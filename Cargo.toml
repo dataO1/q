@@ -29,9 +29,9 @@ notify = "7.0"
 notify-debouncer-full = "0.4"
 
 # Swiftide ecosystem
-swiftide = { version = "0.31", features = ["ollama", "qdrant", "tree-sitter"] }
-swiftide-indexing = "0.31"
-swiftide-integrations = { version = "0.31", features = ["ollama", "qdrant", "tree-sitter"] }
+swiftide = { version = "0.32", features = ["ollama", "qdrant", "tree-sitter"] }
+swiftide-indexing = "0.32"
+swiftide-integrations = { version = "0.32", features = ["ollama", "qdrant", "tree-sitter"] }
 
 # Qdrant client
 qdrant-client = "1.15"
