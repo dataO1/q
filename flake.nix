@@ -40,7 +40,6 @@
             openssl
           ];
 
-          # Build both binaries
           cargoBuildFlags = [ "--bins" ];
         };
 
@@ -60,7 +59,6 @@
           ];
         };
 
-        # NixOS module
         nixosModules.default = { config, lib, pkgs, ... }:
           with lib;
           let

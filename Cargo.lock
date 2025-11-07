@@ -3620,6 +3620,7 @@ dependencies = [
  "qdrant-client",
  "ratatui",
  "serde",
+ "serde_json",
  "swiftide",
  "swiftide-indexing",
  "swiftide-integrations",

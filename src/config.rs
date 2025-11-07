@@ -30,8 +30,6 @@ pub struct QdrantConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChunkingConfig {
-    /// Map file extensions to language names for tree-sitter
-    /// Example: "rs" -> "rust", "py" -> "python"
     pub extension_to_language: HashMap<String, String>,
     #[serde(default = "default_chunk_range")]
     pub chunk_size_range: (usize, usize),
@@ -54,7 +52,7 @@ fn default_collection_name() -> String {
 }
 
 fn default_vector_size() -> u64 {
-    768 // nomic-embed-text default
+    768
 }
 
 fn default_chunk_range() -> (usize, usize) {

@@ -5,14 +5,21 @@ edition = "2021"
 
 [[bin]]
 name = "semantic-indexer"
-path = "src/main.rs"
+path = "src/indexer_bin/main.rs"
 
 [[bin]]
 name = "q"
-path = "src/search/main.rs"
+path = "src/tui_bin/main.rs"
+
+[[bin]]
+name = "semantic-search-mcp"
+path = "src/mcp_bin/main.rs"
+
+[lib]
+name = "semantic_search"
+path = "src/lib.rs"
 
 [dependencies]
-# Core async runtime
 tokio = { version = "1.41", features = ["full"] }
 anyhow = "1.0"
 thiserror = "2.0"
@@ -31,11 +38,15 @@ qdrant-client = "1.15"
 
 # Configuration
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 toml = "0.8"
 
 # TUI
 ratatui = "0.29"
 crossterm = "0.28"
+
+# MCP (stub - update with actual version)
+# mcp_sdk_rs = "0.1"
 
 # Logging
 tracing = "0.1"
