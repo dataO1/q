@@ -1,0 +1,69 @@
+use anyhow::{Context, Result};
+use notify::{Event, EventKind, RecursiveMode, Watcher};
+use notify_debouncer_full::{new_debouncer, DebouncedEvent, Debouncer, FileIdMap};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+use tokio::sync::mpsc;
+
+pub enum FileEvent {
+    Modified(PathBuf),
+    Created(PathBuf),
+    Removed(PathBuf),
+}
+
+pub struct FileWatcher {
+    _debouncer: Debouncer<notify::RecommendedWatcher, FileIdMap>,
+}
+
+impl FileWatcher {
+    pub fn new(
+        paths: Vec<PathBuf>,
+        debounce_duration: Duration,
+    ) -> Result<(Self, mpsc::UnboundedReceiver<FileEvent>)> {
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        let tx_clone = tx.clone();
+        let mut debouncer = new_debouncer(
+            debounce_duration,
+            None,
+            move |result: Result<Vec<DebouncedEvent>, Vec<notify::Error>>| {
+                match result {
+                    Ok(events) => {
+                        for event in events {
+                            let file_event = match event.kind {
+                                EventKind::Create(_) => {
+                                    FileEvent::Created(event.paths[0].clone())
+                                }
+                                EventKind::Modify(_) => {
+                                    FileEvent::Modified(event.paths[0].clone())
+                                }
+                                EventKind::Remove(_) => {
+                                    FileEvent::Removed(event.paths[0].clone())
+                                }
+                                _ => continue,
+                            };
+                            let _ = tx_clone.send(file_event);
+                        }
+                    }
+                    Err(errors) => {
+                        for error in errors {
+                            tracing::error!("Watch error: {:?}", error);
+                        }
+                    }
+                }
+            },
+        )
+        .context("Failed to create debouncer")?;
+
+        for path in paths {
+            debouncer
+                .watcher()
+                .watch(&path, RecursiveMode::Recursive)
+                .with_context(|| format!("Failed to watch path: {:?}", path))?;
+
+            tracing::info!("Watching path: {:?}", path);
+        }
+
+        Ok((Self { _debouncer: debouncer }, rx))
+    }
+}
