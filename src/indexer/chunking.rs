@@ -18,7 +18,7 @@ impl Display for ChunkStrategy {
     }
 }
 
-pub fn determine_chunk_strategy(path: &Path, _config: &Config) -> ChunkStrategy {
+pub fn determine_chunk_strategy(path: &Path, _config: &Config) -> ChunkStrategy {;
     match path.extension().and_then(|e| e.to_str()) {
         Some("rs") => ChunkStrategy::Code { language: "rust" },
         Some("py") => ChunkStrategy::Code { language: "python" },

@@ -9,7 +9,7 @@ vector_size = 768
 num_results = 5
 
 [chunking]
-chunk_size_range = [100, 2048]
+chunk_size_range = [10, 2048]
 
 [chunking.extension_to_language]
 rs = "rust"
@@ -22,3 +22,4 @@ cpp = "cpp"
 java = "java"
 rb = "ruby"
 md = "markdown"
+txt = "text"

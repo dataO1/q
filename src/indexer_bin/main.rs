@@ -12,7 +12,7 @@ use semantic_search::{
 use swiftide::{
     indexing,
     indexing::loaders::FileLoader,
-    indexing::transformers::{ChunkCode, ChunkMarkdown, Embed},
+    indexing::transformers::{ChunkCode, ChunkMarkdown, ChunkText, Embed},
     integrations::ollama::Ollama,
 };
 use swiftide_indexing::Pipeline;
@@ -56,7 +56,10 @@ async fn main() -> Result<()> {
         .build()
         .context("Failed to connect to Qdrant")?;
 
-    let ollama = Ollama::default();
+    let mut ollama = Ollama::default();
+    ollama.with_default_embed_model(&config.ollama.embedding_model);
+
+    tracing::info!("Connected to Ollama with User {:?}", ollama.options().user);
 
     db::ensure_collection(
         &qdrant_client,
@@ -123,30 +126,35 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn create_pipeline(path: PathBuf) -> Result<Pipeline<String>, anyhow::Error>{
+fn create_pipeline(path: PathBuf, config: &Config,) -> Result<Pipeline<String>, anyhow::Error>{
 
     // For a single file, use the parent directory with a filter
     let parent_dir = path.parent()
         .and_then(|p| p.to_str())
         .ok_or_else(|| anyhow::anyhow!("Invalid path"))?;
-    tracing::info!("Creating pipeline for parent dir: {:?}", parent_dir);
 
     let file_name = path.file_name()
         .and_then(|f| f.to_str())
         .ok_or_else(|| anyhow::anyhow!("Invalid filename"))?;
+ // Convert Vec<&String> to Vec<&str>
+    let extensions: Vec<&str> = config.chunking.extension_to_language
+        .keys()
+        .map(|s| s.as_str())
+        .collect();
 
-    let file_loader = FileLoader::new(parent_dir);
-        // .with_extensions(&[path.extension()
-            // .and_then(|e| e.to_str())
-            // .unwrap_or("txt")]);
-    let pipeline = indexing::Pipeline::from_loader(file_loader).filter(move |node|{
-        let keep= path.is_dir()
-        || (path.is_file() && node.as_ref().unwrap().path == *path.to_str().unwrap());
-        if keep {
-            tracing::info!("Pipeline kept file: {:?}", path.to_str().unwrap())
-        };
-        keep
-    });
+    let file_loader = FileLoader::new(parent_dir)
+        .with_extensions(&extensions);
+
+    let pipeline = indexing::Pipeline::from_loader(file_loader);
+    tracing::info!("Created pipeline for parent dir: {:?}, with active extensions: {:?}", parent_dir, extensions);
+    //     .filter(move |node|{
+    //     let keep= path.is_dir()
+    //     || (path.is_file() && node.as_ref().unwrap().path == *path.to_str().unwrap());
+    //     if keep {
+    //         tracing::info!("Pipeline kept file: {:?}", path.to_str().unwrap())
+    //     };
+    //     keep
+    // });
 
     return Ok(pipeline)
 }
@@ -167,7 +175,7 @@ async fn index_file(
         .collection_name(&config.qdrant.collection_name)
         .build()?;
 
-    let pipeline = create_pipeline(path.clone());
+    let pipeline = create_pipeline(path.clone(),config);
 
 
     // Build and run the indexing pipeline based on file type
@@ -175,23 +183,24 @@ async fn index_file(
         ChunkStrategy::Code { language } => {
             tracing::info!("Indexing {} code from {:?}", language, path);
             pipeline?
-            .then_chunk(ChunkCode::try_for_language_and_chunk_size(language, config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.1
-            )?)
+                .then_chunk(ChunkCode::try_for_language_and_chunk_size(
+                    language,
+                    config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.1
+                )?)
         }
         ChunkStrategy::Markdown => {
             tracing::info!("Indexing markdown from {:?}", path);
             pipeline?
-            .then_chunk(ChunkMarkdown::from_chunk_range(
-                config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.0
-            ))
+                .then_chunk(ChunkMarkdown::from_chunk_range(
+                    config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.1
+                ))
         }
         ChunkStrategy::PlainText => {
             tracing::info!("Indexing plain text from {:?}", path);
-            // For plain text, use markdown chunker as fallback
             pipeline?
-            .then_chunk(ChunkMarkdown::from_chunk_range(
-                config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.0
-            ))
+                .then_chunk(ChunkText::from_chunk_range(
+                    config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.1
+                ))
         }
     };
 

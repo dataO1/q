@@ -67,7 +67,8 @@ async fn main() -> Result<()> {
     if let Some(query) = args.query {
         // CLI mode
         // First, initialize the clients
-        let ollama = Ollama::default();
+        let mut ollama = Ollama::default();
+        ollama.with_default_embed_model(&config.ollama.embedding_model);
         let qdrant_client = Qdrant::from_url("http://localhost:6334")
             .api_key(std::env::var("QDRANT_API_KEY"))
             .build()?;
@@ -125,7 +126,8 @@ async fn run_tui(config: Config, limit: usize) -> Result<()> {
                             let tx_clone = tx.clone();
 
                             // First, initialize the clients
-                            let ollama = Ollama::default();
+                            let mut ollama = Ollama::default();
+                            ollama.with_default_embed_model(&config.ollama.embedding_model);
                             let qdrant_client = Qdrant::from_url("http://localhost:6334")
                                 .api_key(std::env::var("QDRANT_API_KEY"))
                                 .build()?;
