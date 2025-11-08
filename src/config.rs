@@ -26,6 +26,8 @@ pub struct QdrantConfig {
     pub collection_name: String,
     #[serde(default = "default_vector_size")]
     pub vector_size: u64,
+    #[serde(default = "default_num_results")]
+    pub num_results: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +57,11 @@ fn default_vector_size() -> u64 {
     768
 }
 
+
+fn default_num_results() -> u64 {
+    5
+}
+
 fn default_chunk_range() -> (usize, usize) {
     (100, 2048)
 }
@@ -76,6 +83,7 @@ impl Config {
                 url: default_qdrant_url(),
                 collection_name: default_collection_name(),
                 vector_size: default_vector_size(),
+                num_results: default_num_results(),
             },
             chunking: ChunkingConfig {
                 extension_to_language: Self::default_language_map(),

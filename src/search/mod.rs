@@ -1,8 +1,11 @@
+// use crate::config::OllamaConfig;
 use crate::Config;
-use anyhow::{Context, Result};
+use anyhow::{Result};
+use qdrant_client::{qdrant::ScoredPoint, Qdrant};
 use qdrant_client::qdrant::SearchPointsBuilder;
 use serde::{Deserialize, Serialize};
-use swiftide::integrations::ollama::Ollama;
+use swiftide_integrations::ollama::Ollama;
+use swiftide::traits::EmbeddingModel;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SearchResult {
@@ -11,60 +14,38 @@ pub struct SearchResult {
     pub snippet: String,
 }
 
+// Implement the From trait for the conversion
+impl From<ScoredPoint> for SearchResult {
+    fn from(item: ScoredPoint) -> Self {
+        return SearchResult {
+            path: item.get("path").to_string(),
+            score: item.score ,
+            snippet: item.get("content").to_string() };
+    }
+}
+
 pub async fn search(
     query: &str,
+    ollama: &Ollama,
+    client: &Qdrant,
     config: &Config,
-    limit: usize,
 ) -> Result<Vec<SearchResult>> {
-    // Connect to Qdrant
-    let qdrant = qdrant_client::Qdrant::from_url(&config.qdrant.url)
-        .build()
-        .context("Failed to connect to Qdrant")?;
+    let limit = config.qdrant.num_results;
+    // 1. Convert single query to Vec<String>
+    let embedding = ollama.embed(vec![query.to_string()]).await?;
 
-    // Embed query using Ollama
-    let ollama = Ollama::builder()
-        .default_embed_model(&config.ollama.embedding_model)
-        .build()?;
-
-    // Get embedding for query
-    let embedding = ollama.embed(query).await
-        .context("Failed to embed query")?;
-
-    // Search in Qdrant
-    let search_result = qdrant
-        .search_points(
-            SearchPointsBuilder::new(&config.qdrant.collection_name, embedding, limit as u64)
-                .with_payload(true)
-        )
-        .await
-        .context("Failed to search")?;
-
-    // Convert results
-    let results = search_result
-        .result
+    // 2. Extract first vector from batch result
+    let search_vector = embedding
         .into_iter()
-        .map(|point| {
-            let payload = point.payload;
-            let path = payload
-                .get("path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown")
-                .to_string();
-            let snippet = payload
-                .get("content")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .chars()
-                .take(100)
-                .collect::<String>();
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("No embedding returned"))?;
 
-            SearchResult {
-                path,
-                score: point.score,
-                snippet,
-            }
-        })
-        .collect();
-
-    Ok(results)
+    // 3. Pass Vec<f32> to Qdrant
+    let search_points = SearchPointsBuilder::new(
+        &config.qdrant.collection_name,
+        search_vector,
+        limit as u64
+    ) .with_payload(true);
+    let search_result: Vec<ScoredPoint> = client.search_points(search_points).await?.result;
+    Ok(search_result.into_iter().map(|x| SearchResult::from(x)).collect() )
 }

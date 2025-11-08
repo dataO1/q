@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use notify::{Event, EventKind, RecursiveMode, Watcher};
-use notify_debouncer_full::{new_debouncer, DebouncedEvent, Debouncer, FileIdMap};
+use notify::{EventKind, RecursiveMode};
+use notify_debouncer_full::{new_debouncer_opt, DebouncedEvent, Debouncer, FileIdMap};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -19,11 +19,11 @@ impl FileWatcher {
     pub fn new(
         paths: Vec<PathBuf>,
         debounce_duration: Duration,
-    ) -> Result<(Self, mpsc::UnboundedReceiver<FileEvent>)> {
-        let (tx, rx) = mpsc::unbounded_channel();
+    ) -> Result<(Self, mpsc::Receiver<FileEvent>)> {
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
 
         let tx_clone = tx.clone();
-        let mut debouncer = new_debouncer(
+        let mut debouncer = new_debouncer_opt(
             debounce_duration,
             None,
             move |result: Result<Vec<DebouncedEvent>, Vec<notify::Error>>| {
@@ -51,13 +51,12 @@ impl FileWatcher {
                         }
                     }
                 }
-            },
+            }, FileIdMap::new(),notify::Config::default()
         )
         .context("Failed to create debouncer")?;
 
         for path in paths {
             debouncer
-                .watcher()
                 .watch(&path, RecursiveMode::Recursive)
                 .with_context(|| format!("Failed to watch path: {:?}", path))?;
 
