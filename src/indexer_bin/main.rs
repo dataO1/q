@@ -133,17 +133,22 @@ fn create_pipeline(path: PathBuf, config: &Config,) -> Result<Pipeline<String>, 
         .and_then(|p| p.to_str())
         .ok_or_else(|| anyhow::anyhow!("Invalid path"))?;
 
-    let file_name = path.file_name()
-        .and_then(|f| f.to_str())
-        .ok_or_else(|| anyhow::anyhow!("Invalid filename"))?;
- // Convert Vec<&String> to Vec<&str>
-    let extensions: Vec<&str> = config.chunking.extension_to_language
-        .keys()
-        .map(|s| s.as_str())
+    let extension = path.extension()
+        .and_then(|e| e.to_str())
+        .ok_or_else(|| anyhow::anyhow!("File has no extension"))?;
+
+    let available_extensions: &Vec<String> = &config.chunking.supported_filetypes;
+
+    let active_extensions: Vec<String> = available_extensions
+        .iter() // Iterate over references to String (&String)
+        .filter(|s| s.contains(extension)) // Use contains() which accepts &str
+        .cloned() // Clone the &String references into new String objects
         .collect();
 
+
     let file_loader = FileLoader::new(parent_dir)
-        .with_extensions(&extensions);
+        .with_extensions(&active_extensions);
+
 
     let path_clone = path.clone();
 
@@ -160,7 +165,7 @@ fn create_pipeline(path: PathBuf, config: &Config,) -> Result<Pipeline<String>, 
             }
         });
 
-    tracing::info!("Created pipeline for parent dir: {:?}, with active extensions: {:?}", parent_dir, extensions);
+    tracing::info!("Created pipeline for parent dir: {:?}, with active extensions: {:?}", parent_dir,active_extensions);
     return Ok(pipeline)
 }
 
@@ -175,7 +180,7 @@ async fn index_file(
 
     // Create Swiftide Qdrant storage
     let qdrant_storage = SwiftideQdrant::builder()
-        .batch_size(10)
+        .batch_size(config.chunking.batch_size)
         .vector_size(config.ollama.embedding_dimensions)
         .collection_name(&config.qdrant.collection_name)
         .build()?;

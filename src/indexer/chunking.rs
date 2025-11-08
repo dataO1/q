@@ -18,17 +18,28 @@ impl Display for ChunkStrategy {
     }
 }
 
-pub fn determine_chunk_strategy(path: &Path, _config: &Config) -> ChunkStrategy {;
+pub fn determine_chunk_strategy(path: &Path, config: &Config) -> ChunkStrategy {
     match path.extension().and_then(|e| e.to_str()) {
-        Some("rs") => ChunkStrategy::Code { language: "rust" },
-        Some("py") => ChunkStrategy::Code { language: "python" },
-        Some("js") => ChunkStrategy::Code { language: "javascript" },
-        Some("ts") => ChunkStrategy::Code { language: "typescript" },
-        Some("go") => ChunkStrategy::Code { language: "go" },
-        Some("java") => ChunkStrategy::Code { language: "java" },
-        Some("cpp") | Some("cc") | Some("cxx") => ChunkStrategy::Code { language: "cpp" },
-        Some("c") | Some("h") => ChunkStrategy::Code { language: "c" },
-        Some("md") => ChunkStrategy::Markdown,
-        _ => ChunkStrategy::PlainText,
+        Some(ext) => {
+            let ext_lower = ext.to_lowercase();
+            // Fall back to hardcoded mappings
+            match ext_lower.as_str() {
+                "rs" => ChunkStrategy::Code { language: "rust" },
+                "py" => ChunkStrategy::Code { language: "python" },
+                "js" => ChunkStrategy::Code { language: "javascript" },
+                "ts" => ChunkStrategy::Code { language: "typescript" },
+                "go" => ChunkStrategy::Code { language: "go" },
+                "c" | "h" => ChunkStrategy::Code { language: "c" },
+                "cpp" | "cc" | "cxx" | "c++" => ChunkStrategy::Code { language: "cpp" },
+                "java" => ChunkStrategy::Code { language: "java" },
+                "rb" => ChunkStrategy::Code { language: "ruby" },
+                "nix" => ChunkStrategy::Code { language: "nix" },
+                "html" => ChunkStrategy::Code { language: "html" },
+                "php" => ChunkStrategy::Code { language: "php" },
+                "md" => ChunkStrategy::Markdown,
+                _ => ChunkStrategy::PlainText,
+            }
+        }
+        None => ChunkStrategy::PlainText,
     }
 }

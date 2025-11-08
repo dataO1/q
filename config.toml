@@ -10,16 +10,23 @@ num_results = 5
 
 [chunking]
 chunk_size_range = [1, 2048]
-
-[chunking.extension_to_language]
-rs = "rust"
-py = "python"
-js = "javascript"
-ts = "typescript"
-go = "go"
-c = "c"
-cpp = "cpp"
-java = "java"
-rb = "ruby"
-md = "markdown"
-txt = "text"
+supported_filetypes = [
+"rs",
+"py",
+"js",
+"ts",
+"go",
+"c",
+"h",
+"cpp",
+"cc",
+"cxx",
+"c++",
+"java",
+"rb",
+"md",
+"nix",
+"html",
+"php",
+"txt",
+]

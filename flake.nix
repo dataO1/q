@@ -58,15 +58,15 @@
             cargo-watch
             # semantic-search
           ];
-          RUST_LOG="swiftide=trace,swiftide_indexing=trace,swiftide_integrations=trace,debug";
+          # RUST_LOG="swiftide=trace,swiftide_indexing=trace,swiftide_integrations=trace,debug";
 
           shellHook = ''
           echo "##########################################"
           echo "# INDEXING:                              #"
           echo "# cargo run --bin semantic-indexer <dir> #"
-          echo "                                          "
+          echo "#                                        #"
           echo "# SEARCH:                                #"
-          echo "# cargo run --bin semantic-indexer <dir> #"
+          echo "# cargo run --bin q <search>             #"
           echo "##########################################"
 
           '';

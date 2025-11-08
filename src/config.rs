@@ -34,7 +34,7 @@ pub struct QdrantConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChunkingConfig {
-    pub extension_to_language: HashMap<String, String>,
+    pub supported_filetypes: Vec<String>,
     #[serde(default = "default_chunk_range")]
     pub chunk_size_range: (usize, usize),
     #[serde(default = "default_batch_size")]
@@ -99,32 +99,29 @@ impl Config {
                 num_results: default_num_results(),
             },
             chunking: ChunkingConfig {
-                extension_to_language: Self::default_language_map(),
+                supported_filetypes: Self::default_supported_file_types(),
                 chunk_size_range: default_chunk_range(),
                 batch_size: default_batch_size(),
             },
         }
     }
 
-    fn default_language_map() -> HashMap<String, String> {
+    fn default_supported_file_types() -> Vec<String> {
         [
-            ("rs", "rust"),
-            ("py", "python"),
-            ("js", "javascript"),
-            ("ts", "typescript"),
-            ("go", "go"),
-            ("c", "c"),
-            ("cpp", "cpp"),
-            ("java", "java"),
-            ("rb", "ruby"),
-            ("md", "markdown"),
+            "rs",
+            "py",
+            "js",
+            "ts",
+            "go",
+            "c",
+            "cpp",
+            "java",
+            "rb",
+            "md",
+            "txt",
         ]
         .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .map(|v| v.to_string())
         .collect()
-    }
-
-    pub fn get_language_for_extension(&self, ext: &str) -> Option<&str> {
-        self.chunking.extension_to_language.get(ext).map(|s| s.as_str())
     }
 }
