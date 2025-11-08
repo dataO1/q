@@ -145,17 +145,22 @@ fn create_pipeline(path: PathBuf, config: &Config,) -> Result<Pipeline<String>, 
     let file_loader = FileLoader::new(parent_dir)
         .with_extensions(&extensions);
 
-    let pipeline = indexing::Pipeline::from_loader(file_loader);
-    tracing::info!("Created pipeline for parent dir: {:?}, with active extensions: {:?}", parent_dir, extensions);
-    //     .filter(move |node|{
-    //     let keep= path.is_dir()
-    //     || (path.is_file() && node.as_ref().unwrap().path == *path.to_str().unwrap());
-    //     if keep {
-    //         tracing::info!("Pipeline kept file: {:?}", path.to_str().unwrap())
-    //     };
-    //     keep
-    // });
+    let path_clone = path.clone();
 
+    let pipeline = indexing::Pipeline::from_loader(file_loader)
+        .filter(move |node| {
+            if let Ok(n) = node.as_ref() {
+                let keep = n.path == path_clone;
+                if keep {
+                    tracing::info!("Pipeline kept file: {:?}", path_clone);
+                }
+                keep
+            } else {
+                false
+            }
+        });
+
+    tracing::info!("Created pipeline for parent dir: {:?}, with active extensions: {:?}", parent_dir, extensions);
     return Ok(pipeline)
 }
 
