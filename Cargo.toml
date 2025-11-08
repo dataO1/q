@@ -34,7 +34,7 @@ swiftide-indexing = "0.32"
 swiftide-integrations = { version = "0.32", features = ["ollama", "qdrant", "tree-sitter"] }
 
 # Qdrant client
-qdrant-client = "1.15"
+qdrant-client = "1.13.6"
 
 # Configuration
 serde = { version = "1.0", features = ["derive"] }

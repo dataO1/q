@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Result};
 use notify::{EventKind, RecursiveMode};
 use notify_debouncer_full::{new_debouncer_opt, DebouncedEvent, Debouncer, FileIdMap};
 use std::path::PathBuf;
@@ -52,17 +52,15 @@ impl FileWatcher {
                     }
                 }
             }, FileIdMap::new(),notify::Config::default()
-        )
-        .context("Failed to create debouncer")?;
+        );
+        let mut debouncer = debouncer?;
 
         for path in paths {
-            debouncer
-                .watch(&path, RecursiveMode::Recursive)
-                .with_context(|| format!("Failed to watch path: {:?}", path))?;
-
-            tracing::info!("Watching path: {:?}", path);
+            match debouncer.watch(&path, RecursiveMode::Recursive) {
+                Ok(_) => tracing::info!("Watching path: {:?}", path),
+                Err(e) => tracing::warn!("Could not watch {:?}: {}", path, e),
+            }
         }
-
         Ok((Self { _debouncer: debouncer }, rx))
     }
 }

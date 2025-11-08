@@ -6,6 +6,7 @@ use semantic_search::{
     indexer::{
         chunking::{determine_chunk_strategy, ChunkStrategy},
         FileWatcher,
+        FileEvent,
     },
 };
 use std::path::PathBuf;
@@ -64,14 +65,14 @@ async fn main() -> Result<()> {
 
     while let Some(event) = rx.recv().await {
         match event {
-            semantic_search::indexer::FileEvent::Modified(path)
-            | semantic_search::indexer::FileEvent::Created(path) => {
+            FileEvent::Modified(path)
+            | FileEvent::Created(path) => {
                 tracing::info!("Indexing: {:?}", path);
                 if let Err(e) = index_file(&path, &config, &qdrant_client).await {
                     tracing::error!("Failed to index {:?}: {}", path, e);
                 }
             }
-            semantic_search::indexer::FileEvent::Removed(path) => {
+            FileEvent::Removed(path) => {
                 tracing::info!("Removing from index: {:?}", path);
                 if let Err(e) = remove_from_index(&path, &config, &qdrant_client).await {
                     tracing::error!("Failed to remove {:?}: {}", path, e);
@@ -91,7 +92,7 @@ async fn index_file(
 ) -> Result<()> {
     let strategy = determine_chunk_strategy(path, config);
 
-    tracing::debug!("Chunking strategy for {:?}: {:?}", path, strategy);
+    tracing::debug!("Processing file: {:?} with chunking strategy", path);
 
     // TODO: Implement actual indexing with swiftide
     // This is a stub - actual implementation would use swiftide pipeline

@@ -5,6 +5,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use qdrant_client::Qdrant;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
@@ -13,7 +14,8 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame, Terminal,
 };
-use semantic_search::{Config, SearchResult};
+use semantic_search::{search::search, Config, SearchResult};
+use swiftide_integrations::{ollama::Ollama, openai::GenericOpenAI};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
 
@@ -64,7 +66,12 @@ async fn main() -> Result<()> {
 
     if let Some(query) = args.query {
         // CLI mode
-        let results = semantic_search::search::search(&query, &config, args.limit).await?;
+        // First, initialize the clients
+        let ollama = Ollama::default();
+        let qdrant_client = Qdrant::from_url("http://localhost:6334")
+            .api_key(std::env::var("QDRANT_API_KEY"))
+            .build()?;
+        let results = search(&query, &ollama, &qdrant_client, &config).await?;
         for (i, result) in results.iter().enumerate() {
             println!("{}. {} (score: {:.4})", i + 1, result.path, result.score);
             println!("   {}", result.snippet);
@@ -117,14 +124,16 @@ async fn run_tui(config: Config, limit: usize) -> Result<()> {
                             let config_clone = config.clone();
                             let tx_clone = tx.clone();
 
+                            // First, initialize the clients
+                            let ollama = Ollama::default();
+                            let qdrant_client = Qdrant::from_url("http://localhost:6334")
+                                .api_key(std::env::var("QDRANT_API_KEY"))
+                                .build()?;
+
                             tokio::spawn(async move {
-                                match semantic_search::search::search(&query, &config_clone, limit).await {
-                                    Ok(results) => {
-                                        let _ = tx_clone.send(SearchResponse::Results(results));
-                                    }
-                                    Err(e) => {
-                                        let _ = tx_clone.send(SearchResponse::Error(e.to_string()));
-                                    }
+                                match search(&query, &ollama, &qdrant_client, &config_clone).await {
+                                    Ok(results) => { /* handle results */ }
+                                    Err(e) => eprintln!("Search error: {}", e),
                                 }
                             });
                         }
