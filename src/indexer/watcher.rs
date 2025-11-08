@@ -3,7 +3,7 @@ use notify::{EventKind, RecursiveMode};
 use notify_debouncer_full::{new_debouncer_opt, DebouncedEvent, Debouncer, FileIdMap};
 use std::path::PathBuf;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, unbounded_channel};
 
 pub enum FileEvent {
     Modified(PathBuf),
@@ -19,14 +19,16 @@ impl FileWatcher {
     pub fn new(
         paths: Vec<PathBuf>,
         debounce_duration: Duration,
-    ) -> Result<(Self, mpsc::Receiver<FileEvent>)> {
-        let (tx, rx) = tokio::sync::mpsc::channel(100);
+    ) -> Result<(Self, mpsc::UnboundedReceiver<FileEvent>)> {
+        let (tx, rx) = unbounded_channel();
 
-        let tx_clone = tx.clone();
         let mut debouncer = new_debouncer_opt(
             debounce_duration,
             None,
             move |result: Result<Vec<DebouncedEvent>, Vec<notify::Error>>| {
+
+            let tx_clone = tx.clone();
+            // Capture the current tokio runtime handle
                 match result {
                     Ok(events) => {
                         for event in events {
@@ -51,7 +53,7 @@ impl FileWatcher {
                         }
                     }
                 }
-            }, FileIdMap::new(),notify::Config::default()
+            }, FileIdMap::new(), notify::Config::default()
         );
         let mut debouncer = debouncer?;
 

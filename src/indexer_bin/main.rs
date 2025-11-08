@@ -9,9 +9,13 @@ use semantic_search::{
         FileEvent,
     },
 };
+use tracing::info;
 use std::path::PathBuf;
 use std::time::Duration;
 use tracing_subscriber;
+use std::fs;
+use std::path::Path;
+use walkdir::WalkDir;  // Add walkdir = "2" to Cargo.toml
 
 #[derive(Parser, Debug)]
 #[command(name = "semantic-indexer")]
@@ -55,6 +59,33 @@ async fn main() -> Result<()> {
     .await?;
 
     tracing::info!("Connected to Qdrant at {}", config.qdrant.url);
+
+    // for path in args.paths{
+    //
+    //     let watch_path = Path::new(path.as_path());
+    //
+    //     // 1. First, index all existing files
+    //     info!("Scanning existing files in: {:?}", watch_path);
+    //     for entry in WalkDir::new(watch_path)
+    //         .follow_links(true)
+    //         .into_iter()
+    //         .filter_map(|e| e.ok())
+    //     {
+    //         let path = entry.path();
+    //         if path.is_file() {
+    //             if let Some(ext) = path.extension() {
+    //                 if ext == "rs" || ext == "py" || ext == "js" || ext == "md" {
+    //                     info!("Indexing existing file: {:?}", path);
+    //                     if let Err(e) = index_file(path, &config, &qdrant_client).await {
+    //                         error!("Failed to index {:?}: {}", path, e);
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
+
+    info!("Initial scan complete. Starting file watcher...");
 
     let (watcher, mut rx) = FileWatcher::new(
         args.paths.clone(),
