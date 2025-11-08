@@ -126,9 +126,8 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn create_pipeline(path: PathBuf, config: &Config,) -> Result<Pipeline<String>, anyhow::Error>{
+fn get_file_loader(path: &PathBuf, config: &Config)->Result<FileLoader>{
 
-    // For a single file, use the parent directory with a filter
     let parent_dir = path.parent()
         .and_then(|p| p.to_str())
         .ok_or_else(|| anyhow::anyhow!("Invalid path"))?;
@@ -145,13 +144,23 @@ fn create_pipeline(path: PathBuf, config: &Config,) -> Result<Pipeline<String>, 
         .cloned() // Clone the &String references into new String objects
         .collect();
 
-
+    // only load files with the right extension
     let file_loader = FileLoader::new(parent_dir)
         .with_extensions(&active_extensions);
+    tracing::info!("Created FileLoader for: {:?}, with active extensions: {:?}", parent_dir,active_extensions);
+    Ok(file_loader)
+}
 
+fn create_pipeline(path: PathBuf, config: &Config, ollama: &Ollama,) -> Result<Pipeline<String>, anyhow::Error>{
+
+    let chunking_strategy = determine_chunk_strategy(&path, config);
+    // For a single file, use the parent directory with a filter
 
     let path_clone = path.clone();
+    // local file loader
+    let file_loader = get_file_loader(&path, config)?;
 
+    // filter out only the file that exactly matches the original path
     let pipeline = indexing::Pipeline::from_loader(file_loader)
         .filter(move |node| {
             if let Ok(n) = node.as_ref() {
@@ -165,8 +174,41 @@ fn create_pipeline(path: PathBuf, config: &Config,) -> Result<Pipeline<String>, 
             }
         });
 
-    tracing::info!("Created pipeline for parent dir: {:?}, with active extensions: {:?}", parent_dir,active_extensions);
-    return Ok(pipeline)
+
+    // Build and run the indexing pipeline based on file type
+    let chunked_pipeline = match chunking_strategy {
+        ChunkStrategy::Code { language } => {
+            tracing::info!("Indexing {} code from {:?}", language, path);
+            pipeline
+                .then_chunk(ChunkCode::try_for_language_and_chunk_size(
+                    language,
+                    config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.1
+                )?)
+        }
+        ChunkStrategy::Markdown => {
+            tracing::info!("Indexing markdown from {:?}", path);
+            pipeline
+                .then_chunk(ChunkMarkdown::from_chunk_range(
+                    config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.1
+                ))
+        }
+        ChunkStrategy::PlainText => {
+            tracing::info!("Indexing plain text from {:?}", path);
+            pipeline
+                .then_chunk(ChunkText::from_chunk_range(
+                    config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.1
+                ))
+        }
+    };
+
+
+    let embedded_pipeline = chunked_pipeline.then_in_batch(
+        Embed::new(ollama.clone())
+            .with_batch_size(config.chunking.batch_size)
+    );
+
+    tracing::info!("Indexing file: {:?} with strategy: {}", path, chunking_strategy);
+    return Ok(embedded_pipeline)
 }
 
 async fn index_file(
@@ -174,9 +216,6 @@ async fn index_file(
     config: &Config,
     ollama: &Ollama,
 ) -> Result<()> {
-    let strategy = determine_chunk_strategy(path, config);
-
-    tracing::info!("Indexing file: {:?} with strategy: {}", path, strategy);
 
     // Create Swiftide Qdrant storage
     let qdrant_storage = SwiftideQdrant::builder()
@@ -185,40 +224,9 @@ async fn index_file(
         .collection_name(&config.qdrant.collection_name)
         .build()?;
 
-    let pipeline = create_pipeline(path.clone(),config);
+    let pipeline = create_pipeline(path.clone(),config, ollama)?;
 
-
-    // Build and run the indexing pipeline based on file type
-    let chunked_pipeline = match strategy {
-        ChunkStrategy::Code { language } => {
-            tracing::info!("Indexing {} code from {:?}", language, path);
-            pipeline?
-                .then_chunk(ChunkCode::try_for_language_and_chunk_size(
-                    language,
-                    config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.1
-                )?)
-        }
-        ChunkStrategy::Markdown => {
-            tracing::info!("Indexing markdown from {:?}", path);
-            pipeline?
-                .then_chunk(ChunkMarkdown::from_chunk_range(
-                    config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.1
-                ))
-        }
-        ChunkStrategy::PlainText => {
-            tracing::info!("Indexing plain text from {:?}", path);
-            pipeline?
-                .then_chunk(ChunkText::from_chunk_range(
-                    config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.1
-                ))
-        }
-    };
-
-    chunked_pipeline.then_in_batch(
-        Embed::new(ollama.clone())
-            .with_batch_size(config.chunking.batch_size)
-    )
-    .then_store_with(qdrant_storage)
+    pipeline.then_store_with(qdrant_storage)
     .run()
     .await?;
 
