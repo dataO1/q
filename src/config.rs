@@ -16,6 +16,8 @@ pub struct OllamaConfig {
     pub url: String,
     #[serde(default = "default_embedding_model")]
     pub embedding_model: String,
+    #[serde(default = "default_embedding_dimensions")]
+    pub embedding_dimensions: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +37,8 @@ pub struct ChunkingConfig {
     pub extension_to_language: HashMap<String, String>,
     #[serde(default = "default_chunk_range")]
     pub chunk_size_range: (usize, usize),
+    #[serde(default = "default_batch_size")]
+    pub batch_size: usize,
 }
 
 fn default_ollama_url() -> String {
@@ -57,6 +61,9 @@ fn default_vector_size() -> u64 {
     768
 }
 
+fn default_embedding_dimensions() -> u64 {
+    384
+}
 
 fn default_num_results() -> u64 {
     5
@@ -64,6 +71,11 @@ fn default_num_results() -> u64 {
 
 fn default_chunk_range() -> (usize, usize) {
     (100, 2048)
+}
+
+
+fn default_batch_size() -> usize {
+    10
 }
 
 impl Config {
@@ -78,6 +90,7 @@ impl Config {
             ollama: OllamaConfig {
                 url: default_ollama_url(),
                 embedding_model: default_embedding_model(),
+                embedding_dimensions: default_embedding_dimensions(),
             },
             qdrant: QdrantConfig {
                 url: default_qdrant_url(),
@@ -88,6 +101,7 @@ impl Config {
             chunking: ChunkingConfig {
                 extension_to_language: Self::default_language_map(),
                 chunk_size_range: default_chunk_range(),
+                batch_size: default_batch_size(),
             },
         }
     }

@@ -9,13 +9,17 @@ use semantic_search::{
         FileEvent,
     },
 };
-use tracing::info;
+use swiftide::{
+    indexing,
+    indexing::loaders::FileLoader,
+    indexing::transformers::{ChunkCode, ChunkMarkdown, Embed},
+    integrations::ollama::Ollama,
+};
+use swiftide_integrations::{qdrant::Qdrant as SwiftideQdrant, treesitter::SupportedLanguages};
 use std::path::PathBuf;
+use tracing::info;
 use std::time::Duration;
 use tracing_subscriber;
-use std::fs;
-use std::path::Path;
-use walkdir::WalkDir;  // Add walkdir = "2" to Cargo.toml
 
 #[derive(Parser, Debug)]
 #[command(name = "semantic-indexer")]
@@ -50,6 +54,8 @@ async fn main() -> Result<()> {
     let qdrant_client = qdrant_client::Qdrant::from_url(&config.qdrant.url)
         .build()
         .context("Failed to connect to Qdrant")?;
+
+    let ollama = Ollama::default();
 
     db::ensure_collection(
         &qdrant_client,
@@ -99,7 +105,7 @@ async fn main() -> Result<()> {
             FileEvent::Modified(path)
             | FileEvent::Created(path) => {
                 tracing::info!("Indexing: {:?}", path);
-                if let Err(e) = index_file(&path, &config, &qdrant_client).await {
+                if let Err(e) = index_file(&path, &config, &ollama).await {
                     tracing::error!("Failed to index {:?}: {}", path, e);
                 }
             }
@@ -119,26 +125,77 @@ async fn main() -> Result<()> {
 async fn index_file(
     path: &PathBuf,
     config: &Config,
-    _qdrant: &qdrant_client::Qdrant,
+    ollama: &Ollama,
 ) -> Result<()> {
     let strategy = determine_chunk_strategy(path, config);
 
-    tracing::debug!("Processing file: {:?} with chunking strategy", path);
+    // tracing::info!("Indexing file: {:?} with strategy: {:?}", path, strategy);
 
-    // TODO: Implement actual indexing with swiftide
-    // This is a stub - actual implementation would use swiftide pipeline
+    // Create Swiftide Qdrant storage
+    let qdrant_storage = SwiftideQdrant::builder()
+        .batch_size(10)
+        .vector_size(config.ollama.embedding_dimensions)
+        .collection_name(&config.qdrant.collection_name)
+        .build()?;
+
+    // Build and run the indexing pipeline based on file type
     match strategy {
         ChunkStrategy::Code { language } => {
-            tracing::info!("Would index {} code from {:?}", language, path);
+            tracing::info!("Indexing {} code from {:?}", language, path);
+
+            indexing::Pipeline::from_loader(
+                FileLoader::new(path.to_str().unwrap())
+            )
+            .then_chunk(ChunkCode::try_for_language_and_chunk_size(language, config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.1
+            )?)
+            .then_in_batch(
+                Embed::new(ollama.clone())
+                    .with_batch_size(config.chunking.batch_size)
+            )
+            .then_store_with(qdrant_storage)
+            .run()
+            .await?;
         }
+
         ChunkStrategy::Markdown => {
-            tracing::info!("Would index markdown from {:?}", path);
+            tracing::info!("Indexing markdown from {:?}", path);
+
+            indexing::Pipeline::from_loader(
+                FileLoader::new(path.to_str().unwrap())
+            )
+            .then_chunk(ChunkMarkdown::from_chunk_range(
+                config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.0
+            ))
+            .then_in_batch(
+                Embed::new(ollama.clone())
+                    .with_batch_size(config.chunking.batch_size)
+            )
+            .then_store_with(qdrant_storage)
+            .run()
+            .await?;
         }
+
         ChunkStrategy::PlainText => {
-            tracing::info!("Would index plain text from {:?}", path);
+            tracing::info!("Indexing plain text from {:?}", path);
+
+            // For plain text, use markdown chunker as fallback
+            indexing::Pipeline::from_loader(
+                FileLoader::new(path.to_str().unwrap())
+            )
+            .then_chunk(ChunkMarkdown::from_chunk_range(
+                config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.0
+            ))
+            .then_in_batch(
+                Embed::new(ollama.clone())
+                    .with_batch_size(config.chunking.batch_size)
+            )
+            .then_store_with(qdrant_storage)
+            .run()
+            .await?;
         }
     }
 
+    tracing::info!("Successfully indexed: {:?}", path);
     Ok(())
 }
 

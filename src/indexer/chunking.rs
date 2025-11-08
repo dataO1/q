@@ -2,26 +2,22 @@ use crate::Config;
 use std::path::Path;
 
 pub enum ChunkStrategy {
-    Code { language: String },
+    Code { language: &'static str },
     Markdown,
     PlainText,
 }
 
-pub fn determine_chunk_strategy(path: &Path, config: &Config) -> ChunkStrategy {
-    let extension = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-
-    if extension == "md" {
-        return ChunkStrategy::Markdown;
+pub fn determine_chunk_strategy(path: &Path, _config: &Config) -> ChunkStrategy {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("rs") => ChunkStrategy::Code { language: "rust" },
+        Some("py") => ChunkStrategy::Code { language: "python" },
+        Some("js") => ChunkStrategy::Code { language: "javascript" },
+        Some("ts") => ChunkStrategy::Code { language: "typescript" },
+        Some("go") => ChunkStrategy::Code { language: "go" },
+        Some("java") => ChunkStrategy::Code { language: "java" },
+        Some("cpp") | Some("cc") | Some("cxx") => ChunkStrategy::Code { language: "cpp" },
+        Some("c") | Some("h") => ChunkStrategy::Code { language: "c" },
+        Some("md") => ChunkStrategy::Markdown,
+        _ => ChunkStrategy::PlainText,
     }
-
-    if let Some(language) = config.get_language_for_extension(extension) {
-        return ChunkStrategy::Code {
-            language: language.to_string(),
-        };
-    }
-
-    ChunkStrategy::PlainText
 }
