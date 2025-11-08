@@ -15,8 +15,9 @@ use swiftide::{
     indexing::transformers::{ChunkCode, ChunkMarkdown, Embed},
     integrations::ollama::Ollama,
 };
+use swiftide_indexing::Pipeline;
 use swiftide_integrations::{qdrant::Qdrant as SwiftideQdrant, treesitter::SupportedLanguages};
-use std::path::PathBuf;
+use std::{fs::read_to_string, path::PathBuf};
 use tracing::info;
 use std::time::Duration;
 use tracing_subscriber;
@@ -122,6 +123,34 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn create_pipeline(path: PathBuf) -> Result<Pipeline<String>, anyhow::Error>{
+
+    // For a single file, use the parent directory with a filter
+    let parent_dir = path.parent()
+        .and_then(|p| p.to_str())
+        .ok_or_else(|| anyhow::anyhow!("Invalid path"))?;
+    tracing::info!("Creating pipeline for parent dir: {:?}", parent_dir);
+
+    let file_name = path.file_name()
+        .and_then(|f| f.to_str())
+        .ok_or_else(|| anyhow::anyhow!("Invalid filename"))?;
+
+    let file_loader = FileLoader::new(parent_dir);
+        // .with_extensions(&[path.extension()
+            // .and_then(|e| e.to_str())
+            // .unwrap_or("txt")]);
+    let pipeline = indexing::Pipeline::from_loader(file_loader).filter(move |node|{
+        let keep= path.is_dir()
+        || (path.is_file() && node.as_ref().unwrap().path == *path.to_str().unwrap());
+        if keep {
+            tracing::info!("Pipeline kept file: {:?}", path.to_str().unwrap())
+        };
+        keep
+    });
+
+    return Ok(pipeline)
+}
+
 async fn index_file(
     path: &PathBuf,
     config: &Config,
@@ -129,7 +158,7 @@ async fn index_file(
 ) -> Result<()> {
     let strategy = determine_chunk_strategy(path, config);
 
-    // tracing::info!("Indexing file: {:?} with strategy: {:?}", path, strategy);
+    tracing::info!("Indexing file: {:?} with strategy: {}", path, strategy);
 
     // Create Swiftide Qdrant storage
     let qdrant_storage = SwiftideQdrant::builder()
@@ -138,62 +167,41 @@ async fn index_file(
         .collection_name(&config.qdrant.collection_name)
         .build()?;
 
+    let pipeline = create_pipeline(path.clone());
+
+
     // Build and run the indexing pipeline based on file type
-    match strategy {
+    let chunked_pipeline = match strategy {
         ChunkStrategy::Code { language } => {
             tracing::info!("Indexing {} code from {:?}", language, path);
-
-            indexing::Pipeline::from_loader(
-                FileLoader::new(path.to_str().unwrap())
-            )
+            pipeline?
             .then_chunk(ChunkCode::try_for_language_and_chunk_size(language, config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.1
             )?)
-            .then_in_batch(
-                Embed::new(ollama.clone())
-                    .with_batch_size(config.chunking.batch_size)
-            )
-            .then_store_with(qdrant_storage)
-            .run()
-            .await?;
         }
-
         ChunkStrategy::Markdown => {
             tracing::info!("Indexing markdown from {:?}", path);
-
-            indexing::Pipeline::from_loader(
-                FileLoader::new(path.to_str().unwrap())
-            )
+            pipeline?
             .then_chunk(ChunkMarkdown::from_chunk_range(
                 config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.0
             ))
-            .then_in_batch(
-                Embed::new(ollama.clone())
-                    .with_batch_size(config.chunking.batch_size)
-            )
-            .then_store_with(qdrant_storage)
-            .run()
-            .await?;
         }
-
         ChunkStrategy::PlainText => {
             tracing::info!("Indexing plain text from {:?}", path);
-
             // For plain text, use markdown chunker as fallback
-            indexing::Pipeline::from_loader(
-                FileLoader::new(path.to_str().unwrap())
-            )
+            pipeline?
             .then_chunk(ChunkMarkdown::from_chunk_range(
                 config.chunking.chunk_size_range.0..config.chunking.chunk_size_range.0
             ))
-            .then_in_batch(
-                Embed::new(ollama.clone())
-                    .with_batch_size(config.chunking.batch_size)
-            )
-            .then_store_with(qdrant_storage)
-            .run()
-            .await?;
         }
-    }
+    };
+
+    chunked_pipeline.then_in_batch(
+        Embed::new(ollama.clone())
+            .with_batch_size(config.chunking.batch_size)
+    )
+    .then_store_with(qdrant_storage)
+    .run()
+    .await?;
 
     tracing::info!("Successfully indexed: {:?}", path);
     Ok(())

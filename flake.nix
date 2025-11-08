@@ -101,6 +101,12 @@
 
               users.groups.${cfg.group} = {};
 
+              boot.kernel.sysctl = {
+                "fs.inotify.max_user_watches" = 524288;
+                # You can also add other related limits here if necessary, e.g.:
+                "fs.inotify.max_user_instances" = 1024;
+              };
+
               systemd.services.semantic-indexer = {
                 description = "Semantic Code Indexer";
                 wantedBy = [ "multi-user.target" ];

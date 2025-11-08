@@ -1,10 +1,21 @@
 use crate::Config;
 use std::path::Path;
+use std::fmt::{Display, Formatter, Result};
 
 pub enum ChunkStrategy {
     Code { language: &'static str },
     Markdown,
     PlainText,
+}
+
+impl Display for ChunkStrategy {
+    fn fmt(&self, f:&mut Formatter) -> Result {
+        match self{
+            ChunkStrategy::PlainText => write!(f, "Plaintext"),
+            ChunkStrategy::Markdown => write!(f, "Markdown"),
+            ChunkStrategy::Code{language} => write!(f,"Treesitter {}",*language),
+        }
+    }
 }
 
 pub fn determine_chunk_strategy(path: &Path, _config: &Config) -> ChunkStrategy {
