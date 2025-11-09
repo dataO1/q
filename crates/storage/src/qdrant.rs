@@ -1,14 +1,15 @@
-use ai_agent_common::*;
-use qdrant_client::{Qdrant, points::PointStruct};
 use anyhow::Result;
+use qdrant_client::Qdrant;
+use qdrant_client::config::QdrantConfig;
 
 pub struct QdrantClient {
     inner: Qdrant,
 }
 
 impl QdrantClient {
-    pub async fn new(url: &str) -> Result<Self> {
-        let inner = Qdrant::new(url).await?;
+    pub fn new(url: &str) -> Result<Self> {
+        let config = QdrantConfig::from_url(url);
+        let inner = Qdrant::new(config)?;  // No .await - it's sync
         Ok(Self { inner })
     }
 
@@ -16,7 +17,7 @@ impl QdrantClient {
         todo!("Create Qdrant collection")
     }
 
-    pub async fn insert_point(&self, collection: &str, point: PointStruct) -> Result<()> {
+    pub async fn insert_point(&self, collection: &str, point: serde_json::Value) -> Result<()> {
         todo!("Insert point into Qdrant collection")
     }
 }

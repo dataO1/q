@@ -7,14 +7,16 @@ use ai_agent_common::*;
 use rig::completion::CompletionModel;
 use std::sync::Arc;
 
-pub struct OrchestratorSystem<M:CompletionModel> {
-    agents: agents::AgentPool<M>,
+pub type OllamaModel = rig::providers::ollama::CompletionModel<reqwest::Client>;
+
+pub struct OrchestratorSystem {
+    agents: agents::AgentPool,
     workflow: workflow::WorkflowEngine,
     coordination: coordination::CoordinationLayer,
     hitl: hitl::HitlOrchestrator,
 }
 
-impl<M:CompletionModel> OrchestratorSystem<M> {
+impl OrchestratorSystem {
     pub async fn new(config: &SystemConfig) -> Result<Self> {
         Ok(Self {
             agents: agents::AgentPool::new(&config.orchestrator.agents).await?,

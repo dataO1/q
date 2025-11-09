@@ -1,6 +1,7 @@
 use ai_agent_common::*;
 use crate::api_client::ApiClient;
 
+
 pub async fn execute(query: &str) -> anyhow::Result<()> {
     let client = ApiClient::new("http://localhost:8080").await?;
     let response = client.execute_query(query).await?;

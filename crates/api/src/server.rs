@@ -1,17 +1,21 @@
 use ai_agent_common::*;
+use ai_agent_orchestrator::OrchestratorSystem;
 use axum::{Router, routing::post};
+use rig::completion::CompletionModel;
 use std::sync::Arc;
 
+use crate::routes::execute::AppState;
+
 pub struct AcpServer {
-    orchestrator: Arc<crate::orchestrator::OrchestratorSystem>,
+    orchestrator: Arc<OrchestratorSystem>,
 }
 
 impl AcpServer {
-    pub fn new(orchestrator: Arc<crate::orchestrator::OrchestratorSystem>) -> Self {
+    pub fn new(orchestrator: Arc<OrchestratorSystem>) -> Self {
         todo!("Initialize ACP server")
     }
 
-    pub fn router(&self) -> Router {
+    pub fn router(&self) -> Router<AppState> {
         Router::new()
             .route("/execute", post(crate::routes::execute::execute_task))
             .route("/stream/:task_id", axum::routing::get(crate::routes::stream::stream_status))

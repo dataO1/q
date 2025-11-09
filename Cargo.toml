@@ -14,62 +14,62 @@ resolver = "2"
 
 [workspace.dependencies]
 # Async runtime
-tokio = { version = "1.40", features = ["full"] }
-tokio-util = "0.7"
+tokio = { version = "*", features = ["full"] }
+tokio-util = "*"
 
 # Agents & LLM
-rig-core = "0.3"
-graph-flow = "0.2"
+rig-core = "*"
+graph-flow = "*"
 
 # Vector DB & Embeddings
-qdrant-client = "1.11"
-fastembed = "3.7"
+qdrant-client = "*"
+fastembed = "*"
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
-pgvector = "0.4"
-redis = { version = "0.26", features = ["tokio-comp"] }
+sqlx = { version = "*", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+pgvector = "*"
+redis = { version = "*", features = ["tokio-comp"] }
 
 # Indexing
-swiftide = { version = "0.13", features = ["tree-sitter", "qdrant"] }
-notify = "6.1"
-tree-sitter = "0.24"
+swiftide = { version = "*", features = ["tree-sitter", "qdrant"] }
+notify = "*"
+tree-sitter = "*"
 
 # Web & API
-axum = { version = "0.7", features = ["ws"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["trace", "cors"] }
+axum = { version = "*", features = ["ws"] }
+tower = "*"
+tower-http = { version = "*", features = ["trace", "cors"] }
 
 # CLI
-clap = { version = "4.5", features = ["derive"] }
-clap_complete = "4.5"
-rustyline = "14.0"
+clap = { version = "*", features = ["derive"] }
+clap_complete = "*"
+rustyline = "*"
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-toml = "0.8"
+serde = { version = "*", features = ["derive"] }
+serde_json = "*"
+toml = "*"
 
 # Utilities
-anyhow = "1.0"
-thiserror = "1.0"
-tracing = "0.1"
-tracing-subscriber = "0.3"
-uuid = { version = "1.10", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
+anyhow = "*"
+thiserror = "*"
+tracing = "*"
+tracing-subscriber = "*"
+uuid = { version = "*", features = ["v4", "serde"] }
+chrono = { version = "*", features = ["serde"] }
 
 # Graphs
-petgraph = "0.6"
+petgraph = "*"
 
 # Async
-futures = "0.3"
-async-trait = "0.1"
+futures = "*"
+async-trait = "*"
 
 # LRU Cache
-lru = "0.12"
+lru = "*"
 
 # MCP
-mcp-core = "0.1"  # Adjust version
+mcp-core = "*"  # Adjust version
 
 # Collections
-dashmap = "6.1"
+dashmap = "*"

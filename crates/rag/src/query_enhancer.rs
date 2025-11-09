@@ -1,12 +1,16 @@
 use ai_agent_common::*;
 
 pub struct QueryEnhancer {
-    llm_client: rig::Client,
+    // Using String to store model name for now
+    // Will initialize actual client when implementing
+    model_name: String,
 }
 
 impl QueryEnhancer {
     pub fn new(model: &str) -> Result<Self> {
-        todo!("Initialize query enhancement LLM")
+        Ok(Self {
+            model_name: model.to_string(),
+        })
     }
 
     pub async fn enhance_with_history(
@@ -14,7 +18,7 @@ impl QueryEnhancer {
         query: &str,
         history_context: &str,
     ) -> Result<String> {
-        todo!("Rewrite query with history context")
+        todo!("Rewrite query with history context using LLM")
     }
 
     pub async fn generate_source_specific_queries(

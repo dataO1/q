@@ -1,9 +1,9 @@
+use ai_agent_orchestrator::OrchestratorSystem;
 use axum::{extract::Path, response::sse::{Sse, Event}, Extension};
 use futures::stream::Stream;
-use serde_json::json;
+use rig::completion::CompletionModel;
 use std::{convert::Infallible, sync::Arc};
 use tokio::sync::broadcast::{Receiver, error::RecvError};
-use crate::orchestrator::OrchestratorSystem;
 
 pub async fn stream_status(
     Extension(orchestrator): Extension<Arc<OrchestratorSystem>>,

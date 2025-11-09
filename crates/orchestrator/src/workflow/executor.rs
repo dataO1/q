@@ -12,10 +12,10 @@ impl WaveExecutor {
         todo!("Initialize executor")
     }
 
-    pub async fn execute_wave<M:CompletionModel>(
+    pub async fn execute_wave(
         &self,
         tasks: Vec<SubTask>,
-        agents: &crate::agents::AgentPool<M>,
+        agents: &crate::agents::AgentPool,
     ) -> Result<Vec<TaskResult>> {
         todo!("Execute tasks in parallel with locking")
     }

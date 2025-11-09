@@ -17,3 +17,4 @@ uuid = { version = "*", features = ["v4", "serde"] }
 serde_json = "*"
 async-trait = "*"
 tracing-subscriber = "*"
+reqwest = { version = "*", features = ["json", "rustls-tls"] }

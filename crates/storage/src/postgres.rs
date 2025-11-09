@@ -1,4 +1,4 @@
-use ai_agent_common::*;
+use anyhow::Result;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 
 pub struct PostgresClient {
@@ -16,5 +16,9 @@ impl PostgresClient {
 
     pub async fn run_migrations(&self) -> Result<()> {
         todo!("Run SQL migrations")
+    }
+
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
     }
 }

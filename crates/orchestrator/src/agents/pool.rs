@@ -2,20 +2,23 @@ use ai_agent_common::*;
 use rig::agent::Agent;
 use rig::completion::CompletionModel;
 use std::sync::Arc;
+use reqwest::Client;
 
-pub struct AgentPool<M: CompletionModel> {
-    orchestrator: Arc<Agent<M>>,
-    coding_agents: Vec<Arc<Agent<M>>>,
-    planning_agents: Vec<Arc<Agent<M>>>,
-    writing_agents: Vec<Arc<Agent<M>>>,
+use crate::OllamaModel;
+
+pub struct AgentPool {
+    orchestrator: Arc<Agent<OllamaModel>>,
+    coding_agents: Vec<Arc<Agent<OllamaModel>>>,
+    planning_agents: Vec<Arc<Agent<OllamaModel>>>,
+    writing_agents: Vec<Arc<Agent<OllamaModel>>>,
 }
 
-impl<M:CompletionModel> AgentPool<M> {
+impl AgentPool {
     pub async fn new(configs: &[AgentConfig]) -> Result<Self> {
         todo!("Initialize all agents from config")
     }
 
-    pub fn get_agent(&self, agent_type: AgentType) -> Result<Arc<Agent<M>>> {
+    pub fn get_agent(&self, agent_type: AgentType) -> Result<Arc<Agent<OllamaModel>>> {
         todo!("Get available agent of type")
     }
 }

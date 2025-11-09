@@ -1,17 +1,18 @@
-use ai_agent_common::*;
+use anyhow::Result;
+use redis::aio::MultiplexedConnection;
 use redis::AsyncCommands;
 use tokio::sync::Mutex;
 use std::sync::Arc;
 
 pub struct RedisCache {
     client: redis::Client,
-    connection: Arc<Mutex<redis::aio::Connection>>,
+    connection: Arc<Mutex<MultiplexedConnection>>,
 }
 
 impl RedisCache {
     pub async fn new(redis_url: &str) -> Result<Self> {
         let client = redis::Client::open(redis_url)?;
-        let mut connection = client.get_async_connection().await?;
+        let connection = client.get_multiplexed_async_connection().await?;
         Ok(Self {
             client,
             connection: Arc::new(Mutex::new(connection)),

@@ -26,7 +26,7 @@ impl WorkflowEngine {
         })
     }
 
-    pub async fn execute<M:CompletionModel>(&mut self, agents: &AgentPool<M>) -> Result<String> {
+    pub async fn execute(&mut self, agents: &AgentPool) -> Result<String> {
         todo!("Execute workflow graph with wave-based execution")
     }
 

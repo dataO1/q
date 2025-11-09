@@ -1,7 +1,8 @@
 use axum::{response::Json, Extension};
+use rig::completion::CompletionModel;
 use serde_json::json;
 use std::sync::Arc;
-use crate::orchestrator::OrchestratorSystem;
+use ai_agent_orchestrator::OrchestratorSystem;
 
 pub async fn list_agents(
     Extension(orchestrator): Extension<Arc<OrchestratorSystem>>,

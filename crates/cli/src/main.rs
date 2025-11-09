@@ -1,29 +1,20 @@
-use clap::Parser;
-use ai_agent_common::*;
-
-mod interactive;
-mod oneshot;
-mod completions;
-mod display;
+use ai_agent_cli::{oneshot, interactive};  // Import from library
+use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "ai")]
-#[command(about = "AI Agent System CLI")]
+#[command(about = "AI Agent CLI")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
-
-    /// Query (one-shot mode)
-    query: Option<String>,
 }
 
-#[derive(clap::Subcommand)]
+#[derive(Subcommand)]
 enum Commands {
-    /// Generate shell completions
-    Completions {
-        #[arg(value_enum)]
-        shell: clap_complete::Shell,
-    },
+    /// Execute a one-shot query
+    Execute { query: String },
+    /// Start interactive mode
+    Interactive,
 }
 
 #[tokio::main]
@@ -31,17 +22,11 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Completions { shell }) => {
-            completions::generate(shell);
+        Some(Commands::Execute { query }) => {
+            oneshot::execute(&query).await?;
         }
-        None => {
-            if let Some(query) = cli.query {
-                // One-shot mode
-                oneshot::execute(&query).await?;
-            } else {
-                // Interactive mode
-                interactive::run().await?;
-            }
+        Some(Commands::Interactive) | None => {
+            interactive::run().await?;
         }
     }
 

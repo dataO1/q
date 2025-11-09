@@ -13,3 +13,7 @@ tower-http = { version = "*", features = ["trace", "cors"] }
 serde = "*"
 serde_json = "*"
 anyhow = "*"
+futures = "*"
+async-stream = "*"
+rig-core = "*"
+reqwest = { version = "*", features = ["json", "rustls-tls"] }

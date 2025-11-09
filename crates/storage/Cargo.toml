@@ -11,4 +11,5 @@ qdrant-client = "*"
 redis = { version = "*", features = ["tokio-comp"] }
 tokio = { version = "*", features = ["full"] }
 serde = "*"
+serde_json = "*"
 anyhow = "*"
