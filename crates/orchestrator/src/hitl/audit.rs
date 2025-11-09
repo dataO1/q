@@ -4,7 +4,7 @@
 use std::sync::Mutex;
 use std::collections::HashMap;
 use ai_agent_common::*;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 
 pub struct AuditLog {
     pub log: Mutex<HashMap<TaskId, Vec<AuditEntry>>>,

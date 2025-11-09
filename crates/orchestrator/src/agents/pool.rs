@@ -1,4 +1,5 @@
 use ai_agent_common::*;
+use rig_core::Agent;
 use std::sync::Arc;
 
 pub struct AgentPool {
