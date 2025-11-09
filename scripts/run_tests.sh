@@ -53,4 +53,18 @@ echo ""
 echo "🧹 Cleaning up test infrastructure..."
 docker-compose -f docker-compose.test.yml down -v
 
+############################ INDEXING ############################
+
+# Run all indexing tests
+cargo test -p ai-agent-indexing
+
+# Run only unit tests
+cargo test -p ai-agent-indexing --lib
+
+# Run only integration tests
+cargo test -p ai-agent-indexing --test watcher_integration_test
+
+# Run specific test
+cargo test -p ai-agent-indexing test_gitignore_filtering
+
 echo "✅ All tests complete!"

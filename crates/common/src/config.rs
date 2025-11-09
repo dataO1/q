@@ -17,6 +17,68 @@ pub struct IndexingConfig {
     pub system_paths: Vec<PathBuf>,
     pub watch_enabled: bool,
     pub chunk_size: usize,
+    #[serde(default)]
+    pub filters: IndexingFilters,
+}
+
+/// File filtering configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexingFilters {
+    /// Respect .gitignore files
+    #[serde(default = "default_true")]
+    pub respect_gitignore: bool,
+
+    /// Include hidden files (starting with .)
+    #[serde(default)]
+    pub include_hidden: bool,
+
+    /// Additional directories to ignore (beyond .gitignore)
+    #[serde(default = "default_ignore_dirs")]
+    pub ignore_dirs: Vec<String>,
+
+    /// File extensions to ignore
+    #[serde(default)]
+    pub ignore_extensions: Vec<String>,
+
+    /// Custom ignore patterns (gitignore syntax)
+    #[serde(default)]
+    pub custom_ignores: Vec<String>,
+
+    /// File size limit in bytes (None = no limit)
+    #[serde(default)]
+    pub max_file_size: Option<u64>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_ignore_dirs() -> Vec<String> {
+    vec![
+        "target".to_string(),
+        "node_modules".to_string(),
+        "build".to_string(),
+        "dist".to_string(),
+        ".git".to_string(),
+        ".svn".to_string(),
+        "__pycache__".to_string(),
+        ".cache".to_string(),
+        "venv".to_string(),
+        ".venv".to_string(),
+    ]
+}
+
+impl Default for IndexingFilters {
+    fn default() -> Self {
+        Self {
+            respect_gitignore: true,
+            include_hidden: false,
+            ignore_dirs: default_ignore_dirs(),
+            ignore_extensions: vec![],
+            custom_ignores: vec![],
+            max_file_size: Some(10 * 1024 * 1024), // 10MB default
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,6 +185,7 @@ impl Default for SystemConfig {
                 system_paths: vec![],
                 watch_enabled: true,
                 chunk_size: 512,
+                filters: IndexingFilters::default(),
             },
             rag: RagConfig {
                 reranking_weights: RerankingWeights {

@@ -5,10 +5,24 @@
     * Implement storage adapters (Qdrant, PostgreSQL)
     * Basic configuration loading
 - Phase 2 - Indexing (Week 2):
-    * File watcher with inotify
-    * Path classifier chain
-    * Tree-sitter chunker
-    * Ollama embedder
+    * File Watcher (inotify-based)
+        * Watch configured directories for file changes
+        * Detect new, modified, deleted files
+        * Respect .gitignore patterns
+    * Path Classifier Chain
+        * Classify files into tiers: System/Personal/Workspace/Dependencies/Online
+        * Detect project roots (git)
+        * Language detection
+        * File type classification
+    * Tree-sitter Chunker
+        * Smart code-aware chunking
+        * Extract definitions (functions, classes, structs)
+        * Maintain context boundaries
+        * Metadata extraction
+    * Ollama Embedder
+        * Generate embeddings using Ollama's nomic-embed-text
+        * Batch processing for efficiency
+        * Dense vector generation
 - Phase 3 - RAG (Week 3):
     * Query enhancer
     * Source router (heuristics)

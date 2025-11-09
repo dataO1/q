@@ -11,5 +11,12 @@ tree-sitter = "*"
 reqwest = { version = "*", features = ["json", "rustls-tls"] }
 qdrant-client = "*"
 serde = "*"
+serde_json = "*"
 anyhow = "*"
 async-trait = "*"
+tracing = "*"
+ignore = "*"
+
+[dev-dependencies]
+tempfile = "*"
+tokio-test = "*"

@@ -33,3 +33,19 @@ temperature = 0.2
 qdrant_url = "http://localhost:6333"
 postgres_url = "postgresql://localhost/ai_agent"
 redis_url = "redis://localhost:6379"
+
+
+[indexing]
+workspace_paths = ["~/Projects"]
+personal_paths = ["~/Documents", "~/Notes", "~/.config"]
+system_paths = ["/usr/share/man", "/etc"]
+watch_enabled = true
+chunk_size = 512
+
+[indexing.filters]
+respect_gitignore = true
+include_hidden = false
+ignore_dirs = ["target", "node_modules", "build", ".git"]
+ignore_extensions = ["lock", "log", "tmp"]
+custom_ignores = ["*.min.js", "*.bundle.*", "vendor/**"]
+max_file_size = 10485760  # 10MB in bytes
