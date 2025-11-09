@@ -2,13 +2,13 @@ version: '3.8'
 
 services:
   postgres-test:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16  # Use pgvector-enabled PostgreSQL image
     environment:
       POSTGRES_DB: ai_agent_test
       POSTGRES_USER: test_user
       POSTGRES_PASSWORD: test_password
     ports:
-      - "15432:5432"  # Test port: 15432 (production: 5432)
+      - "15432:5432"
     volumes:
       - postgres_test_data:/var/lib/postgresql/data
     tmpfs:
@@ -17,20 +17,35 @@ services:
       postgres
       -c shared_buffers=256MB
       -c max_connections=100
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d ai_agent_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis-test:
     image: redis:7-alpine
     ports:
-      - "16379:6379"  # Test port: 16379 (production: 6379)
+      - "16379:6379"
     command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   qdrant-test:
     image: qdrant/qdrant:latest
     ports:
-      - "16333:6333"  # Test port: 16333 (production: 6333)
-      - "16334:6334"  # gRPC port
+      - "16333:6333"
+      - "16334:6334"
     tmpfs:
       - /qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
 volumes:
   postgres_test_data:

@@ -195,7 +195,7 @@ impl PostgresClient {
         conversation_id: &str,
         query_embedding: &[f32],
         limit: i64,
-    ) -> Result<Vec<(Uuid, String, f32)>> {
+    ) -> Result<Vec<(Uuid, String, f64)>> {  // ← Changed f32 to f64
         let embedding_str = format!("[{}]", query_embedding.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(","));
 
         let rows = sqlx::query(
@@ -218,7 +218,7 @@ impl PostgresClient {
             .map(|row| {
                 let id: Uuid = row.get("id");
                 let content: String = row.get("content");
-                let distance: f32 = row.get("distance");
+                let distance: f64 = row.get("distance");  // ← Fixed: f64 instead of f32
                 (id, content, distance)
             })
             .collect();

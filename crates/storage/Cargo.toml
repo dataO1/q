@@ -19,5 +19,5 @@ chrono = "*"             # Date utilities
 
 
 [dev-dependencies]
-tokio = { features = ["macros", "rt-multi-thread"] }
-uuid = { features = ["v4"] }
+tokio = {version="*", features = ["macros", "rt-multi-thread"] }
+uuid = {version="*", features = ["v4"] }

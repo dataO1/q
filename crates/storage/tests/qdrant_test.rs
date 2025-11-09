@@ -13,27 +13,23 @@ fn test_collection_name(suffix: &str) -> String {
     format!("test_{}_{}", suffix, Uuid::new_v4().to_string().replace('-', "_"))
 }
 
-// Cleanup: Delete test collection
-async fn cleanup_collection(client: &QdrantClient, collection: &str) {
-    // Qdrant doesn't have a delete collection method in the client we're using
-    // Collections are isolated by unique names, so cleanup happens naturally
-    // when Docker container is restarted
-}
-
 #[tokio::test]
 #[ignore]
 async fn test_qdrant_connection() {
+    // Add timeout and retry logic
     let client = QdrantClient::new(&get_test_qdrant_url())
         .expect("Failed to create Qdrant client");
 
     let collection = test_collection_name("connection");
 
-    client.create_collection(&collection, 768).await.unwrap();
+    // Give Qdrant time to be ready
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+    client.create_collection(&collection, 768).await
+        .expect("Failed to create collection");
 
     let exists = client.collection_exists(&collection).await.unwrap();
     assert!(exists);
-
-    cleanup_collection(&client, &collection).await;
 }
 
 #[tokio::test]
@@ -41,6 +37,8 @@ async fn test_qdrant_connection() {
 async fn test_qdrant_insert_and_search() {
     let client = QdrantClient::new(&get_test_qdrant_url()).unwrap();
     let collection = test_collection_name("search");
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     client.ensure_collection(&collection, 4).await.unwrap();
 
@@ -53,6 +51,9 @@ async fn test_qdrant_insert_and_search() {
         .await
         .unwrap();
 
+    // Give time for indexing
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
     // Search
     let results = client
         .search(&collection, vec![0.1, 0.2, 0.3, 0.4], 5, None)
@@ -61,8 +62,6 @@ async fn test_qdrant_insert_and_search() {
 
     assert!(!results.is_empty());
     assert_eq!(results[0].id, 1);
-
-    cleanup_collection(&client, &collection).await;
 }
 
 #[tokio::test]
@@ -70,6 +69,8 @@ async fn test_qdrant_insert_and_search() {
 async fn test_qdrant_metadata_filtering() {
     let client = QdrantClient::new(&get_test_qdrant_url()).unwrap();
     let collection = test_collection_name("filter");
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     client.ensure_collection(&collection, 4).await.unwrap();
 
@@ -89,6 +90,9 @@ async fn test_qdrant_metadata_filtering() {
         .await
         .unwrap();
 
+    // Give time for indexing
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
     // Search with filter
     let results = client
         .search_with_metadata(
@@ -104,6 +108,4 @@ async fn test_qdrant_metadata_filtering() {
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].id, 1);
-
-    cleanup_collection(&client, &collection).await;
 }
