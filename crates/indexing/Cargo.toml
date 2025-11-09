@@ -16,7 +16,17 @@ anyhow = "*"
 async-trait = "*"
 tracing = "*"
 ignore = "*"
+mime_guess = "*"
+dirs = "*"
+tree-sitter = "*"
+tree-sitter-rust = "*"
+tree-sitter-python = "*"
+tree-sitter-javascript = "*"
+tree-sitter-typescript = "*"
+once_cell = "*"  # For lazy static parsers
 
 [dev-dependencies]
 tempfile = "*"
 tokio-test = "*"
+mime_guess = "*"
+dirs = "*"

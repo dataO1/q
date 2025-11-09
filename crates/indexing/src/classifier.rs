@@ -1,43 +1,465 @@
 use ai_agent_common::*;
 use async_trait::async_trait;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use anyhow::{Context, Result};
+use mime_guess;
 
+/// Trait for path classification
 #[async_trait]
 pub trait PathClassifierTrait: Send + Sync {
+    /// Priority of this classifier (higher = checked first)
     fn priority(&self) -> u8;
+
+    /// Attempt to classify a path, returns Some(tier) if matched
     async fn classify(&self, path: &Path) -> Option<CollectionTier>;
 }
 
+/// Main path classifier that runs a chain of classifiers
 pub struct PathClassifier {
     classifiers: Vec<Box<dyn PathClassifierTrait>>,
 }
 
 impl PathClassifier {
+    /// Create a new classifier chain from configuration
     pub fn new(config: &IndexingConfig) -> Self {
-        todo!("Build classifier chain with priority ordering")
+        let mut classifiers: Vec<Box<dyn PathClassifierTrait>> = vec![
+            Box::new(SystemPathClassifier::new(&config.system_paths)),       // 100
+            Box::new(PersonalPathClassifier::new(&config.personal_paths)),   // 80
+            Box::new(DependenciesClassifier::new()),                         // 70
+            Box::new(WorkspacePathClassifier::new(&config.workspace_paths)), // 60
+        ];
+
+        classifiers.sort_by(|a, b| b.priority().cmp(&a.priority()));
+        Self { classifiers }
     }
 
-    pub async fn classify(&self, path: &Path) -> Result<CollectionTier> {
-        todo!("Run through classifier chain")
+    /// Classify a path through the classifier chain
+    pub async fn classify(&self, path: &Path) -> Result<ClassificationResult> {
+        // Run through classifier chain
+        for classifier in &self.classifiers {
+            if let Some(tier) = classifier.classify(path).await {
+                return Ok(ClassificationResult {
+                    tier,
+                    language: detect_language(path),
+                    file_type: detect_file_type(path),
+                    project_root: find_project_root(path),
+                    mime_type: detect_mime_type(path),
+                });
+            }
+        }
+
+        // Default to workspace if no match
+        Ok(ClassificationResult {
+            tier: CollectionTier::Workspace,
+            language: detect_language(path),
+            file_type: detect_file_type(path),
+            project_root: find_project_root(path),
+            mime_type: detect_mime_type(path),
+        })
     }
 }
 
-// Individual classifiers
-pub struct SystemPathClassifier;
-pub struct PersonalPathClassifier {
-    personal_dirs: Vec<String>,
+/// Result of path classification
+#[derive(Debug, Clone)]
+pub struct ClassificationResult {
+    pub tier: CollectionTier,
+    pub language: Option<String>,
+    pub file_type: String,
+    pub project_root: Option<PathBuf>,
+    pub mime_type: Option<String>,
 }
-pub struct WorkspacePathClassifier {
-    workspace_dirs: Vec<String>,
+
+// ============================================================================
+// Individual Classifiers
+// ============================================================================
+
+/// Classifies system paths (/usr, /etc, /lib, etc.)
+pub struct SystemPathClassifier {
+    system_prefixes: Vec<PathBuf>,
 }
-pub struct DependenciesClassifier;
+
+impl SystemPathClassifier {
+    pub fn new(configured_paths: &[PathBuf]) -> Self {
+        let mut prefixes = configured_paths.to_vec();
+
+        // Add common system paths
+        let common_system_paths = [
+            "/usr/share/man",
+            "/usr/share/doc",
+            "/usr/local/share/man",
+            "/usr/include",
+            "/etc",
+            "/lib",
+            "/usr/lib",
+        ];
+
+        for path_str in &common_system_paths {
+            let path = PathBuf::from(path_str);
+            if !prefixes.contains(&path) {
+                prefixes.push(path);
+            }
+        }
+
+        Self { system_prefixes: prefixes }
+    }
+}
 
 #[async_trait]
 impl PathClassifierTrait for SystemPathClassifier {
-    fn priority(&self) -> u8 { 10 }
+    fn priority(&self) -> u8 { 100 } // Highest priority
+
     async fn classify(&self, path: &Path) -> Option<CollectionTier> {
-        todo!("Classify system paths")
+        for prefix in &self.system_prefixes {
+            if path.starts_with(prefix) {
+                return Some(CollectionTier::System);
+            }
+        }
+        None
     }
 }
 
-// Implement other classifiers...
+/// Classifies personal/documents paths
+pub struct PersonalPathClassifier {
+    personal_dirs: Vec<PathBuf>,
+}
+
+impl PersonalPathClassifier {
+    pub fn new(configured_paths: &[PathBuf]) -> Self {
+        let mut dirs = configured_paths.to_vec();
+
+        // Add common personal directories (expanded from ~)
+        if let Some(home) = dirs::home_dir() {
+            let common_personal = [
+                "Documents", "notes", ".config",
+                "Desktop", "Downloads", "writings",
+            ];
+
+            for dir_name in &common_personal {
+                let path = home.join(dir_name);
+                if !dirs.contains(&path) {
+                    dirs.push(path);
+                }
+            }
+        }
+
+        Self { personal_dirs: dirs }
+    }
+}
+
+#[async_trait]
+impl PathClassifierTrait for PersonalPathClassifier {
+    fn priority(&self) -> u8 { 80 }
+
+    async fn classify(&self, path: &Path) -> Option<CollectionTier> {
+        for dir in &self.personal_dirs {
+            if path.starts_with(dir) {
+                return Some(CollectionTier::Personal);
+            }
+        }
+        None
+    }
+}
+
+/// Classifies workspace/development paths
+pub struct WorkspacePathClassifier {
+    workspace_dirs: Vec<PathBuf>,
+}
+
+impl WorkspacePathClassifier {
+    pub fn new(configured_paths: &[PathBuf]) -> Self {
+        Self {
+            workspace_dirs: configured_paths.to_vec(),
+        }
+    }
+   /// Check if path is in a dependency directory
+    fn is_in_dependency_dir(&self, path: &Path) -> bool {
+        let dependency_indicators = [
+            "node_modules",
+            "vendor",
+            ".cargo/registry",
+            ".cargo/git",
+            "site-packages",
+            "venv",
+            ".venv",
+            "env",
+            "target/debug/deps",
+            "target/release/deps",
+        ];
+
+        for component in path.components() {
+            if let Some(name) = component.as_os_str().to_str() {
+                for indicator in &dependency_indicators {
+                    if name == *indicator || name.contains(indicator) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
+}
+
+#[async_trait]
+impl PathClassifierTrait for WorkspacePathClassifier {
+    fn priority(&self) -> u8 { 60 }
+
+    async fn classify(&self, path: &Path) -> Option<CollectionTier> {
+        for dir in &self.workspace_dirs {
+            if path.starts_with(dir) {
+                // Check if it's actually a dependency within workspace
+                if self.is_in_dependency_dir(path) {
+                    return None; // Let DependenciesClassifier handle it
+                }
+                return Some(CollectionTier::Workspace);
+            }
+        }
+        None
+    }
+}
+
+/// Classifies dependency/vendor code
+pub struct DependenciesClassifier;
+
+impl DependenciesClassifier {
+    pub fn new() -> Self {
+        Self
+    }
+
+    fn is_dependency_path(&self, path: &Path) -> bool {
+        let dependency_indicators = [
+            "node_modules",
+            "vendor",
+            ".cargo/registry",
+            ".cargo/git",
+            "site-packages",
+            "venv",
+            ".venv",
+            "env",
+            "target/debug/deps",
+            "target/release/deps",
+            ".m2/repository",
+            "go/pkg",
+        ];
+
+        for component in path.components() {
+            if let Some(name) = component.as_os_str().to_str() {
+                for indicator in &dependency_indicators {
+                    if name.contains(indicator) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
+}
+
+#[async_trait]
+impl PathClassifierTrait for DependenciesClassifier {
+    fn priority(&self) -> u8 { 70 }
+
+    async fn classify(&self, path: &Path) -> Option<CollectionTier> {
+        if self.is_dependency_path(path) {
+            Some(CollectionTier::Dependencies)
+        } else {
+            None
+        }
+    }
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Detect programming language from file extension and content
+
+pub fn detect_language(path: &Path) -> Option<String> {
+    let ext = path.extension()?.to_str()?;
+
+    let language = match ext {
+        // Systems programming
+        "rs" => "rust",
+        "c" => "c",
+        "cpp" | "cc" | "cxx" | "h" | "hpp" => "cpp",
+        "go" => "go",
+        "zig" => "zig",
+
+        // High-level languages
+        "py" | "pyw" => "python",
+        "js" | "mjs" | "cjs" => "javascript",
+        "ts" | "tsx" => "typescript",
+        "java" => "java",
+        "kt" | "kts" => "kotlin",
+        "scala" | "sc" => "scala",
+        "rb" => "ruby",
+        "php" => "php",
+        "swift" => "swift",
+
+        // Functional
+        "hs" | "lhs" => "haskell",
+        "ml" | "mli" => "ocaml",
+        "fs" | "fsx" | "fsi" => "fsharp",
+        "elm" => "elm",
+        "clj" | "cljs" | "cljc" => "clojure",
+
+        // Shell/scripting
+        "sh" | "bash" | "zsh" => "shell",
+        "fish" => "fish",
+        "nu" => "nushell",
+
+        // Web
+        "html" | "htm" => "html",
+        "css" | "scss" | "sass" | "less" => "css",
+        "vue" => "vue",
+        "jsx" => "jsx",
+        "svelte" => "svelte",
+
+        // Data/Config
+        "json" => "json",
+        "yaml" | "yml" => "yaml",
+        "toml" => "toml",
+        "xml" => "xml",
+        "csv" => "csv",
+        "sql" => "sql",
+
+        // Documentation
+        "md" | "markdown" => "markdown",
+        "rst" => "restructuredtext",
+        "tex" => "latex",
+        "org" => "org-mode",
+
+        _ => return None,
+    };
+
+    Some(language.to_string())
+}
+
+/// Detect file type category
+pub fn detect_file_type(path: &Path) -> String {
+    let ext = path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+
+    match ext {
+        "rs" | "c" | "cpp" | "go" | "py" | "js" | "ts" | "java" => "source_code".to_string(),
+        "h" | "hpp" | "hxx" => "header".to_string(),
+        "md" | "rst" | "txt" | "org" => "documentation".to_string(),
+        "json" | "yaml" | "toml" | "xml" | "ini" | "conf" => "configuration".to_string(),
+        "html" | "css" | "scss" => "web".to_string(),
+        "sql" => "database".to_string(),
+        "sh" | "bash" | "zsh" | "fish" => "script".to_string(),
+        _ => "unknown".to_string(),
+    }
+}
+
+/// Find project root by looking for markers (.git, Cargo.toml, package.json, etc.)
+pub fn find_project_root(path: &Path) -> Option<PathBuf> {
+    let markers = [
+        ".git",
+        "Cargo.toml",
+        "package.json",
+        "go.mod",
+        "pom.xml",
+        "build.gradle",
+        "pyproject.toml",
+        "setup.py",
+        "Makefile",
+        "CMakeLists.txt",
+    ];
+
+    let mut current = path;
+
+    while let Some(parent) = current.parent() {
+        for marker in &markers {
+            if parent.join(marker).exists() {
+                return Some(parent.to_path_buf());
+            }
+        }
+        current = parent;
+    }
+
+    None
+}
+
+/// Detect MIME type using mime_guess
+pub fn detect_mime_type(path: &Path) -> Option<String> {
+    mime_guess::from_path(path)
+        .first()
+        .map(|mime| mime.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config() -> IndexingConfig {
+        IndexingConfig {
+            workspace_paths: vec![PathBuf::from("/home/user/projects")],
+            personal_paths: vec![PathBuf::from("/home/user/Documents")],
+            system_paths: vec![PathBuf::from("/usr/share/doc")],
+            watch_enabled: true,
+            chunk_size: 512,
+            filters: IndexingFilters::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_classify_system_path() {
+        let classifier = PathClassifier::new(&test_config());
+        let path = PathBuf::from("/usr/share/man/man1/ls.1");
+
+        let result = classifier.classify(&path).await.unwrap();
+        assert_eq!(result.tier, CollectionTier::System);
+    }
+
+    #[tokio::test]
+    async fn test_classify_personal_path() {
+        let classifier = PathClassifier::new(&test_config());
+        let path = PathBuf::from("/home/user/Documents/notes.md");
+
+        let result = classifier.classify(&path).await.unwrap();
+        assert_eq!(result.tier, CollectionTier::Personal);
+    }
+
+    #[tokio::test]
+    async fn test_classify_workspace_path() {
+        let classifier = PathClassifier::new(&test_config());
+        let path = PathBuf::from("/home/user/projects/myapp/src/main.rs");
+
+        let result = classifier.classify(&path).await.unwrap();
+        assert_eq!(result.tier, CollectionTier::Workspace);
+    }
+
+    #[tokio::test]
+    async fn test_classify_dependencies() {
+        let classifier = PathClassifier::new(&test_config());
+        let path = PathBuf::from("/home/user/projects/myapp/node_modules/react/index.js");
+
+        let result = classifier.classify(&path).await.unwrap();
+        assert_eq!(result.tier, CollectionTier::Dependencies);
+    }
+
+    #[test]
+    fn test_detect_language() {
+        assert_eq!(detect_language(Path::new("main.rs")), Some("rust".to_string()));
+        assert_eq!(detect_language(Path::new("app.py")), Some("python".to_string()));
+        assert_eq!(detect_language(Path::new("script.js")), Some("javascript".to_string()));
+        assert_eq!(detect_language(Path::new("unknown.xyz")), None);
+    }
+
+    #[test]
+    fn test_detect_file_type() {
+        assert_eq!(detect_file_type(Path::new("main.rs")), "source_code");
+        assert_eq!(detect_file_type(Path::new("README.md")), "documentation");
+        assert_eq!(detect_file_type(Path::new("config.toml")), "configuration");
+    }
+
+    #[test]
+    fn test_detect_mime_type() {
+        assert!(detect_mime_type(Path::new("file.txt")).is_some());
+        assert!(detect_mime_type(Path::new("image.png")).is_some());
+        assert!(detect_mime_type(Path::new("video.mp4")).is_some());
+    }
+}
