@@ -13,3 +13,11 @@ tokio = { version = "*", features = ["full"] }
 serde = "*"
 serde_json = "*"
 anyhow = "*"
+tracing = "*"
+uuid = { version = "*", features = ["v4", "serde"] }
+chrono = "*"             # Date utilities
+
+
+[dev-dependencies]
+tokio = { features = ["macros", "rt-multi-thread"] }
+uuid = { features = ["v4"] }

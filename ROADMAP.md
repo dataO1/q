@@ -434,6 +434,149 @@ Provide an ACP API for UIs to connect to.
 ## Neovim
 
 
-
-
 # File Structure
+
+crates
+├── api
+│   ├── Cargo.toml
+│   └── src
+│       ├── lib.rs
+│       ├── middleware
+│       │   ├── logging.rs
+│       │   └── mod.rs
+│       ├── routes
+│       │   ├── agents.rs
+│       │   ├── execute.rs
+│       │   ├── mod.rs
+│       │   └── stream.rs
+│       └── server.rs
+├── cli
+│   ├── Cargo.toml
+│   └── src
+│       ├── api_client.rs
+│       ├── completions.rs
+│       ├── display.rs
+│       ├── interactive.rs
+│       ├── lib.rs
+│       ├── main.rs
+│       └── oneshot.rs
+├── common
+│   ├── Cargo.toml
+│   └── src
+│       ├── config.rs
+│       ├── error.rs
+│       ├── lib.rs
+│       └── types.rs
+├── history
+│   ├── Cargo.toml
+│   └── src
+│       ├── buffer_memory.rs
+│       ├── lib.rs
+│       ├── manager.rs
+│       ├── metadata.rs
+│       ├── patterns.rs
+│       ├── semantic_memory.rs
+│       └── summarizer.rs
+├── indexing
+│   ├── Cargo.toml
+│   └── src
+│       ├── chunker.rs
+│       ├── classifier.rs
+│       ├── embedder.rs
+│       ├── lib.rs
+│       ├── storage.rs
+│       └── watcher.rs
+├── mcp-tools
+│   ├── Cargo.toml
+│   └── src
+│       ├── filesystem.rs
+│       ├── git.rs
+│       ├── lib.rs
+│       ├── lsp.rs
+│       ├── treesitter.rs
+│       └── web.rs
+├── orchestrator
+│   ├── Cargo.toml
+│   └── src
+│       ├── agents
+│       │   ├── coding.rs
+│       │   ├── mod.rs
+│       │   ├── orchestrator.rs
+│       │   ├── planning.rs
+│       │   ├── pool.rs
+│       │   └── writing.rs
+│       ├── coordination
+│       │   ├── conflict.rs
+│       │   ├── file_locks.rs
+│       │   ├── mod.rs
+│       │   └── shared_context.rs
+│       ├── hitl
+│       │   ├── assessor.rs
+│       │   ├── audit.rs
+│       │   ├── mod.rs
+│       │   └── queue.rs
+│       ├── lib.rs
+│       ├── main.rs
+│       └── workflow
+│           ├── analyzer.rs
+│           ├── builder.rs
+│           ├── checkpoint.rs
+│           ├── executor.rs
+│           └── mod.rs
+├── rag
+│   ├── Cargo.toml
+│   └── src
+│       ├── context_manager.rs
+│       ├── context_providers.rs
+│       ├── lib.rs
+│       ├── query_enhancer.rs
+│       ├── reranker.rs
+│       ├── retriever.rs
+│       └── source_router.rs
+└── storage
+    ├── Cargo.toml
+    └── src
+        ├── lib.rs
+        ├── postgres.rs
+        ├── qdrant.rs
+        └── redis.rs
+
+25 directories, 79 files
+
+
+# Changelog
+
+Summary of Phase 1 Implementation
+
+What we've completed:
+
+✅ Common Crate:
+
+    Complete type system with all domain types
+
+    Comprehensive error handling with conversions
+
+    Full configuration loading with validation
+
+✅ Storage Layer:
+
+    PostgreSQL: Full implementation with migrations, conversation storage, semantic search, checkpoints, audit logs
+
+    Qdrant: Vector database with metadata filtering, batch operations, search
+
+    Redis: Caching layer with JSON support, lists, sets, TTL, and cache patterns
+
+Phase 1 is now complete and production-ready! All storage adapters are fully implemented with:
+
+    Proper error handling
+
+    Logging/tracing
+
+    Connection pooling
+
+    Async/await throughout
+
+    Type safety
+
+    Documentation
+

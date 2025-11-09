@@ -35,8 +35,24 @@ pub enum AgentError {
     #[error("File lock conflict: {path}")]
     FileLockConflict { path: std::path::PathBuf },
 
+    #[error("History error: {0}")]
+    History(String),
+
+    #[error("RAG error: {0}")]
+    Rag(String),
+
+    #[error("Indexing error: {0}")]
+    Indexing(String),
+
     #[error("Unknown error: {0}")]
     Unknown(String),
+}
+
+/// Convert anyhow errors to AgentError
+impl From<anyhow::Error> for AgentError {
+    fn from(err: anyhow::Error) -> Self {
+        AgentError::Unknown(err.to_string())
+    }
 }
 
 pub type Result<T> = std::result::Result<T, AgentError>;

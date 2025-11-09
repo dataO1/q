@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ai_agent_test
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+    ports:
+      - "15432:5432"  # Test port: 15432 (production: 5432)
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    tmpfs:
+      - /tmp
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c max_connections=100
+
+  redis-test:
+    image: redis:7-alpine
+    ports:
+      - "16379:6379"  # Test port: 16379 (production: 6379)
+    command: redis-server --save "" --appendonly no
+
+  qdrant-test:
+    image: qdrant/qdrant:latest
+    ports:
+      - "16333:6333"  # Test port: 16333 (production: 6333)
+      - "16334:6334"  # gRPC port
+    tmpfs:
+      - /qdrant/storage
+
+volumes:
+  postgres_test_data:
+    driver: local

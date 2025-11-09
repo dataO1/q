@@ -72,6 +72,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.17",
  "tokio",
  "toml 0.9.8",
@@ -163,6 +164,7 @@ version = "0.1.0"
 dependencies = [
  "ai-agent-common",
  "anyhow",
+ "chrono",
  "pgvector",
  "qdrant-client",
  "redis",
@@ -170,6 +172,8 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

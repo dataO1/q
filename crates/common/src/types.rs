@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::fmt;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 
@@ -13,18 +14,52 @@ impl TaskId {
     }
 }
 
+impl Default for TaskId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for TaskId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Unique identifier for conversations
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ConversationId(pub String);
 
-/// Collection tier for Qdrant
+impl ConversationId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4().to_string())
+    }
+
+    pub fn from_string(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl Default for ConversationId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for ConversationId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Collection tier for Qdrant (3-layer data filtering)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CollectionTier {
-    System,       // System files
-    Personal,     // Personal documents
-    Workspace,    // Active projects
-    Dependencies, // External libraries
-    Online,       // Web docs
+    System,        // System files (/etc, man pages)
+    Personal,      // Personal documents
+    Workspace,     // Active projects
+    Dependencies,  // External libraries
+    Online,        // Web docs
 }
 
 impl CollectionTier {
@@ -36,6 +71,16 @@ impl CollectionTier {
             Self::Dependencies => "external_deps",
             Self::Online => "online_docs",
         }
+    }
+
+    pub fn all() -> Vec<Self> {
+        vec![
+            Self::System,
+            Self::Personal,
+            Self::Workspace,
+            Self::Dependencies,
+            Self::Online,
+        ]
     }
 }
 
@@ -114,6 +159,28 @@ pub struct Message {
     pub content: String,
     pub timestamp: DateTime<Utc>,
     pub metadata: MessageMetadata,
+}
+
+impl Message {
+    pub fn new_user(content: String) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            role: Role::User,
+            content,
+            timestamp: Utc::now(),
+            metadata: MessageMetadata::default(),
+        }
+    }
+
+    pub fn new_assistant(content: String) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            role: Role::Assistant,
+            content,
+            timestamp: Utc::now(),
+            metadata: MessageMetadata::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
