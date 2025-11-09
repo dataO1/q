@@ -4,7 +4,7 @@
     * Implement common crate types
     * Implement storage adapters (Qdrant, PostgreSQL)
     * Basic configuration loading
-- Phase 2 - Indexing (Week 2):
+- Phase 2 - Indexing (Week 2) (using swiftide):
     * File Watcher (inotify-based)
         * Watch configured directories for file changes
         * Detect new, modified, deleted files

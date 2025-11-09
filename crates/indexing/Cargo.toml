@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 ai-agent-common = { path = "../common" }
+ai-agent-storage = { path = "../storage" }
 tokio = { version = "*", features = ["full"] }
 notify = "*"
 tree-sitter = "*"
@@ -18,12 +19,10 @@ tracing = "*"
 ignore = "*"
 mime_guess = "*"
 dirs = "*"
-tree-sitter = "*"
-tree-sitter-rust = "*"
-tree-sitter-python = "*"
-tree-sitter-javascript = "*"
-tree-sitter-typescript = "*"
-once_cell = "*"  # For lazy static parsers
+# Swiftide with correct features
+swiftide = { version = "*", features = ["ollama", "qdrant", "tree-sitter"] }
+swiftide-indexing = "*"
+swiftide-integrations = { version = "*", features = ["ollama", "qdrant"] }
 
 [dev-dependencies]
 tempfile = "*"

@@ -49,3 +49,8 @@ ignore_dirs = ["target", "node_modules", "build", ".git"]
 ignore_extensions = ["lock", "log", "tmp"]
 custom_ignores = ["*.min.js", "*.bundle.*", "vendor/**"]
 max_file_size = 10485760  # 10MB in bytes
+
+[embedding]
+ollama_url = "http://localhost:11434"
+model = "nomic-embed-text"
+batch_size = 32
