@@ -1,11 +1,13 @@
 use ai_agent_common::*;
+use rig::agent::Agent;
+use rig::completion::CompletionModel;
 
-pub struct ProgressiveSummarizer {
-    agent: rig_core::Agent,
+pub struct ProgressiveSummarizer<M:CompletionModel>{
+    agent: Agent<M>,
     summarization_interval: usize,
 }
 
-impl ProgressiveSummarizer {
+impl<M:CompletionModel> ProgressiveSummarizer<M> {
     pub fn new(model: &str, interval: usize) -> Result<Self> {
         todo!("Initialize summarization agent")
     }

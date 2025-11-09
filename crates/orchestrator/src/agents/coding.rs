@@ -1,15 +1,16 @@
 use ai_agent_common::*;
-use rig_core::Agent;
+use rig::agent::Agent;
+use rig::completion::CompletionModel;
 use async_trait::async_trait;
 use std::sync::Arc;
 
 /// Coding agent specialized for code generation and fixes
-pub struct CodingAgent {
-    agent: Arc<Agent>,
+pub struct CodingAgent<M:CompletionModel> {
+    agent: Arc<Agent<M>>,
 }
 
-impl CodingAgent {
-    pub fn new(agent: Arc<Agent>) -> Self {
+impl<M:CompletionModel> CodingAgent<M> {
+    pub fn new(agent: Arc<Agent<M>>) -> Self {
         Self { agent }
     }
 
@@ -18,9 +19,9 @@ impl CodingAgent {
     }
 }
 
-#[async_trait]
-impl Agent for CodingAgent {
-    async fn prompt(&self, input: &str) -> Result<String> {
-        self.generate_code(input, "").await
-    }
-}
+// #[async_trait]
+// impl Agent for CodingAgent {
+//     async fn prompt(&self, input: &str) -> Result<String> {
+//         self.generate_code(input, "").await
+//     }
+// }

@@ -1,15 +1,16 @@
 use ai_agent_common::*;
-use rig_core::Agent;
+use rig::agent::Agent;
+use rig::completion::CompletionModel;
 use async_trait::async_trait;
 use std::sync::Arc;
 
 /// Planning agent for strategy, architecture, task sequencing
-pub struct PlanningAgent {
-    agent: Arc<Agent>,
+pub struct PlanningAgent<M:CompletionModel> {
+    agent: Arc<Agent<M>>,
 }
 
-impl PlanningAgent {
-    pub fn new(agent: Arc<Agent>) -> Self {
+impl<M:CompletionModel> PlanningAgent<M> {
+    pub fn new(agent: Arc<Agent<M>>) -> Self {
         Self { agent }
     }
 
@@ -18,9 +19,9 @@ impl PlanningAgent {
     }
 }
 
-#[async_trait]
-impl Agent for PlanningAgent {
-    async fn prompt(&self, input: &str) -> Result<String> {
-        self.plan(input, "").await
-    }
-}
+// #[async_trait]
+// impl Agent for PlanningAgent {
+//     async fn prompt(&self, input: &str) -> Result<String> {
+//         self.plan(input, "").await
+//     }
+// }

@@ -1,15 +1,16 @@
 use ai_agent_common::*;
-use rig_core::Agent;
+use rig::agent::Agent;
+use rig::completion::{Chat, CompletionModel, Prompt, PromptError};
 use async_trait::async_trait;
 use std::sync::Arc;
 
 /// Writing agent specialized in documentation and explanations
-pub struct WritingAgent {
-    agent: Arc<Agent>,
+pub struct WritingAgent<M:CompletionModel> {
+    agent: Arc<Agent<M>>,
 }
 
-impl WritingAgent {
-    pub fn new(agent: Arc<Agent>) -> Self {
+impl<M:CompletionModel> WritingAgent<M> {
+    pub fn new(agent: Arc<Agent<M>>) -> Self {
         Self { agent }
     }
 
@@ -18,9 +19,11 @@ impl WritingAgent {
     }
 }
 
-#[async_trait]
-impl Agent for WritingAgent {
-    async fn prompt(&self, input: &str) -> Result<String> {
-        self.write(input, "").await
-    }
-}
+// #[async_trait]
+// impl<M: CompletionModel> Chat for WritingAgent<M> {
+//     async fn chat(&self, input: &str, history: Vec<Message>) -> Result<String> {
+//         // Use history to provide context
+//         let context = self.format_history(&history);
+//         self.write(input, &context).await
+//     }
+// }

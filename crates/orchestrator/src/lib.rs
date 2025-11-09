@@ -1,11 +1,10 @@
-//! Dynamic Agent Network Orchestration
-
 pub mod agents;
 pub mod workflow;
 pub mod coordination;
 pub mod hitl;
 
 use ai_agent_common::*;
+use std::sync::Arc;
 
 pub struct OrchestratorSystem {
     agents: agents::AgentPool,
@@ -16,7 +15,12 @@ pub struct OrchestratorSystem {
 
 impl OrchestratorSystem {
     pub async fn new(config: &OrchestratorConfig) -> Result<Self> {
-        todo!("Initialize orchestrator")
+        Ok(Self {
+            agents: agents::AgentPool::new(&config.agents).await?,
+            workflow: workflow::WorkflowEngine::new(&config.database_url).await?,
+            coordination: coordination::CoordinationLayer::new(),
+            hitl: hitl::HitlOrchestrator::new(),
+        })
     }
 
     pub async fn execute_query(
@@ -24,6 +28,16 @@ impl OrchestratorSystem {
         query: String,
         conversation_id: ConversationId,
     ) -> Result<String> {
-        todo!("Full query execution pipeline")
+        todo!("Execute full query workflow")
+    }
+
+    // Placeholder for status subscription (for API streaming)
+    pub async fn subscribe_to_status(&self, task_id: String) -> tokio::sync::broadcast::Receiver<StatusEvent> {
+        todo!("Implement status event subscription")
+    }
+
+    // Placeholder for agent listing
+    pub async fn list_agents(&self) -> Vec<String> {
+        todo!("List available agents")
     }
 }

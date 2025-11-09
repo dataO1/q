@@ -1,7 +1,7 @@
 use ai_agent_common::*;
 
 pub struct QueryEnhancer {
-    llm_client: rig_core::Client,
+    llm_client: rig::Client,
 }
 
 impl QueryEnhancer {

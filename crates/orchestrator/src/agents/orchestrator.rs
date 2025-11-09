@@ -1,15 +1,16 @@
 use ai_agent_common::*;
-use rig_core::Agent;
+use rig::agent::Agent;
+use rig::completion::CompletionModel;
 use async_trait::async_trait;
 use std::sync::Arc;
 
 /// Main orchestrator agent: manages task decomposition, delegation, and conflict resolution
-pub struct OrchestratorAgent {
-    agent: Arc<Agent>,
+pub struct OrchestratorAgent<M:CompletionModel> {
+    agent: Arc<Agent<M>>,
 }
 
-impl OrchestratorAgent {
-    pub fn new(agent: Arc<Agent>) -> Self {
+impl<M:CompletionModel> OrchestratorAgent<M> {
+    pub fn new(agent: Arc<Agent<M>>) -> Self {
         Self { agent }
     }
 
@@ -20,9 +21,9 @@ impl OrchestratorAgent {
     }
 }
 
-#[async_trait]
-impl Agent for OrchestratorAgent {
-    async fn prompt(&self, input: &str) -> Result<String> {
-        self.handle_task(input, "").await
-    }
-}
+// #[async_trait]
+// impl Agent for OrchestratorAgent {
+//     async fn prompt(&self, input: &str) -> Result<String> {
+//         self.handle_task(input, "").await
+//     }
+// }
