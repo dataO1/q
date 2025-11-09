@@ -82,7 +82,7 @@ impl IndexingPipeline {
 
         // Add embedding and storage
         pipeline = pipeline
-            .then(Embed::new(self.ollama_client.clone()))
+            .then_in_batch(Embed::new(self.ollama_client.clone()))
             .then_store_with(qdrant);
 
         // Run the pipeline
@@ -115,7 +115,7 @@ impl IndexingPipeline {
         let qdrant = SwiftideQdrant::builder()
             .batch_size(50)
             .vector_size(768)
-            .collection_name(&collection)
+            .collection_name(collection)
             .build()?;
 
         // Build pipeline with code chunking for all files
@@ -124,7 +124,7 @@ impl IndexingPipeline {
                 "rust",  // Will auto-detect
                 10..self.chunk_size,
             )?)
-            .then_in_batch(10, Embed::new(self.ollama_client.clone()))
+            .then_in_batch(Embed::new(self.ollama_client.clone()))
             .then_store_with(qdrant)
             .run()
             .await
@@ -257,8 +257,8 @@ mod tests {
                 chunk_size: 512,
                 filters: IndexingFilters::default(),
             },
-            rag: RagConfig::default(),
-            orchestrator: OrchestratorConfig::default(),
+            rag: SystemConfig::default().rag,
+            orchestrator: SystemConfig::default().orchestrator,
             storage: StorageConfig {
                 qdrant_url: "http://localhost:6333".to_string(),
                 postgres_url: "postgresql://localhost/test".to_string(),
