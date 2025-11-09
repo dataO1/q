@@ -1,8 +1,8 @@
-use rustyline::Editor;
 use ai_agent_common::*;
+use rustyline::DefaultEditor;
 
 pub async fn run() -> anyhow::Result<()> {
-    let mut rl = Editor::<()>::new()?;
+    let mut rl = DefaultEditor::new()?;
 
     println!("AI Agent System - Interactive Mode");
     println!("Type your query or @<Tab> for context providers");

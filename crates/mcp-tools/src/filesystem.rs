@@ -1,6 +1,6 @@
-use ai_agent_common::*;
-use mcp_core::{Tool, Content, ToolError};
 use async_trait::async_trait;
+
+use crate::Tool;
 
 pub struct FileSystemTool;
 
@@ -20,7 +20,7 @@ impl Tool for FileSystemTool {
         "File system operations (read, write, list)"
     }
 
-    async fn call(&self, args: serde_json::Value) -> Result<Vec<Content>, ToolError> {
+    async fn call(&self, args: serde_json::Value) -> anyhow::Result<String> {
         todo!("Implement filesystem tool commands")
     }
 }

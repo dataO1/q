@@ -1,5 +1,5 @@
 use clap::{Command, Arg};
-use clap_complete::{generate, Shell};
+use clap_complete::{Shell};
 use std::io;
 
 pub fn generate(shell: Shell) {
@@ -7,5 +7,5 @@ pub fn generate(shell: Shell) {
         .about("AI Agent CLI")
         .arg(Arg::new("query").help("Query to process").index(1));
 
-    generate(shell, &mut cmd, "ai", &mut io::stdout());
+    clap_complete::generate(shell, &mut cmd, "ai", &mut io::stdout());
 }

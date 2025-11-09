@@ -4,6 +4,7 @@ pub mod analyzer;
 pub mod checkpoint;
 
 use ai_agent_common::*;
+use rig::completion::CompletionModel;
 use crate::agents::AgentPool;
 use petgraph::graph::DiGraph;
 
@@ -25,7 +26,7 @@ impl WorkflowEngine {
         })
     }
 
-    pub async fn execute(&mut self, agents: &AgentPool) -> Result<String> {
+    pub async fn execute<M:CompletionModel>(&mut self, agents: &AgentPool<M>) -> Result<String> {
         todo!("Execute workflow graph with wave-based execution")
     }
 

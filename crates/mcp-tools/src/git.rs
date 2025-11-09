@@ -1,6 +1,6 @@
 use ai_agent_common::*;
-use mcp_core::{Tool, Content, ToolError};
 use async_trait::async_trait;
+use crate::Tool;
 
 pub struct GitTool;
 
@@ -20,7 +20,7 @@ impl Tool for GitTool {
         "Git operations: log, blame, diff, commit"
     }
 
-    async fn call(&self, args: serde_json::Value) -> std::result::Result<Vec<Content>, ToolError> {
+    async fn call(&self, args: serde_json::Value) -> anyhow::Result<String> {
         todo!("Execute git commands")
     }
 }

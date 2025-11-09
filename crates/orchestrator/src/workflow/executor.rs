@@ -1,4 +1,7 @@
 use ai_agent_common::*;
+use rig::completion::CompletionModel;
+
+use crate::workflow::builder::SubTask;
 
 pub struct WaveExecutor {
     file_locks: std::sync::Arc<tokio::sync::RwLock<std::collections::HashMap<std::path::PathBuf, TaskId>>>,
@@ -9,10 +12,10 @@ impl WaveExecutor {
         todo!("Initialize executor")
     }
 
-    pub async fn execute_wave(
+    pub async fn execute_wave<M:CompletionModel>(
         &self,
         tasks: Vec<SubTask>,
-        agents: &crate::agents::AgentPool,
+        agents: &crate::agents::AgentPool<M>,
     ) -> Result<Vec<TaskResult>> {
         todo!("Execute tasks in parallel with locking")
     }

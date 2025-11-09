@@ -1,6 +1,8 @@
 use ai_agent_common::*;
 use tokio::sync::mpsc;
 
+use crate::hitl::assessor::RiskLevel;
+
 pub struct ApprovalQueue {
     tx: mpsc::Sender<ApprovalRequest>,
     rx: mpsc::Receiver<ApprovalResponse>,
@@ -11,13 +13,6 @@ pub struct ApprovalRequest {
     pub task_id: TaskId,
     pub description: String,
     pub risk_level: RiskLevel,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum RiskLevel {
-    Low,
-    Medium,
-    High,
 }
 
 #[derive(Debug, Clone)]

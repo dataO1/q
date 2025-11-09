@@ -5,11 +5,11 @@ edition = "2021"
 
 [dependencies]
 ai-agent-common = { path = "../common" }
-tokio = { version = "1.37", features = ["full"] }
-sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
-pgvector = "0.4"
-lru = "0.12"
-serde = "1.0"
-async-trait = "0.1"
-rig-core = "0.3"
-anyhow = "1.0"
+tokio = { version = "*", features = ["full"] }
+sqlx = { version = "*", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+pgvector = "*"
+lru = "*"
+serde = "*"
+async-trait = "*"
+rig-core = "*"
+anyhow = "*"

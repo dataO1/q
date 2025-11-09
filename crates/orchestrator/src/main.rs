@@ -1,11 +1,9 @@
-use ai_agent_common::*;
-use orchestrator::{OrchestratorSystem};
-use std::sync::Arc;
-use tokio;
+use ai_agent_common::SystemConfig;
+use ai_agent_orchestrator::OrchestratorSystem;
 
 #[tokio::main]
-async fn main() -> Result<()> {
-// Initialize logging
+async fn main() -> anyhow::Result<()> {  // ← Changed from Result<()> to anyhow::Result<()>
+    // Initialize logging
     tracing_subscriber::fmt::init();
 
     // Load full system configuration from file
@@ -15,7 +13,7 @@ async fn main() -> Result<()> {
     let config = SystemConfig::load(&config_path)?;
 
     // Initialize orchestrator system with full config
-    let mut orchestrator = OrchestratorSystem::new(&config).await?;
+    let mut orchestrator = OrchestratorSystem::<rig::providers::openai::CompletionModel>::new(&config).await?;
 
     println!("Orchestrator service started.");
     println!("Using database: {}", config.storage.postgres_url);

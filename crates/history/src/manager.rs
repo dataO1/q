@@ -1,14 +1,15 @@
 use ai_agent_common::*;
+use rig::completion::CompletionModel;
 use crate::*;
 
-pub struct HistoryManager {
+pub struct HistoryManager<M:CompletionModel> {
     buffer_memory: buffer_memory::BufferMemory,
     semantic_memory: semantic_memory::SemanticMemory,
-    summarizer: summarizer::ProgressiveSummarizer,
+    summarizer: summarizer::ProgressiveSummarizer<M>,
     metadata_tracker: metadata::MetadataTracker,
 }
 
-impl HistoryManager {
+impl<M:CompletionModel> HistoryManager<M> {
     pub async fn new(postgres_url: &str, config: &RagConfig) -> Result<Self> {
         todo!("Initialize history manager")
     }

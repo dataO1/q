@@ -1,6 +1,6 @@
-use ai_agent_common::*;
-use mcp_core::{Tool, Content, ToolError};
 use async_trait::async_trait;
+
+use crate::Tool;
 
 pub struct TreeSitterTool;
 
@@ -20,7 +20,7 @@ impl Tool for TreeSitterTool {
         "Parse code using tree-sitter"
     }
 
-    async fn call(&self, args: serde_json::Value) -> Result<Vec<Content>, ToolError> {
+    async fn call(&self, args: serde_json::Value) -> anyhow::Result<String> {
         todo!("Implement tree-sitter parsing tool")
     }
 }

@@ -6,10 +6,10 @@ edition = "2021"
 [dependencies]
 ai-agent-common = { path = "../common" }
 ai-agent-orchestrator = { path = "../orchestrator" }
-tokio = { version = "1.37", features = ["full"] }
-axum = { version = "0.7", features = ["ws"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["trace", "cors"] }
-serde = "1.0"
-serde_json = "1.0"
-anyhow = "1.0"
+tokio = { version = "*", features = ["full"] }
+axum = { version = "*", features = ["ws"] }
+tower = "*"
+tower-http = { version = "*", features = ["trace", "cors"] }
+serde = "*"
+serde_json = "*"
+anyhow = "*"

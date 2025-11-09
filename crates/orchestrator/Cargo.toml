@@ -16,3 +16,4 @@ chrono = "*"             # Date utilities
 uuid = { version = "*", features = ["v4", "serde"] }
 serde_json = "*"
 async-trait = "*"
+tracing-subscriber = "*"
