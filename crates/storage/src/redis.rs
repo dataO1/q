@@ -21,7 +21,7 @@ impl RedisCache {
 
     pub async fn set(&self, key: &str, value: &str) -> Result<()> {
         let mut conn = self.connection.lock().await;
-        conn.set(key, value).await?;
+        conn.set::<_, _, ()>(key, value).await?;
         Ok(())
     }
 

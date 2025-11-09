@@ -1,6 +1,5 @@
 use ai_agent_common::*;
 use lru::LruCache;
-use std::num::NonZeroUsize;
 
 pub struct BufferMemory {
     cache: LruCache<ConversationId, Vec<Message>>,

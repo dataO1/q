@@ -1,5 +1,5 @@
 use ai_agent_common::SystemConfig;
-use ai_agent_orchestrator::{OllamaModel, OrchestratorSystem};
+use ai_agent_orchestrator::OrchestratorSystem;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {  // ← Changed from Result<()> to anyhow::Result<()>
@@ -13,7 +13,7 @@ async fn main() -> anyhow::Result<()> {  // ← Changed from Result<()> to anyho
     let config = SystemConfig::load(&config_path)?;
 
     // Initialize orchestrator system with full config
-    let mut orchestrator = OrchestratorSystem::new(&config).await?;
+    let orchestrator = OrchestratorSystem::new(&config).await?;
 
     println!("Orchestrator service started.");
     println!("Using database: {}", config.storage.postgres_url);

@@ -1,5 +1,5 @@
 use ai_agent_common::*;
-use tree_sitter::{Parser, Language};
+use tree_sitter::Parser;
 
 pub struct SmartChunker {
     parser: Parser,

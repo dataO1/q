@@ -1,7 +1,6 @@
 use ai_agent_common::*;
 use ai_agent_orchestrator::OrchestratorSystem;
 use axum::{Router, routing::post};
-use rig::completion::CompletionModel;
 use std::sync::Arc;
 
 use crate::routes::execute::AppState;

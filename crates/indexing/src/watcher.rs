@@ -1,5 +1,5 @@
 use ai_agent_common::*;
-use notify::{Watcher, RecursiveMode, Event};
+use notify::Event;
 use tokio::sync::mpsc;
 
 pub struct FileWatcher {

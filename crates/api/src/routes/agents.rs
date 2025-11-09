@@ -1,5 +1,4 @@
 use axum::{response::Json, Extension};
-use rig::completion::CompletionModel;
 use serde_json::json;
 use std::sync::Arc;
 use ai_agent_orchestrator::OrchestratorSystem;
