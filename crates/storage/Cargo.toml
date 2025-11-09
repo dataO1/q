@@ -1,0 +1,14 @@
+[package]
+name = "ai-agent-storage"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ai-agent-common = { path = "../common" }
+sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+pgvector = "0.4"
+qdrant-client = "1.11"
+redis = { version = "0.26", features = ["tokio-comp"] }
+tokio = { version = "1.37", features = ["full"] }
+serde = "1.0"
+anyhow = "1.0"

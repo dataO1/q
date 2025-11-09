@@ -1,0 +1,15 @@
+[package]
+name = "ai-agent-orchestrator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ai-agent-common = { path = "../common" }
+tokio = { version = "1.37", features = ["full"] }
+petgraph = "0.6"
+sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+anyhow = "1.0"
+rig-core = "0.3"
+async-trait = "0.1"
+serde = "1.0"
+tracing = "0.1"

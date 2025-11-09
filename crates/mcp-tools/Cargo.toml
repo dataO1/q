@@ -1,0 +1,12 @@
+[package]
+name = "ai-agent-mcp-tools"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ai-agent-common = { path = "../common" }
+tokio = { version = "1.37", features = ["full"] }
+serde = "1.0"
+mcp-core = "0.1"
+async-trait = "0.1"
+anyhow = "1.0"

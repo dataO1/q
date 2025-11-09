@@ -1,0 +1,127 @@
+ai-agent-system/
+├── Cargo.toml                 # Workspace definition
+├── flake.nix                  # NixOS deployment
+├── config.example.toml        # Configuration template
+├── README.md
+│
+├── crates/
+│   ├── common/               # Shared types and utilities
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── types.rs      # Core types (TaskId, ProjectScope, etc.)
+│   │       ├── error.rs      # Unified error handling
+│   │       └── config.rs     # Configuration loading
+│   │
+│   ├── indexing/             # Persistence Layer
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── main.rs       # Indexing binary
+│   │       ├── watcher.rs    # inotify file watching
+│   │       ├── classifier.rs # Path classification (system/personal/workspace)
+│   │       ├── chunker.rs    # Smart chunking with tree-sitter
+│   │       ├── embedder.rs   # Ollama embedding integration
+│   │       └── storage.rs    # Qdrant storage layer
+│   │
+│   ├── rag/                  # Smart Multi-Source RAG
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── context_manager.rs    # Project scope, token budget
+│   │       ├── query_enhancer.rs     # LLM-based query expansion
+│   │       ├── source_router.rs      # Hybrid source selection
+│   │       ├── retriever.rs          # Multi-source parallel retrieval
+│   │       ├── reranker.rs           # FastEmbed reranking
+│   │       └── context_providers.rs  # @ notation providers
+│   │
+│   ├── history/              # Smart History Manager
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── manager.rs            # Main history manager
+│   │       ├── buffer_memory.rs      # Short-term LRU
+│   │       ├── semantic_memory.rs    # PostgreSQL+pgvector
+│   │       ├── summarizer.rs         # Progressive summarization
+│   │       ├── metadata.rs           # File/topic tracking
+│   │       └── patterns.rs           # Conversation patterns
+│   │
+│   ├── orchestrator/         # Dynamic Agent Network
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── main.rs       # Orchestrator binary
+│   │       ├── agents/
+│   │       │   ├── mod.rs
+│   │       │   ├── pool.rs           # Agent pool management
+│   │       │   ├── orchestrator.rs   # Llama 3.3 orchestrator
+│   │       │   ├── coding.rs         # Qwen2.5-Coder agent
+│   │       │   ├── planning.rs       # Qwen2.5 planning
+│   │       │   └── writing.rs        # Qwen2.5 writing
+│   │       ├── workflow/
+│   │       │   ├── mod.rs
+│   │       │   ├── builder.rs        # GraphFlow DAG construction
+│   │       │   ├── executor.rs       # Wave-based execution
+│   │       │   ├── analyzer.rs       # Complexity analysis
+│   │       │   └── checkpoint.rs     # State snapshots
+│   │       ├── coordination/
+│   │       │   ├── mod.rs
+│   │       │   ├── file_locks.rs     # File locking manager
+│   │       │   ├── shared_context.rs # Interface registry
+│   │       │   └── conflict.rs       # Conflict detection
+│   │       └── hitl/
+│   │           ├── mod.rs
+│   │           ├── queue.rs          # Approval queue
+│   │           ├── assessor.rs       # Risk assessment
+│   │           └── audit.rs          # Audit logging
+│   │
+│   ├── mcp-tools/            # MCP Tool Implementations
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── lsp.rs        # LSP integration
+│   │       ├── treesitter.rs # Tree-sitter parsing
+│   │       ├── git.rs        # Git operations
+│   │       ├── filesystem.rs # File I/O
+│   │       └── web.rs        # Web search
+│   │
+│   ├── storage/              # Database Adapters
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── qdrant.rs     # Qdrant client
+│   │       ├── postgres.rs   # PostgreSQL client
+│   │       ├── redis.rs      # Redis cache
+│   │       └── migrations/   # SQL migrations
+│   │
+│   ├── api/                  # ACP Server
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── server.rs     # Axum server
+│   │       ├── routes/
+│   │       │   ├── mod.rs
+│   │       │   ├── execute.rs        # Task execution
+│   │       │   ├── stream.rs         # WebSocket streaming
+│   │       │   └── agents.rs         # Agent discovery
+│   │       └── middleware/
+│   │           ├── mod.rs
+│   │           └── logging.rs        # Tracing
+│   │
+│   └── cli/                  # CLI Interface
+│       ├── Cargo.toml
+│       └── src/
+│           ├── main.rs
+│           ├── interactive.rs        # Rustyline mode
+│           ├── oneshot.rs           # Command mode
+│           ├── completions.rs       # Shell completions
+│           └── display.rs           # Status rendering
+│
+├── config/
+│   ├── agents.toml          # Agent definitions
+│   ├── rag.toml             # RAG configuration
+│   └── indexing.toml        # Indexing paths
+│
+└── scripts/
+    ├── setup.sh             # Initial setup
+    └── test.sh              # Testing script
