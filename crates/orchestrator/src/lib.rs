@@ -4,20 +4,21 @@ pub mod coordination;
 pub mod hitl;
 
 use ai_agent_common::*;
+use rig::completion::CompletionModel;
 use std::sync::Arc;
 
-pub struct OrchestratorSystem {
-    agents: agents::AgentPool,
+pub struct OrchestratorSystem<M:CompletionModel> {
+    agents: agents::AgentPool<M>,
     workflow: workflow::WorkflowEngine,
     coordination: coordination::CoordinationLayer,
     hitl: hitl::HitlOrchestrator,
 }
 
-impl OrchestratorSystem {
-    pub async fn new(config: &OrchestratorConfig) -> Result<Self> {
+impl<M:CompletionModel> OrchestratorSystem<M> {
+    pub async fn new(config: &SystemConfig) -> Result<Self> {
         Ok(Self {
-            agents: agents::AgentPool::new(&config.agents).await?,
-            workflow: workflow::WorkflowEngine::new(&config.database_url).await?,
+            agents: agents::AgentPool::new(&config.orchestrator.agents).await?,
+            workflow: workflow::WorkflowEngine::new(&config.storage.postgres_url).await?,
             coordination: coordination::CoordinationLayer::new(),
             hitl: hitl::HitlOrchestrator::new(),
         })

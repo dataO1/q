@@ -5,16 +5,24 @@ use tokio;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Load configuration (TODO: Implement config loading)
-    let config = todo!("Load configuration");
+// Initialize logging
+    tracing_subscriber::fmt::init();
 
-    // Initialize orchestrator system
-    let mut orchestrator = OrchestratorSystem::new(&config.orchestrator).await?;
+    // Load full system configuration from file
+    let config_path = std::env::var("CONFIG_PATH")
+        .unwrap_or_else(|_| "config.toml".to_string());
 
-    // Run server or CLI (TBD in future implementation)
+    let config = SystemConfig::load(&config_path)?;
+
+    // Initialize orchestrator system with full config
+    let mut orchestrator = OrchestratorSystem::new(&config).await?;
+
     println!("Orchestrator service started.");
+    println!("Using database: {}", config.storage.postgres_url);
 
-    // Placeholder: run indefinitely or wait for shutdown
+    // Run indefinitely or wait for shutdown signal
     tokio::signal::ctrl_c().await?;
+
+    println!("Shutting down orchestrator...");
     Ok(())
 }
