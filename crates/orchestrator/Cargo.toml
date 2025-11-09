@@ -13,6 +13,6 @@ serde = "*"
 tracing = "*"
 rig-core = "*"           # Rig agent system
 chrono = "*"             # Date utilities
-uuid = { features = ["v4", "serde"] }
+uuid = { version = "*", features = ["v4", "serde"] }
 serde_json = "*"
 async-trait = "*"
