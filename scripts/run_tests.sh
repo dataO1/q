@@ -48,10 +48,6 @@ echo ""
 echo "Running common crate tests..."
 cargo test -p ai-agent-common
 
-# Cleanup
-echo ""
-echo "🧹 Cleaning up test infrastructure..."
-docker-compose -f docker-compose.test.yml down -v
 
 ############################ INDEXING ############################
 
@@ -66,5 +62,13 @@ cargo test -p ai-agent-indexing --test watcher_integration_test
 
 # Run specific test
 cargo test -p ai-agent-indexing test_gitignore_filtering
+
+# Run all indexing tests
+cargo test -p ai-agent-indexing --test pipeline_test -- --ignored --test-threads=1
+
+# Cleanup
+echo ""
+echo "🧹 Cleaning up test infrastructure..."
+docker-compose -f docker-compose.test.yml down -v
 
 echo "✅ All tests complete!"

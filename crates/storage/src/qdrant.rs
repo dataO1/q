@@ -22,18 +22,26 @@ impl QdrantClient {
         Ok(Self { inner })
     }
 
-    /// Create a collection with proper configuration
+/// Create a collection with the given name and vector size
     pub async fn create_collection(&self, name: &str, vector_size: u64) -> Result<()> {
-        let create_collection = CreateCollectionBuilder::new(name)
-            .vectors_config(VectorParamsBuilder::new(vector_size, Distance::Cosine))
-            .build();
+        use qdrant_client::qdrant::{CreateCollectionBuilder, Distance, VectorParamsBuilder};
 
-        self.inner
-            .create_collection(create_collection)
-            .await
+        self.inner.create_collection(
+            CreateCollectionBuilder::new(name)
+                .vectors_config(VectorParamsBuilder::new(vector_size, Distance::Cosine))
+        ).await
             .context(format!("Failed to create collection: {}", name))?;
 
-        tracing::info!("Created Qdrant collection: {}", name);
+        tracing::info!("Created collection: {}", name);
+        Ok(())
+    }
+
+
+    pub async fn delete_collection(&self, name: &str) -> Result<()> {
+        self.inner.delete_collection(name).await
+            .context(format!("Failed to create collection: {}", name))?;
+
+        tracing::info!("Created collection: {}", name);
         Ok(())
     }
 

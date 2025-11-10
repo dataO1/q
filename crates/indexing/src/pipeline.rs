@@ -42,7 +42,7 @@ impl IndexingPipeline {
         info!("Indexing file: {} → {}", file_path.display(), collection);
 
         // Build Qdrant storage
-        let qdrant = SwiftideQdrant::builder()
+        let qdrant = SwiftideQdrant::try_from_url(&self.qdrant_url)?
             .batch_size(50)
             .vector_size(768)  // nomic-embed-text dimension
             .collection_name(collection)
@@ -112,7 +112,7 @@ impl IndexingPipeline {
         }
 
         // Build Qdrant storage
-        let qdrant = SwiftideQdrant::builder()
+        let qdrant = SwiftideQdrant::try_from_url(&self.qdrant_url)?
             .batch_size(50)
             .vector_size(768)
             .collection_name(collection)
@@ -161,7 +161,7 @@ impl IndexingPipeline {
     }
 
     /// Check if file is a code file
-    fn is_code_file(&self, path: &Path) -> bool {
+    pub fn is_code_file(&self, path: &Path) -> bool {
         let code_extensions = [
             "rs", "py", "js", "ts", "jsx", "tsx",
             "c", "cpp", "h", "hpp", "go", "java",
