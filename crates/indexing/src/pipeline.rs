@@ -57,29 +57,32 @@ impl IndexingPipeline {
     }
 
     /// Index a single file with Redis-based deduplication
+/// Index a file with automatic upsert (updates existing points by ID)
     pub async fn index_file(&self, file_path: &Path, tier: CollectionTier) -> Result<()> {
         let collection = tier.collection_name();
 
         info!("Indexing file: {} → {}", file_path.display(), collection);
 
+        // Qdrant builder with upsert enabled (default behavior)
         let qdrant = SwiftideQdrant::try_from_url(&self.qdrant_url)?
             .batch_size(50)
             .vector_size(384)
             .with_vector(EmbeddedField::Combined)
             .with_sparse_vector(EmbeddedField::Combined)
-            .collection_name(collection.clone())
+            .collection_name(collection)
             .build()?;
 
         let is_code = self.is_code_file(file_path);
         let mut pipeline = Pipeline::from_loader(FileLoader::new(file_path));
 
         if is_code {
+            let language = self.detect_language(file_path)?;  // ✅ Unwrap to String
             pipeline = pipeline
-                // 1. Chunk code with tree-sitter
-                .then_chunk(ChunkCode::try_for_language_and_chunk_size("rust", 10..self.chunk_size)?)
-                // 2. Filter already cached nodes (Redis deduplication)
+                // 1. Chunk with tree-sitter (generates stable chunk IDs)
+                .then_chunk(ChunkCode::try_for_language_and_chunk_size(language, 10..self.chunk_size)?)
+                // 2. Filter cached (skip unchanged chunks via Redis)
                 .filter_cached(self.redis_cache.clone())
-                // 3. Generate Q&A metadata (only for new nodes)
+                // 3. Q&A metadata
                 .then(MetadataQACode::from_client(self.ollama_client.clone()).build()?)
                 // 4. Sparse embeddings
                 .then_in_batch(
@@ -91,7 +94,7 @@ impl IndexingPipeline {
                     transformers::Embed::new(self.fastembed_dense.clone())
                         .with_batch_size(32)
                 )
-                // 6. Store (and cache in Redis)
+                // 6. Upsert to Qdrant (automatic - updates if ID exists, inserts if new)
                 .then_store_with(qdrant);
         } else {
             pipeline = pipeline
@@ -109,12 +112,12 @@ impl IndexingPipeline {
         }
 
         pipeline.run().await?;
-        info!("Successfully indexed/cached: {}", file_path.display());
+        info!("✓ Indexed/updated: {}", file_path.display());
         Ok(())
     }
 
     /// Detect programming language from file extension
-    fn detect_language(&self, path: &Path) -> Result<String> {
+    fn detect_language(&self, path: &Path) -> Result<&str> {
         let ext = path.extension()
             .and_then(|e| e.to_str())
             .context("No file extension")?;
@@ -128,10 +131,9 @@ impl IndexingPipeline {
             "java" => "java",
             "c" | "cpp" | "cc" => "cpp",
             _ => "rust", // fallback
-        }.to_string())
+        })
     }
 
-    /// Index directory with Redis caching
     pub async fn index_directory(
         &self,
         dir_path: &Path,
@@ -147,17 +149,18 @@ impl IndexingPipeline {
             loader = loader.with_extensions(extensions);
         }
 
+        let language = self.detect_language(dir_path)?;  // ✅ Unwrap to String
         let qdrant = SwiftideQdrant::try_from_url(&self.qdrant_url)?
             .batch_size(50)
             .vector_size(384)
             .with_vector(EmbeddedField::Combined)
             .with_sparse_vector(EmbeddedField::Combined)
-            .collection_name(collection.clone())
+            .collection_name(collection)
             .build()?;
 
         Pipeline::from_loader(loader)
-            .then_chunk(ChunkCode::try_for_language_and_chunk_size("rust", 10..self.chunk_size)?)
-            .filter_cached(self.redis_cache.clone())  // ← Skip cached chunks
+            .then_chunk(ChunkCode::try_for_language_and_chunk_size(language, 10..self.chunk_size)?)
+            .filter_cached(self.redis_cache.clone())
             .then(MetadataQACode::from_client(self.ollama_client.clone()).build()?)
             .then_in_batch(
                 transformers::SparseEmbed::new(self.fastembed_sparse.clone())
@@ -171,7 +174,7 @@ impl IndexingPipeline {
             .run()
             .await?;
 
-        info!("Successfully indexed directory: {}", dir_path.display());
+        info!("✓ Indexed directory: {}", dir_path.display());
         Ok(())
     }
 
