@@ -20,7 +20,7 @@ ignore = "*"
 mime_guess = "*"
 dirs = "*"
 # Swiftide with correct features
-swiftide = { version = "*", features = ["ollama", "qdrant", "tree-sitter"] }
+swiftide = { version = "*", features = ["ollama", "qdrant", "tree-sitter", "fastembed"] }
 swiftide-indexing = "*"
 swiftide-integrations = { version = "*", features = ["ollama", "qdrant"] }
 

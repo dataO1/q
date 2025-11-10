@@ -4,10 +4,18 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 // Correct Swiftide 0.32 imports
-use swiftide::indexing::{self, Pipeline};
-use swiftide::indexing::loaders::FileLoader;
-use swiftide::indexing::transformers::{ChunkCode, ChunkMarkdown, Embed};
-use swiftide::integrations::{ollama::Ollama, qdrant::Qdrant as SwiftideQdrant};
+use swiftide::indexing::{
+    EmbeddedField,
+    loaders::FileLoader,
+    transformers::{self, ChunkCode, ChunkMarkdown, MetadataQACode, Embed},
+    Pipeline,
+};
+use swiftide::integrations::{
+    ollama::Ollama,
+    fastembed::FastEmbed,
+    qdrant::Qdrant as SwiftideQdrant,
+};
+
 use tracing::{info, warn};
 
 /// Indexing pipeline using Swiftide
@@ -15,85 +23,113 @@ pub struct IndexingPipeline {
     ollama_client: Ollama,
     qdrant_url: String,
     chunk_size: usize,
+    fastembed_sparse: FastEmbed,
+    fastembed_dense: FastEmbed,
 }
 
 impl IndexingPipeline {
     /// Create a new indexing pipeline from configuration
+    /// Create a new indexing pipeline with hybrid search support
     pub fn new(config: &SystemConfig) -> Result<Self> {
         let ollama_client = Ollama::builder()
             .default_embed_model("nomic-embed-text")
             .build()?;
 
+        // Initialize FastEmbed for both dense and sparse embeddings
+        let fastembed_dense = FastEmbed::try_default()
+            .context("Failed to initialize dense embedder")?
+            .to_owned();
+
+        let fastembed_sparse = FastEmbed::try_default_sparse()
+            .context("Failed to initialize sparse embedder")?
+            .to_owned();
+
         Ok(Self {
             ollama_client,
+            fastembed_dense,
+            fastembed_sparse,
             qdrant_url: config.storage.qdrant_url.clone(),
             chunk_size: config.indexing.chunk_size,
         })
     }
 
     /// Index a single file into the appropriate collection tier
-    pub async fn index_file(
-        &self,
-        file_path: &Path,
-        tier: CollectionTier,
-    ) -> Result<()> {
+/// Index a single file with hybrid search support
+    pub async fn index_file(&self, file_path: &Path, tier: CollectionTier) -> Result<()> {
         let collection = tier.collection_name();
 
         info!("Indexing file: {} → {}", file_path.display(), collection);
 
-        // Build Qdrant storage
+        // Build Qdrant with hybrid search (dense + sparse)
         let qdrant = SwiftideQdrant::try_from_url(&self.qdrant_url)?
             .batch_size(50)
-            .vector_size(768)  // nomic-embed-text dimension
-            .collection_name(collection)
+            .vector_size(384)  // FastEmbed default size
+            .with_vector(EmbeddedField::Combined)
+            .with_sparse_vector(EmbeddedField::Combined)
+            .collection_name(collection.clone())
             .build()?;
 
-        // Determine if it's code or markdown
         let is_code = self.is_code_file(file_path);
+        let mut pipeline = Pipeline::from_loader(FileLoader::new(file_path));
 
-        // Build the pipeline
-        let mut pipeline = Pipeline::from_loader(
-            FileLoader::new(file_path)
-        );
-
-        // Add appropriate chunker
         if is_code {
-            if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
-                let language = match ext {
-                    "rs" => "rust",
-                    "py" => "python",
-                    "js" | "jsx" => "javascript",
-                    "ts" | "tsx" => "typescript",
-                    _ => "rust", // fallback
-                };
-
-                pipeline = pipeline.then_chunk(
-                    ChunkCode::try_for_language_and_chunk_size(
-                        language,
-                        10..self.chunk_size,
-                    )?
-                );
-            }
+            pipeline = pipeline
+                // 1. Chunk code with tree-sitter
+                .then_chunk(ChunkCode::try_for_language_and_chunk_size("rust", 10..self.chunk_size)?)
+                // 2. Generate Q&A metadata using Ollama
+                .then(MetadataQACode::from_client(self.ollama_client.clone()).build()?)
+                // 3. Sparse embeddings (keyword-based)
+                .then_in_batch(
+                    transformers::SparseEmbed::new(self.fastembed_sparse.clone())
+                        .with_batch_size(32)
+                )
+                // 4. Dense embeddings (semantic)
+                .then_in_batch(
+                    transformers::Embed::new(self.fastembed_dense.clone())
+                        .with_batch_size(32)
+                )
+                // 5. Store with both vector types
+                .then_store_with(qdrant);
         } else {
-            pipeline = pipeline.then_chunk(
-                ChunkMarkdown::from_chunk_range(10..self.chunk_size)
-            );
+            // For markdown/docs
+            pipeline = pipeline
+                .then_chunk(ChunkMarkdown::from_chunk_range(10..self.chunk_size))
+                .then_in_batch(
+                    transformers::SparseEmbed::new(self.fastembed_sparse.clone())
+                        .with_batch_size(32)
+                )
+                .then_in_batch(
+                    transformers::Embed::new(self.fastembed_dense.clone())
+                        .with_batch_size(32)
+                )
+                .then_store_with(qdrant);
         }
 
-        // Add embedding and storage
-        pipeline = pipeline
-            .then_in_batch(Embed::new(self.ollama_client.clone()))
-            .then_store_with(qdrant);
-
-        // Run the pipeline
-        pipeline.run().await
-            .context(format!("Failed to index file: {}", file_path.display()))?;
-
+        pipeline.run().await?;
         info!("Successfully indexed: {}", file_path.display());
         Ok(())
     }
 
+    /// Detect programming language from file extension
+    fn detect_language(&self, path: &Path) -> Result<String> {
+        let ext = path.extension()
+            .and_then(|e| e.to_str())
+            .context("No file extension")?;
+
+        Ok(match ext {
+            "rs" => "rust",
+            "py" => "python",
+            "js" | "jsx" => "javascript",
+            "ts" | "tsx" => "typescript",
+            "go" => "go",
+            "java" => "java",
+            "c" | "cpp" | "cc" => "cpp",
+            _ => "rust", // fallback
+        }.to_string())
+    }
+
     /// Index an entire directory
+/// Index an entire directory
     pub async fn index_directory(
         &self,
         dir_path: &Path,
@@ -105,30 +141,32 @@ impl IndexingPipeline {
         info!("Indexing directory: {} → {}", dir_path.display(), collection);
 
         let mut loader = FileLoader::new(dir_path);
-
-        // Filter by extensions if provided
         if !extensions.is_empty() {
             loader = loader.with_extensions(extensions);
         }
 
-        // Build Qdrant storage
         let qdrant = SwiftideQdrant::try_from_url(&self.qdrant_url)?
             .batch_size(50)
-            .vector_size(768)
-            .collection_name(collection)
+            .vector_size(384)
+            .with_vector(EmbeddedField::Combined)
+            .with_sparse_vector(EmbeddedField::Combined)
+            .collection_name(collection.clone())
             .build()?;
 
-        // Build pipeline with code chunking for all files
         Pipeline::from_loader(loader)
-            .then_chunk(ChunkCode::try_for_language_and_chunk_size(
-                "rust",  // Will auto-detect
-                10..self.chunk_size,
-            )?)
-            .then_in_batch(Embed::new(self.ollama_client.clone()))
+            .then_chunk(ChunkCode::try_for_language_and_chunk_size("rust", 10..self.chunk_size)?)
+            .then(MetadataQACode::from_client(self.ollama_client.clone()).build()?)
+            .then_in_batch(
+                transformers::SparseEmbed::new(self.fastembed_sparse.clone())
+                    .with_batch_size(32)
+            )
+            .then_in_batch(
+                transformers::Embed::new(self.fastembed_dense.clone())
+                    .with_batch_size(32)
+            )
             .then_store_with(qdrant)
             .run()
-            .await
-            .context(format!("Failed to index directory: {}", dir_path.display()))?;
+            .await?;
 
         info!("Successfully indexed directory: {}", dir_path.display());
         Ok(())

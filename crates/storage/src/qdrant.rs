@@ -22,8 +22,36 @@ impl QdrantClient {
         Ok(Self { inner })
     }
 
-/// Create a collection with the given name and vector size
-    pub async fn create_collection(&self, name: &str, vector_size: u64) -> Result<()> {
+/// Create a collection with hybrid search support (dense + sparse vectors)
+    async fn create_collection_hybrid(&self, name: &str, vector_size: u64) -> Result<()> {
+        use qdrant_client::qdrant::{
+            CreateCollectionBuilder,
+            Distance,
+            VectorParamsBuilder,
+            SparseVectorParamsBuilder,
+            SparseVectorsConfigBuilder,  // ← This is the key type
+        };
+
+        // Build sparse vector config properly
+        let mut sparse_config = SparseVectorsConfigBuilder::default();
+        sparse_config.add_named_vector_params(
+            "sparse",  // Name for the sparse vector
+            SparseVectorParamsBuilder::default()
+        );
+
+        self.inner.create_collection(
+            CreateCollectionBuilder::new(name)
+                .vectors_config(VectorParamsBuilder::new(vector_size, Distance::Cosine))
+                .sparse_vectors_config(sparse_config)  // ← Use the builder, not params
+        ).await
+            .context(format!("Failed to create hybrid collection: {}", name))?;
+
+        tracing::info!("Created hybrid collection: {} (dense: {}, sparse: enabled)", name, vector_size);
+        Ok(())
+    }
+
+    /// Create a simple collection with only dense vectors
+    async fn create_collection(&self, name: &str, vector_size: u64) -> Result<()> {
         use qdrant_client::qdrant::{CreateCollectionBuilder, Distance, VectorParamsBuilder};
 
         self.inner.create_collection(
@@ -32,7 +60,7 @@ impl QdrantClient {
         ).await
             .context(format!("Failed to create collection: {}", name))?;
 
-        tracing::info!("Created collection: {}", name);
+        tracing::info!("Created collection: {} (vector size: {})", name, vector_size);
         Ok(())
     }
 
@@ -54,10 +82,12 @@ impl QdrantClient {
     }
 
     /// Ensure collection exists, create if missing
-    pub async fn ensure_collection(&self, name: &str, vector_size: u64) -> Result<()> {
-        if !self.collection_exists(name).await? {
-            self.create_collection(name, vector_size).await?;
+    async fn ensure_collection(&self, collection_name: &str) -> Result<()> {
+        if !self.collection_exists(collection_name).await? {
+            tracing::info!("Creating hybrid collection: {}", collection_name);
+            self.create_collection_hybrid(collection_name, 768).await?;
         }
+
         Ok(())
     }
 
