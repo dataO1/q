@@ -2,10 +2,13 @@ use ai_agent_common::config::{SystemConfig};
 use ai_agent_indexing::pipeline::IndexingCoordinator;
 use ai_agent_indexing::watcher::FileWatcher;
 use ai_agent_indexing::classifier::PathClassifier;
+use ai_agent_storage::QdrantClient;
 use anyhow::Result;
-use tracing::{info, error};
+use swiftide::integrations::qdrant::Qdrant;
+use tracing::{debug, error, info};
 use clap::Parser;
-use std::path::PathBuf;
+use tracing_subscriber::{fmt, EnvFilter};
+use tracing::Level;
 
 #[derive(Parser)]
 #[command(name = "indexer")]
@@ -18,15 +21,20 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Parse CLI args
     let cli = Cli::parse();
 
-    // Initialize logging
+    // Enhanced logging with backtrace support
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("info".parse().unwrap())
+            EnvFilter::from_default_env()
+                .add_directive(Level::DEBUG.into())  // Default to DEBUG
+                .add_directive("swiftide=trace".parse().unwrap())  // ← Swiftide TRACE
+                .add_directive("ai_agent_indexing=trace".parse().unwrap())
+                .add_directive("ai_agent_storage=trace".parse().unwrap())
         )
+        .with_target(true)  // Show module paths
+        .with_line_number(true)  // Show line numbers
+        .with_thread_ids(true)
         .init();
 
     info!("🚀 Starting AI Agent File Indexer");
@@ -34,73 +42,87 @@ async fn main() -> Result<()> {
 
     // Load configuration
     let config = SystemConfig::load_config(&cli.config)?;
+    debug!("Loaded config: {:#?}", config);  // ← Add debug
 
     // Verify services
-    verify_services(&config).await?;
+    info!("🔍 Verifying services...");
+    if let Err(e) = verify_services(&config).await {
+        error!("Service verification failed: {:?}", e);
+        error!("Backtrace: {:?}", std::backtrace::Backtrace::force_capture());
+        return Err(e);
+    }
 
-    // Initialize components
-    let coordinator = IndexingCoordinator::new(config.clone())?;
-    let classifier = PathClassifier::new(&config.indexing);
-
-    // Collect all paths to watch
-    let mut watch_paths = Vec::new();
-    watch_paths.extend(config.indexing.workspace_paths.clone());
-    watch_paths.extend(config.indexing.personal_paths.clone());
-    watch_paths.extend(config.indexing.system_paths.clone());
-
-    // Create watcher with paths
-    let mut watcher = FileWatcher::new(watch_paths, config.indexing.filters.clone())?;
+    // Initialize coordinator with debug
+    debug!("Creating IndexingCoordinator...");
+    let coordinator = IndexingCoordinator::new(config.clone())
+        .map_err(|e| {
+            error!("Failed to create coordinator: {:?}", e);
+            error!("Backtrace: {:?}", std::backtrace::Backtrace::force_capture());
+            e
+        })?;
 
     // Initial indexing
     info!("📚 Starting initial indexing...");
     coordinator.initial_index().await?;
     info!("✅ Initial indexing complete");
 
-    // Start watching
-    info!("👁️  File watcher is active");
-    info!("✨ Indexer running! Press Ctrl+C to stop.");
 
     // Event loop
-    loop {
-        // Watch returns a single event (it's async)
-        match watcher.watch().await {
-            Ok(event) => {
-                info!("📝 File event: {} - {}", event.event_type(), event.path().display());
+    if (config.indexing.watch_enabled){
+        // Collect all paths to watch
+        let mut watch_paths = Vec::new();
+        watch_paths.extend(config.indexing.workspace_paths.clone());
+        watch_paths.extend(config.indexing.personal_paths.clone());
+        watch_paths.extend(config.indexing.system_paths.clone());
+        let classifier = PathClassifier::new(&config.indexing);
 
-                // Classify the file (this is also async now)
-                match classifier.classify(&event.path()).await {
-                    Ok(result) => {
-                        info!("📂 Classified as: {:?} tier", result.tier);
+        // Create watcher with paths
+        let mut watcher = FileWatcher::new(watch_paths, config.indexing.filters.clone())?;
+        info!("👁️  File watcher is watching: {:?}", watcher.get_watched_paths());
+        info!("✨ Indexer running! Press Ctrl+C to stop.");
+        loop {
+            // Watch returns a single event (it's async)
+            match watcher.watch().await {
+                Ok(event) => {
+                    info!("📝 File event: {} - {}", event.event_type(), event.path().display());
 
-                        // Handle the event
-                        match coordinator.handle_file_event(
-                            &event.path(),
-                            &event.event_type(),
-                            result.tier,
-                        ).await {
-                            Ok(_) => info!("✅ Indexed: {}", event.path().display()),
-                            Err(e) => error!("❌ Failed to index {}: {}", event.path().display(), e),
+                    // Classify the file (this is also async now)
+                    match classifier.classify(&event.path()).await {
+                        Ok(result) => {
+                            info!("📂 Classified as: {:?} tier", result.tier);
+
+                            // Handle the event
+                            match coordinator.handle_file_event(
+                                &event.path(),
+                                &event.event_type(),
+                                result.tier,
+                            ).await {
+                                Ok(_) => info!("✅ Indexed: {}", event.path().display()),
+                                Err(e) => error!("❌ Failed to index {}: {}", event.path().display(), e),
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to classify {}: {}", event.path().display(), e);
                         }
                     }
-                    Err(e) => {
-                        error!("Failed to classify {}: {}", event.path().display(), e);
-                    }
                 }
-            }
-            Err(e) => {
-                error!("Watcher error: {}", e);
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                Err(e) => {
+                    error!("Watcher error: {}", e);
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                }
             }
         }
     }
+    Ok(())
 }
 
 /// Verify required services are running
 async fn verify_services(config: &SystemConfig) -> Result<()> {
     info!("🔍 Verifying services...");
-
     // Check Qdrant
-    match reqwest::get(&format!("{}/", config.storage.qdrant_url)).await {
+    let client = QdrantClient::new(&config.storage.qdrant_url)?;
+    // let client = Qdrant::try_from_url(&config.storage.qdrant_url)?.build()?;
+    match client.health_check().await{
         Ok(_) => info!("✅ Qdrant: {}", config.storage.qdrant_url),
         Err(e) => {
             error!("❌ Qdrant not available at {}: {}", config.storage.qdrant_url, e);

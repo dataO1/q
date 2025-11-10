@@ -145,6 +145,7 @@ impl FileWatcher {
     /// Process raw notify event into FileEvent
     fn process_event(&self, event: Event) -> Option<FileEvent> {
         use notify::EventKind;
+        tracing::error!("File watcher got event: {:?}", event);
 
         match event.kind {
             EventKind::Create(_) => {
@@ -286,6 +287,10 @@ impl FileWatcher{
 
     pub fn is_ignored_by_gitignore(&self, path: &Path) -> bool {
         self.is_ignored_by_gitignore_internal(path)
+    }
+
+    pub fn get_watched_paths(&self) -> &Vec<PathBuf> {
+        &self.watched_paths
     }
 }
 // Test-only access via cfg(test)

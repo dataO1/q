@@ -1,6 +1,7 @@
 pub mod watcher;
 pub mod classifier;
 pub mod pipeline;
+pub mod chunk_adaptive;
 
 pub use watcher::{FileWatcher, FileEvent};
 pub use classifier::{PathClassifier, ClassificationResult};

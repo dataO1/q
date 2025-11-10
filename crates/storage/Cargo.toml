@@ -7,7 +7,6 @@ edition = "2021"
 ai-agent-common = { path = "../common" }
 sqlx = { version = "*", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
 pgvector = "*"
-qdrant-client = "*"
 redis = { version = "*", features = ["tokio-comp"] }
 tokio = { version = "*", features = ["full"] }
 serde = "*"
@@ -16,6 +15,7 @@ anyhow = "*"
 tracing = "*"
 uuid = { version = "*", features = ["v4", "serde"] }
 chrono = "*"             # Date utilities
+swiftide = { version = "*", features = ["qdrant"] }
 
 
 [dev-dependencies]

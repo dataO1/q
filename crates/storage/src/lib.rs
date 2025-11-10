@@ -3,7 +3,7 @@ pub mod qdrant;
 pub mod redis;
 
 pub use postgres::PostgresClient;
-pub use qdrant::{QdrantClient, SearchResult};
+pub use qdrant::QdrantClient;
 pub use redis::RedisCache;
 
 /// Initialize all storage backends

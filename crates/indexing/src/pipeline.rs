@@ -2,18 +2,17 @@ use ai_agent_common::*;
 use ai_agent_storage::QdrantClient;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use crate::chunk_adaptive::ChunkAdaptive;
 
 // Correct Swiftide 0.32 imports
 use swiftide::indexing::{
-    EmbeddedField,
     loaders::FileLoader,
-    transformers::{self, ChunkCode, ChunkMarkdown, MetadataQACode, Embed},
+    transformers::{self,  MetadataQACode},
     Pipeline,
 };
 use swiftide::integrations::{
     ollama::Ollama,
     fastembed::FastEmbed,
-    qdrant::Qdrant as SwiftideQdrant,
     redis::Redis,
 };
 
@@ -22,96 +21,80 @@ use tracing::{info, warn};
 /// Indexing pipeline using Swiftide
 pub struct IndexingPipeline {
     ollama_client: Ollama,
-    qdrant_url: String,
-    chunk_size: usize,
+    qdrant_client: QdrantClient,
     fastembed_sparse: FastEmbed,
     fastembed_dense: FastEmbed,
     redis_cache: Redis,  // ← Add Redis cache
+    config: IndexingConfig//
 }
 
 impl IndexingPipeline {
     /// Create a new indexing pipeline from configuration
     /// Create a new indexing pipeline with hybrid search support
      pub fn new(config: &SystemConfig) -> Result<Self> {
+        tracing::debug!("Creating IndexingPipeline");
+
+        tracing::debug!("Building Ollama client...");
         let ollama_client = Ollama::builder()
             .default_embed_model("nomic-embed-text")
-            .build()?;
+            .default_prompt_model("qwen2.5-coder:7b")
+            .build()
+            .context("Failed to build Ollama client")?;
 
-        let fastembed_dense = FastEmbed::try_default()?.to_owned();
-        let fastembed_sparse = FastEmbed::try_default_sparse()?.to_owned();
+        tracing::debug!("Initializing FastEmbed dense...");
+        let fastembed_dense = FastEmbed::try_default()
+            .context("Failed to initialize dense embedder")?
+            .to_owned();
+
+        tracing::debug!("Initializing FastEmbed sparse...");
+        let fastembed_sparse = FastEmbed::try_default_sparse()
+            .context("Failed to initialize sparse embedder")?
+            .to_owned();
+
+        tracing::debug!("Creating Redis cache...");
+        let redis_cache = Redis::try_from_url(
+            &config.storage.redis_url
+                .clone()
+                .unwrap_or_else(|| "redis://localhost:6379".to_string()),
+            "swiftide-indexing"
+        ).context("Failed to create Redis cache")?;
+
+        tracing::debug!("Initializing Qdrant client...");
+        let qdrant_client = QdrantClient::new(&config.storage.qdrant_url.to_string())
+            .context("Failed to create Qdrant client")?;
 
         // Initialize Redis for caching indexed nodes
-        let redis_cache = Redis::try_from_url(
-            &config.storage.redis_url.clone().unwrap_or_else(|| "redis://localhost:6379".to_string()),
-            "swiftide-indexing"  // Cache namespace
-        )?;
 
         Ok(Self {
             ollama_client,
             fastembed_dense,
             fastembed_sparse,
             redis_cache,
-            qdrant_url: config.storage.qdrant_url.clone(),
-            chunk_size: config.indexing.chunk_size,
+            qdrant_client,
+            config: config.indexing.clone()
         })
     }
 
     /// Index a single file with Redis-based deduplication
 /// Index a file with automatic upsert (updates existing points by ID)
-    pub async fn index_file(&self, file_path: &Path, tier: CollectionTier) -> Result<()> {
+    pub async fn index_directory(&self, file_path: &Path, tier: CollectionTier) -> Result<()> {
         let collection = tier.collection_name();
 
         info!("Indexing file: {} → {}", file_path.display(), collection);
 
         // Qdrant builder with upsert enabled (default behavior)
-        let qdrant = SwiftideQdrant::try_from_url(&self.qdrant_url)?
-            .batch_size(50)
-            .vector_size(384)
-            .with_vector(EmbeddedField::Combined)
-            .with_sparse_vector(EmbeddedField::Combined)
-            .collection_name(collection)
-            .build()?;
+        let qdrant = self.qdrant_client.indexing_client(&collection)?;
 
-        let is_code = self.is_code_file(file_path);
-        let mut pipeline = Pipeline::from_loader(FileLoader::new(file_path));
+        let pipeline = self.create_pipeline(file_path,&["rs", "md"])
+            .map_err(|err| {
+                tracing::error!("Failed to create pipeline: {:?}", err);
+                err
+            })?;
 
-        if is_code {
-            let language = self.detect_language(file_path)?;  // ✅ Unwrap to String
-            pipeline = pipeline
-                // 1. Chunk with tree-sitter (generates stable chunk IDs)
-                .then_chunk(ChunkCode::try_for_language_and_chunk_size(language, 10..self.chunk_size)?)
-                // 2. Filter cached (skip unchanged chunks via Redis)
-                .filter_cached(self.redis_cache.clone())
-                // 3. Q&A metadata
-                .then(MetadataQACode::from_client(self.ollama_client.clone()).build()?)
-                // 4. Sparse embeddings
-                .then_in_batch(
-                    transformers::SparseEmbed::new(self.fastembed_sparse.clone())
-                        .with_batch_size(32)
-                )
-                // 5. Dense embeddings
-                .then_in_batch(
-                    transformers::Embed::new(self.fastembed_dense.clone())
-                        .with_batch_size(32)
-                )
-                // 6. Upsert to Qdrant (automatic - updates if ID exists, inserts if new)
-                .then_store_with(qdrant);
-        } else {
-            pipeline = pipeline
-                .then_chunk(ChunkMarkdown::from_chunk_range(10..self.chunk_size))
-                .filter_cached(self.redis_cache.clone())
-                .then_in_batch(
-                    transformers::SparseEmbed::new(self.fastembed_sparse.clone())
-                        .with_batch_size(32)
-                )
-                .then_in_batch(
-                    transformers::Embed::new(self.fastembed_dense.clone())
-                        .with_batch_size(32)
-                )
-                .then_store_with(qdrant);
-        }
-
-        pipeline.run().await?;
+        pipeline
+            .then_store_with(qdrant)
+            .run()
+            .await?;
         info!("✓ Indexed/updated: {}", file_path.display());
         Ok(())
     }
@@ -134,52 +117,30 @@ impl IndexingPipeline {
         })
     }
 
-    pub async fn index_directory(
-        &self,
-        dir_path: &Path,
-        tier: CollectionTier,
-        extensions: &[&str],
-    ) -> Result<()> {
-        let collection = tier.collection_name();
+    fn create_pipeline(&self, path: &Path, extensions: &[&str],
+) -> Result<Pipeline<String>>{
 
-        info!("Indexing directory: {} → {}", dir_path.display(), collection);
-
-        let mut loader = FileLoader::new(dir_path);
-        if !extensions.is_empty() {
-            loader = loader.with_extensions(extensions);
-        }
-
-        let is_code = self.is_code_file(dir_path);
-        if is_code{
-            let language = self.detect_language(dir_path)?;  // ✅ Unwrap to String
-            let qdrant = SwiftideQdrant::try_from_url(&self.qdrant_url)?
-                .batch_size(50)
-                .vector_size(384)
-                .with_vector(EmbeddedField::Combined)
-                .with_sparse_vector(EmbeddedField::Combined)
-                .collection_name(collection)
-                .build()?;
-
-            Pipeline::from_loader(loader)
-                .then_chunk(ChunkCode::try_for_language_and_chunk_size(language, 10..self.chunk_size)?)
-                .filter_cached(self.redis_cache.clone())
-                .then(MetadataQACode::from_client(self.ollama_client.clone()).build()?)
-                .then_in_batch(
-                    transformers::SparseEmbed::new(self.fastembed_sparse.clone())
-                        .with_batch_size(32)
-                )
-                .then_in_batch(
-                    transformers::Embed::new(self.fastembed_dense.clone())
-                        .with_batch_size(32)
-                )
-                .then_store_with(qdrant)
-                .run()
-                .await?;
-
-        }
-
-        info!("✓ Indexed directory: {}", dir_path.display());
-        Ok(())
+        let file_loader = FileLoader::new(path).with_extensions(extensions);
+        let mut pipeline = Pipeline::from_loader(file_loader);
+        pipeline = pipeline
+            .then_chunk(ChunkAdaptive::default());
+            // 2. Filter cached (skip unchanged chunks via Redis)
+            // .filter_cached(self.redis_cache.clone());
+            // 3. Q&A metadata
+            if self.config.enable_qa_metadata{
+                pipeline = pipeline.then(MetadataQACode::from_client(self.ollama_client.clone()).build()?)
+            }
+            // 4. Sparse embeddings
+            pipeline = pipeline.then_in_batch(
+                transformers::SparseEmbed::new(self.fastembed_sparse.clone())
+                    .with_batch_size(32)
+            )
+            // 5. Dense embeddings
+            .then_in_batch(
+                transformers::Embed::new(self.fastembed_dense.clone())
+                    .with_batch_size(32)
+            );
+        Ok(pipeline)
     }
 
     /// Batch index multiple files
@@ -190,22 +151,11 @@ impl IndexingPipeline {
         let mut results = Vec::new();
 
         for (file_path, tier) in files {
-            let result = self.index_file(&file_path, tier).await;
+            let result = self.index_directory(&file_path, tier).await;
             results.push(result);
         }
 
         Ok(results)
-    }
-
-    /// Re-index a file (delete old, index new)
-    pub async fn reindex_file(
-        &self,
-        file_path: &Path,
-        tier: CollectionTier,
-        _qdrant_client: &QdrantClient,
-    ) -> Result<()> {
-        // Swiftide/Qdrant handles duplicates via point ID
-        self.index_file(file_path, tier).await
     }
 
     /// Check if file is a code file
@@ -216,7 +166,7 @@ impl IndexingPipeline {
             "rb", "php", "swift", "kt", "scala",
         ];
 
-        path.extension()
+        path.is_file() && path.extension()
             .and_then(|ext| ext.to_str())
             .map(|ext| code_extensions.contains(&ext))
             .unwrap_or(false)
@@ -231,10 +181,15 @@ pub struct IndexingCoordinator {
 
 impl IndexingCoordinator {
     pub fn new(config: SystemConfig) -> Result<Self> {
-        Ok(Self {
-            pipeline: IndexingPipeline::new(&config)?,
-            config,
-        })
+        tracing::debug!("Creating IndexingCoordinator");
+        tracing::debug!("Qdrant URL: {}", config.storage.qdrant_url);
+
+        tracing::debug!("Creating IndexingPipeline...");
+        let pipeline = IndexingPipeline::new(&config)
+            .context("Failed to create indexing pipeline")?;
+
+        tracing::debug!("IndexingCoordinator created successfully");
+        Ok(Self { config, pipeline })
     }
 
     /// Handle a file system event
@@ -246,7 +201,7 @@ impl IndexingCoordinator {
     ) -> Result<()> {
         match event_type {
             "created" | "modified" => {
-                self.pipeline.index_file(path, tier).await?;
+                self.pipeline.index_directory(path, tier).await?;
             }
             "deleted" => {
                 // TODO: Implement deletion from Qdrant
@@ -265,22 +220,24 @@ impl IndexingCoordinator {
 
         // Index workspace paths
         for path in &self.config.indexing.workspace_paths {
+            let extensions =  &["rs", "py", "js", "ts", "md"];
             self.pipeline
-                .index_directory(path, CollectionTier::Workspace, &["rs", "py", "js", "ts", "md"])
+                .index_directory(path, CollectionTier::Workspace)
                 .await?;
         }
 
         // Index personal paths
         for path in &self.config.indexing.personal_paths {
+            let extensions =   &["md", "txt", "org"];
             self.pipeline
-                .index_directory(path, CollectionTier::Personal, &["md", "txt", "org"])
+                .index_directory(path, CollectionTier::Personal)
                 .await?;
         }
 
         // Index system paths
         for path in &self.config.indexing.system_paths {
             self.pipeline
-                .index_directory(path, CollectionTier::System, &[])
+                .index_directory(path, CollectionTier::System)
                 .await?;
         }
 
@@ -297,18 +254,11 @@ mod tests {
 
     fn test_config() -> SystemConfig {
         SystemConfig {
-            indexing: IndexingConfig {
-                workspace_paths: vec![],
-                personal_paths: vec![],
-                system_paths: vec![],
-                watch_enabled: true,
-                chunk_size: 512,
-                filters: IndexingFilters::default(),
-            },
+            indexing: IndexingConfig::default(),
             rag: SystemConfig::default().rag,
             orchestrator: SystemConfig::default().orchestrator,
             storage: StorageConfig {
-                qdrant_url: "http://localhost:6333".to_string(),
+                qdrant_url: "http://localhost:16334".to_string(),
                 postgres_url: "postgresql://localhost/test".to_string(),
                 redis_url: None,
             },
@@ -347,7 +297,7 @@ mod tests {
         let pipeline = IndexingPipeline::new(&config).unwrap();
 
         let result = pipeline
-            .index_file(&test_file, CollectionTier::Workspace)
+            .index_directory(&test_file, CollectionTier::Workspace)
             .await;
 
         assert!(result.is_ok());

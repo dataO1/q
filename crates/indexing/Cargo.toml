@@ -31,6 +31,7 @@ swiftide-integrations = { version = "*", features = ["ollama", "qdrant"] }
 redis = "*"
 toml = "*"
 clap = { version = "*", features = ["derive"] }  # ← "derive" feature is crucial
+derive_builder = "*"
 
 [dev-dependencies]
 tempfile = "*"

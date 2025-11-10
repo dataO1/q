@@ -15,19 +15,19 @@ echo ""
 # Step 1: Check if test services are running
 echo -e "${BLUE}📋 Step 1: Checking test services...${NC}"
 
-if ! curl -s http://localhost:16333 > /dev/null; then
-    echo -e "${YELLOW}⚠️  Test Qdrant not running on :16333${NC}"
-    echo -e "${BLUE}Starting test services...${NC}"
-    docker-compose up -d
-    sleep 5
-fi
+# if ! curl -s http://localhost:16333 > /dev/null; then
+#     echo -e "${YELLOW}⚠️  Test Qdrant not running on :16333${NC}"
+#     echo -e "${BLUE}Starting test services...${NC}"
+#     docker-compose up -d
+#     sleep 5
+# fi
 
-if curl -s http://localhost:16333 > /dev/null; then
-    echo -e "${GREEN}✅ Test Qdrant ready${NC}"
-else
-    echo -e "${RED}❌ Failed to start test Qdrant${NC}"
-    exit 1
-fi
+# if , grpcurl -s http://localhost:16333 > /dev/null; then
+#     echo -e "${GREEN}✅ Test Qdrant ready${NC}"
+# else
+#     echo -e "${RED}❌ Failed to start test Qdrant${NC}"
+#     exit 1
+# fi
 
 # if redis-cli -p 16379 ping > /dev/null 2>&1; then
 #     echo -e "${GREEN}✅ Test Redis ready${NC}"
@@ -104,7 +104,7 @@ echo ""
 
 # Step 4: Build the indexer
 echo -e "${BLUE}📋 Step 4: Building indexer...${NC}"
-cargo build -p ai-agent-indexing --bin indexer
+RUSTFLAGS="-Awarnings" cargo build -p ai-agent-indexing --bin indexer
 echo -e "${GREEN}✅ Build complete${NC}"
 echo ""
 
@@ -114,4 +114,7 @@ echo ""
 echo -e "${YELLOW}Try editing files in test-workspace/ to see live indexing!${NC}"
 echo ""
 
-RUST_LOG=info cargo run -p ai-agent-indexing --bin indexer -- --config config.dev.toml
+# export RUST_BACKTRACE=full
+# export RUST_LOG=trace
+export RUST_LOG=info
+cargo run -p ai-agent-indexing --bin indexer -- --config config.dev.toml

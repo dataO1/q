@@ -19,6 +19,7 @@ pub struct IndexingConfig {
     pub chunk_size: usize,
     #[serde(default)]
     pub filters: IndexingFilters,
+    pub enable_qa_metadata: bool,
 }
 
 /// File filtering configuration
@@ -47,6 +48,21 @@ pub struct IndexingFilters {
     /// File size limit in bytes (None = no limit)
     #[serde(default)]
     pub max_file_size: Option<u64>,
+}
+
+impl Default for IndexingConfig{
+
+    fn default() -> Self {
+        Self {
+            workspace_paths: vec![],
+            personal_paths: vec![],
+            system_paths: vec![],
+            watch_enabled: true,
+            chunk_size: 512,
+            filters: IndexingFilters::default(),
+            enable_qa_metadata: false
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -189,6 +205,7 @@ impl Default for SystemConfig {
                 watch_enabled: true,
                 chunk_size: 512,
                 filters: IndexingFilters::default(),
+                enable_qa_metadata: false
             },
             rag: RagConfig {
                 reranking_weights: RerankingWeights {

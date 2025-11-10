@@ -4,16 +4,17 @@ personal_paths = ["./test-notes"]
 system_paths = []
 watch_enabled = true
 chunk_size = 512
+enable_qa_metadata = false  # ← Enable this for better retrieval (slower)
 
 [indexing.filters]
-respect_gitignore = true
+respect_gitignore = false
 include_hidden = false
 ignore_dirs = ["target", "node_modules", ".git"]
 ignore_extensions = ["lock", "log"]
 max_file_size = 10485760
 
 [storage]
-qdrant_url = "http://localhost:16333"      # Test Qdrant
+qdrant_url = "http://localhost:16334"      # Test Qdrant
 postgres_url = "postgresql://test_user:test_pass@localhost:15432/ai_agent_test"
 redis_url = "redis://localhost:16379"       # Test Redis
 
