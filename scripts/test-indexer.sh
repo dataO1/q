@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+export $(cat .env.test | xargs)
+
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
@@ -13,26 +15,26 @@ echo ""
 # Step 1: Check if test services are running
 echo -e "${BLUE}📋 Step 1: Checking test services...${NC}"
 
-if ! curl -s http://localhost:16334 > /dev/null; then
-    echo -e "${YELLOW}⚠️  Test Qdrant not running on :16334${NC}"
+if ! curl -s http://localhost:16333 > /dev/null; then
+    echo -e "${YELLOW}⚠️  Test Qdrant not running on :16333${NC}"
     echo -e "${BLUE}Starting test services...${NC}"
     docker-compose up -d
     sleep 5
 fi
 
-if curl -s http://localhost:16334 > /dev/null; then
+if curl -s http://localhost:16333 > /dev/null; then
     echo -e "${GREEN}✅ Test Qdrant ready${NC}"
 else
     echo -e "${RED}❌ Failed to start test Qdrant${NC}"
     exit 1
 fi
 
-if redis-cli -p 16379 ping > /dev/null 2>&1; then
-    echo -e "${GREEN}✅ Test Redis ready${NC}"
-else
-    echo -e "${RED}❌ Test Redis not available${NC}"
-    exit 1
-fi
+# if redis-cli -p 16379 ping > /dev/null 2>&1; then
+#     echo -e "${GREEN}✅ Test Redis ready${NC}"
+# else
+#     echo -e "${RED}❌ Test Redis not available${NC}"
+#     exit 1
+# fi
 
 # Step 2: Check Ollama
 echo -e "${BLUE}📋 Step 2: Checking Ollama...${NC}"
@@ -112,4 +114,4 @@ echo ""
 echo -e "${YELLOW}Try editing files in test-workspace/ to see live indexing!${NC}"
 echo ""
 
-RUST_LOG=info cargo run -p ai-agent-indexing --bin indexer -- --config config.test.toml
+RUST_LOG=info cargo run -p ai-agent-indexing --bin indexer -- --config config.dev.toml

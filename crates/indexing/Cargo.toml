@@ -30,7 +30,7 @@ swiftide-indexing = "*"
 swiftide-integrations = { version = "*", features = ["ollama", "qdrant"] }
 redis = "*"
 toml = "*"
-clap = "*"
+clap = { version = "*", features = ["derive"] }  # ← "derive" feature is crucial
 
 [dev-dependencies]
 tempfile = "*"

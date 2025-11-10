@@ -149,30 +149,34 @@ impl IndexingPipeline {
             loader = loader.with_extensions(extensions);
         }
 
-        let language = self.detect_language(dir_path)?;  // ✅ Unwrap to String
-        let qdrant = SwiftideQdrant::try_from_url(&self.qdrant_url)?
-            .batch_size(50)
-            .vector_size(384)
-            .with_vector(EmbeddedField::Combined)
-            .with_sparse_vector(EmbeddedField::Combined)
-            .collection_name(collection)
-            .build()?;
+        let is_code = self.is_code_file(dir_path);
+        if is_code{
+            let language = self.detect_language(dir_path)?;  // ✅ Unwrap to String
+            let qdrant = SwiftideQdrant::try_from_url(&self.qdrant_url)?
+                .batch_size(50)
+                .vector_size(384)
+                .with_vector(EmbeddedField::Combined)
+                .with_sparse_vector(EmbeddedField::Combined)
+                .collection_name(collection)
+                .build()?;
 
-        Pipeline::from_loader(loader)
-            .then_chunk(ChunkCode::try_for_language_and_chunk_size(language, 10..self.chunk_size)?)
-            .filter_cached(self.redis_cache.clone())
-            .then(MetadataQACode::from_client(self.ollama_client.clone()).build()?)
-            .then_in_batch(
-                transformers::SparseEmbed::new(self.fastembed_sparse.clone())
-                    .with_batch_size(32)
-            )
-            .then_in_batch(
-                transformers::Embed::new(self.fastembed_dense.clone())
-                    .with_batch_size(32)
-            )
-            .then_store_with(qdrant)
-            .run()
-            .await?;
+            Pipeline::from_loader(loader)
+                .then_chunk(ChunkCode::try_for_language_and_chunk_size(language, 10..self.chunk_size)?)
+                .filter_cached(self.redis_cache.clone())
+                .then(MetadataQACode::from_client(self.ollama_client.clone()).build()?)
+                .then_in_batch(
+                    transformers::SparseEmbed::new(self.fastembed_sparse.clone())
+                        .with_batch_size(32)
+                )
+                .then_in_batch(
+                    transformers::Embed::new(self.fastembed_dense.clone())
+                        .with_batch_size(32)
+                )
+                .then_store_with(qdrant)
+                .run()
+                .await?;
+
+        }
 
         info!("✓ Indexed directory: {}", dir_path.display());
         Ok(())

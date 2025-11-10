@@ -4,7 +4,7 @@ set -e
 echo "🚀 Starting test infrastructure..."
 
 # Start test services
-docker-compose -f docker-compose.test.yml up -d
+docker-compose up -d
 
 # Simple wait for services (without docker-compose wait)
 echo "⏳ Waiting for services to be ready..."

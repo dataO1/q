@@ -21,3 +21,6 @@ target
 #.idea/
 .direnv
 crates/indexing/.fastembed_cache
+.fastembed_cache
+test-notes
+test-workspace/src
