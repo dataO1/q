@@ -41,7 +41,7 @@ redis_url = "redis://localhost:6379"
 
     fs::write(&config_path, config_content).unwrap();
 
-    let config = SystemConfig::load(config_path.to_str().unwrap()).unwrap();
+    let config = SystemConfig::from_file(config_path.to_str().unwrap()).unwrap();
 
     assert_eq!(config.indexing.chunk_size, 512);
     assert_eq!(config.rag.max_results, 5);
@@ -83,7 +83,7 @@ postgres_url = "postgresql://localhost/test_db"
 
     fs::write(&config_path, config_content).unwrap();
 
-    let result = SystemConfig::load(config_path.to_str().unwrap());
+    let result = SystemConfig::from_file(config_path.to_str().unwrap());
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("chunk_size"));
 }
@@ -126,7 +126,7 @@ postgres_url = "postgresql://localhost/test_db"
 
     fs::write(&config_path, config_content).unwrap();
 
-    let result = SystemConfig::load(config_path.to_str().unwrap());
+    let result = SystemConfig::from_file(config_path.to_str().unwrap());
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("temperature"));
 }
