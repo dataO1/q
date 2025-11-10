@@ -1,7 +1,6 @@
 use ai_agent_common::*;
 use rig::agent::Agent;
 use rig::completion::CompletionModel;
-use async_trait::async_trait;
 use std::sync::Arc;
 
 /// Coding agent specialized for code generation and fixes

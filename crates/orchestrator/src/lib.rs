@@ -4,8 +4,6 @@ pub mod coordination;
 pub mod hitl;
 
 use ai_agent_common::*;
-use rig::completion::CompletionModel;
-use std::sync::Arc;
 
 pub type OllamaModel = rig::providers::ollama::CompletionModel<reqwest::Client>;
 

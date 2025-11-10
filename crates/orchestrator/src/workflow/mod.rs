@@ -4,7 +4,6 @@ pub mod analyzer;
 pub mod checkpoint;
 
 use ai_agent_common::*;
-use rig::completion::CompletionModel;
 use crate::agents::AgentPool;
 use petgraph::graph::DiGraph;
 

@@ -1,5 +1,6 @@
 [indexing]
-workspace_paths = ["./test-workspace"]
+# workspace_paths = ["./test-workspace"]
+workspace_paths = ["./crates"]
 personal_paths = ["./test-notes"]
 system_paths = []
 watch_enabled = true
@@ -7,7 +8,7 @@ chunk_size = 512
 enable_qa_metadata = false  # ← Enable this for better retrieval (slower)
 
 [indexing.filters]
-respect_gitignore = false
+respect_gitignore = true
 include_hidden = false
 ignore_dirs = ["target", "node_modules", ".git"]
 ignore_extensions = ["lock", "log"]

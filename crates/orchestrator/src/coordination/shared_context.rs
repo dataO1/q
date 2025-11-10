@@ -1,7 +1,6 @@
 //! Shared context registry used by multiple agents in the orchestration
 
 use std::collections::HashMap;
-use ai_agent_common::*;
 
 pub struct SharedContext {
     interfaces: HashMap<String, String>,  // Interface name → definition

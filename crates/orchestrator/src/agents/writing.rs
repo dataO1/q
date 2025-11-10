@@ -1,7 +1,6 @@
 use ai_agent_common::*;
 use rig::agent::Agent;
-use rig::completion::{Chat, CompletionModel, Prompt, PromptError};
-use async_trait::async_trait;
+use rig::completion::CompletionModel;
 use std::sync::Arc;
 
 /// Writing agent specialized in documentation and explanations

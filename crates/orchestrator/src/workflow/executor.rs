@@ -1,5 +1,4 @@
 use ai_agent_common::*;
-use rig::completion::CompletionModel;
 
 use crate::workflow::builder::SubTask;
 

@@ -1,6 +1,5 @@
 //! Risk assessment for Human-In-The-Loop (HITL) requests
 
-use ai_agent_common::*;
 
 pub struct RiskAssessor;
 

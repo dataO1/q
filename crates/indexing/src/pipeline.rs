@@ -1,29 +1,29 @@
 use ai_agent_common::*;
 use ai_agent_storage::QdrantClient;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
+use serde_json::json;
+use swiftide_indexing::transformers::{ MetadataTitle, MetadataKeywords, MetadataSummary };
+use swiftide_integrations::fastembed::FastEmbed;
+use tree_sitter::{Language, Parser};
 use std::path::{Path, PathBuf};
-use crate::chunk_adaptive::ChunkAdaptive;
+use crate::{chunk_adaptive::ChunkAdaptive, metadata_transformer::ExtractMetadataTransformer};
+// Add all the tree-sitter language crates you want to support
+use tree_sitter;
 
 // Correct Swiftide 0.32 imports
 use swiftide::indexing::{
-    loaders::FileLoader,
-    transformers::{self,  MetadataQACode},
-    Pipeline,
+    loaders::FileLoader, transformers::{self,  MetadataQACode}, Node, Pipeline
 };
 use swiftide::integrations::{
     ollama::Ollama,
-    fastembed::FastEmbed,
     redis::Redis,
 };
 
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 /// Indexing pipeline using Swiftide
 pub struct IndexingPipeline {
-    ollama_client: Ollama,
     qdrant_client: QdrantClient,
-    fastembed_sparse: FastEmbed,
-    fastembed_dense: FastEmbed,
     redis_cache: Redis,  // ← Add Redis cache
     config: IndexingConfig//
 }
@@ -34,22 +34,6 @@ impl IndexingPipeline {
      pub fn new(config: &SystemConfig) -> Result<Self> {
         tracing::debug!("Creating IndexingPipeline");
 
-        tracing::debug!("Building Ollama client...");
-        let ollama_client = Ollama::builder()
-            .default_embed_model("nomic-embed-text")
-            .default_prompt_model("qwen2.5-coder:7b")
-            .build()
-            .context("Failed to build Ollama client")?;
-
-        tracing::debug!("Initializing FastEmbed dense...");
-        let fastembed_dense = FastEmbed::try_default()
-            .context("Failed to initialize dense embedder")?
-            .to_owned();
-
-        tracing::debug!("Initializing FastEmbed sparse...");
-        let fastembed_sparse = FastEmbed::try_default_sparse()
-            .context("Failed to initialize sparse embedder")?
-            .to_owned();
 
         tracing::debug!("Creating Redis cache...");
         let redis_cache = Redis::try_from_url(
@@ -66,9 +50,6 @@ impl IndexingPipeline {
         // Initialize Redis for caching indexed nodes
 
         Ok(Self {
-            ollama_client,
-            fastembed_dense,
-            fastembed_sparse,
             redis_cache,
             qdrant_client,
             config: config.indexing.clone()
@@ -119,27 +100,44 @@ impl IndexingPipeline {
 
     fn create_pipeline(&self, path: &Path, extensions: &[&str],
 ) -> Result<Pipeline<String>>{
+        // Example custom transformer to add useful metadata
+        let dense_embedding_model = Ollama::builder()
+            .default_embed_model("jeffh/intfloat-e5-base-v2:f32")
+            .build()
+            .context("Failed to build dense embedding model client")?;
+        tracing::debug!("Initializing FastEmbed sparse...");
+        let sparse_embedding_model = FastEmbed::try_default_sparse()
+            .context("Failed to initialize sparse embedder")?
+            .to_owned();
+        let prompt_client = Ollama::builder()
+            .default_prompt_model("qwen2.5-coder:7b")
+            .build()
+            .context("Failed to build Ollama prompt client")?;
 
         let file_loader = FileLoader::new(path).with_extensions(extensions);
         let mut pipeline = Pipeline::from_loader(file_loader);
         pipeline = pipeline
-            .then_chunk(ChunkAdaptive::default());
-            // 2. Filter cached (skip unchanged chunks via Redis)
-            // .filter_cached(self.redis_cache.clone());
-            // 3. Q&A metadata
-            if self.config.enable_qa_metadata{
-                pipeline = pipeline.then(MetadataQACode::from_client(self.ollama_client.clone()).build()?)
-            }
-            // 4. Sparse embeddings
-            pipeline = pipeline.then_in_batch(
-                transformers::SparseEmbed::new(self.fastembed_sparse.clone())
-                    .with_batch_size(32)
-            )
-            // 5. Dense embeddings
-            .then_in_batch(
-                transformers::Embed::new(self.fastembed_dense.clone())
-                    .with_batch_size(32)
-            );
+            .then(MetadataTitle::new(prompt_client.clone()))
+            .then(MetadataSummary::new(prompt_client.clone()))
+            .then(MetadataKeywords::new(prompt_client.clone()))
+            .then(ExtractMetadataTransformer::new());
+
+        if self.config.enable_qa_metadata{
+            pipeline = pipeline.then(MetadataQACode::from_client(prompt_client.clone()).build()?)
+        }
+        pipeline = pipeline.then_chunk(ChunkAdaptive::default())
+        // 2. Filter cached (skip unchanged chunks via Redis)
+        // .filter_cached(self.redis_cache.clone());
+        // 4. Sparse embeddings
+        .then_in_batch(
+            transformers::SparseEmbed::new(sparse_embedding_model.clone())
+                .with_batch_size(32)
+        )
+        // 5. Dense embeddings
+        .then_in_batch(
+            transformers::Embed::new(dense_embedding_model.clone())
+                .with_batch_size(32)
+        );
         Ok(pipeline)
     }
 

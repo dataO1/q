@@ -1,7 +1,6 @@
 use ai_agent_common::*;
 use rig::agent::Agent;
 use rig::completion::CompletionModel;
-use async_trait::async_trait;
 use std::sync::Arc;
 
 /// Planning agent for strategy, architecture, task sequencing

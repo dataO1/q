@@ -12,7 +12,6 @@ ai-agent-common = { path = "../common" }
 ai-agent-storage = { path = "../storage" }
 tokio = { version = "*", features = ["full"] }
 notify = "*"
-tree-sitter = "*"
 reqwest = { version = "*", features = ["json", "rustls-tls"] }
 qdrant-client = "*"
 serde = "*"
@@ -32,6 +31,29 @@ redis = "*"
 toml = "*"
 clap = { version = "*", features = ["derive"] }  # ← "derive" feature is crucial
 derive_builder = "*"
+# supported tree-sitter languages
+tree-sitter = "*"
+tree-sitter-rust = "*"
+tree-sitter-python = "*"
+tree-sitter-javascript = "*"
+tree-sitter-typescript = "*"
+tree-sitter-java = "*"
+tree-sitter-c = "*"
+tree-sitter-cpp = "*"
+tree-sitter-go = "*"
+tree-sitter-haskell = "*"
+tree-sitter-lua = "*"
+tree-sitter-yaml = "*"
+tree-sitter-bash = "*"
+tree-sitter-html = "*"
+tree-sitter-json = "*"
+tree-sitter-ruby = "*"
+tree-sitter-asciidoc = "*"
+tree-sitter-xml = "*"
+# tree-sitter-dockerfile = "*"
+tree-sitter-md = "*"
+tree-sitter-yarn = "*"
+
 
 [dev-dependencies]
 tempfile = "*"
@@ -39,3 +61,4 @@ tokio-test = "*"
 mime_guess = "*"
 dirs = "*"
 redis = "*"
+

@@ -3,7 +3,6 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use ai_agent_common::*;
 
 pub struct ConflictDetector {
     locked_files: HashSet<PathBuf>,

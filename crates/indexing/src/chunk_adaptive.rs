@@ -5,10 +5,12 @@ use anyhow::{Context as _, Result};
 use async_trait::async_trait;
 use derive_builder::Builder;
 
+use serde_json::json;
 use swiftide::{indexing::{transformers::ChunkCode, IndexingStream, TextNode}, traits::ChunkerTransformer};
 use swiftide_indexing::transformers::{ChunkMarkdown, ChunkText};
 use swiftide_integrations::treesitter::SupportedLanguages;
 use tracing::info;
+use tree_sitter::Parser;
 
 const DEFAULT_MAX_CHAR_SIZE: usize = 2056;
 /// The `ChunkCode` struct is responsible for chunking code into smaller pieces
@@ -87,6 +89,7 @@ impl ChunkAdaptive {
             _ => "text", // fallback
         }
     }
+
 }
 
 #[async_trait]
@@ -105,9 +108,10 @@ impl ChunkerTransformer for ChunkAdaptive {
     /// # Errors
     /// - If the code splitting fails, an error is sent downstream.
     #[tracing::instrument(skip_all, name = "transformers.my_custom_chunker")]
-    async fn transform_node(&self, node: TextNode) -> IndexingStream<String> {
+    async fn transform_node(&self, mut node: TextNode) -> IndexingStream<String> {
         // Simply return the stream from ChunkCode
         let lang = self.detect_language(&node.path);
+        node.metadata.insert("language".to_string(), json!(lang));
         match lang{
             "markdown" => {
                 info!("Transforming markdown node");

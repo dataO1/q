@@ -1,8 +1,6 @@
 use ai_agent_common::*;
 use rig::agent::Agent;
-use rig::completion::CompletionModel;
 use std::sync::Arc;
-use reqwest::Client;
 
 use crate::OllamaModel;
 
