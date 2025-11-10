@@ -14,6 +14,7 @@ use swiftide::integrations::{
     ollama::Ollama,
     fastembed::FastEmbed,
     qdrant::Qdrant as SwiftideQdrant,
+    redis::Redis,
 };
 
 use tracing::{info, warn};
@@ -25,45 +26,45 @@ pub struct IndexingPipeline {
     chunk_size: usize,
     fastembed_sparse: FastEmbed,
     fastembed_dense: FastEmbed,
+    redis_cache: Redis,  // ← Add Redis cache
 }
 
 impl IndexingPipeline {
     /// Create a new indexing pipeline from configuration
     /// Create a new indexing pipeline with hybrid search support
-    pub fn new(config: &SystemConfig) -> Result<Self> {
+     pub fn new(config: &SystemConfig) -> Result<Self> {
         let ollama_client = Ollama::builder()
             .default_embed_model("nomic-embed-text")
             .build()?;
 
-        // Initialize FastEmbed for both dense and sparse embeddings
-        let fastembed_dense = FastEmbed::try_default()
-            .context("Failed to initialize dense embedder")?
-            .to_owned();
+        let fastembed_dense = FastEmbed::try_default()?.to_owned();
+        let fastembed_sparse = FastEmbed::try_default_sparse()?.to_owned();
 
-        let fastembed_sparse = FastEmbed::try_default_sparse()
-            .context("Failed to initialize sparse embedder")?
-            .to_owned();
+        // Initialize Redis for caching indexed nodes
+        let redis_cache = Redis::try_from_url(
+            &config.storage.redis_url.clone().unwrap_or_else(|| "redis://localhost:6379".to_string()),
+            "swiftide-indexing"  // Cache namespace
+        )?;
 
         Ok(Self {
             ollama_client,
             fastembed_dense,
             fastembed_sparse,
+            redis_cache,
             qdrant_url: config.storage.qdrant_url.clone(),
             chunk_size: config.indexing.chunk_size,
         })
     }
 
-    /// Index a single file into the appropriate collection tier
-/// Index a single file with hybrid search support
+    /// Index a single file with Redis-based deduplication
     pub async fn index_file(&self, file_path: &Path, tier: CollectionTier) -> Result<()> {
         let collection = tier.collection_name();
 
         info!("Indexing file: {} → {}", file_path.display(), collection);
 
-        // Build Qdrant with hybrid search (dense + sparse)
         let qdrant = SwiftideQdrant::try_from_url(&self.qdrant_url)?
             .batch_size(50)
-            .vector_size(384)  // FastEmbed default size
+            .vector_size(384)
             .with_vector(EmbeddedField::Combined)
             .with_sparse_vector(EmbeddedField::Combined)
             .collection_name(collection.clone())
@@ -76,24 +77,26 @@ impl IndexingPipeline {
             pipeline = pipeline
                 // 1. Chunk code with tree-sitter
                 .then_chunk(ChunkCode::try_for_language_and_chunk_size("rust", 10..self.chunk_size)?)
-                // 2. Generate Q&A metadata using Ollama
+                // 2. Filter already cached nodes (Redis deduplication)
+                .filter_cached(self.redis_cache.clone())
+                // 3. Generate Q&A metadata (only for new nodes)
                 .then(MetadataQACode::from_client(self.ollama_client.clone()).build()?)
-                // 3. Sparse embeddings (keyword-based)
+                // 4. Sparse embeddings
                 .then_in_batch(
                     transformers::SparseEmbed::new(self.fastembed_sparse.clone())
                         .with_batch_size(32)
                 )
-                // 4. Dense embeddings (semantic)
+                // 5. Dense embeddings
                 .then_in_batch(
                     transformers::Embed::new(self.fastembed_dense.clone())
                         .with_batch_size(32)
                 )
-                // 5. Store with both vector types
+                // 6. Store (and cache in Redis)
                 .then_store_with(qdrant);
         } else {
-            // For markdown/docs
             pipeline = pipeline
                 .then_chunk(ChunkMarkdown::from_chunk_range(10..self.chunk_size))
+                .filter_cached(self.redis_cache.clone())
                 .then_in_batch(
                     transformers::SparseEmbed::new(self.fastembed_sparse.clone())
                         .with_batch_size(32)
@@ -106,7 +109,7 @@ impl IndexingPipeline {
         }
 
         pipeline.run().await?;
-        info!("Successfully indexed: {}", file_path.display());
+        info!("Successfully indexed/cached: {}", file_path.display());
         Ok(())
     }
 
@@ -128,8 +131,7 @@ impl IndexingPipeline {
         }.to_string())
     }
 
-    /// Index an entire directory
-/// Index an entire directory
+    /// Index directory with Redis caching
     pub async fn index_directory(
         &self,
         dir_path: &Path,
@@ -155,6 +157,7 @@ impl IndexingPipeline {
 
         Pipeline::from_loader(loader)
             .then_chunk(ChunkCode::try_for_language_and_chunk_size("rust", 10..self.chunk_size)?)
+            .filter_cached(self.redis_cache.clone())  // ← Skip cached chunks
             .then(MetadataQACode::from_client(self.ollama_client.clone()).build()?)
             .then_in_batch(
                 transformers::SparseEmbed::new(self.fastembed_sparse.clone())
