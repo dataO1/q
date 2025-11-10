@@ -402,6 +402,7 @@ mod tests {
             watch_enabled: true,
             chunk_size: 512,
             filters: IndexingFilters::default(),
+            enable_qa_metadata: false,
         }
     }
 
