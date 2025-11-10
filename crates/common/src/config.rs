@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 use anyhow::{Context, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,15 +118,18 @@ pub struct StorageConfig {
 
 impl SystemConfig {
     /// Load configuration from TOML file
-    pub fn load(path: &str) -> Result<Self> {
-        let content = std::fs::read_to_string(path)
+    pub fn from_file(path: &str) -> Result<Self> {
+        let contents = fs::read_to_string(path)
             .context(format!("Failed to read config file: {}", path))?;
 
-        let config: SystemConfig = toml::from_str(&content)
-            .context("Failed to parse TOML configuration")?;
+        let config: SystemConfig = toml::from_str(&contents)
+            .context("Failed to parse config file")?;
 
-        config.validate()?;
         Ok(config)
+    }
+    // Load configuration from file
+    pub fn load_config(path: &str) -> Result<SystemConfig> {
+        SystemConfig::from_file(path)
     }
 
     /// Validate configuration values

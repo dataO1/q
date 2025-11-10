@@ -117,7 +117,7 @@ impl IndexingPipeline {
     }
 
     /// Detect programming language from file extension
-    fn detect_language(&self, path: &Path) -> Result<&str> {
+    pub fn detect_language(&self, path: &Path) -> Result<&str> {
         let ext = path.extension()
             .and_then(|e| e.to_str())
             .context("No file extension")?;

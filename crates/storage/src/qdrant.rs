@@ -23,7 +23,7 @@ impl QdrantClient {
     }
 
 /// Create a collection with hybrid search support (dense + sparse vectors)
-    async fn create_collection_hybrid(&self, name: &str, vector_size: u64) -> Result<()> {
+    pub async fn create_collection_hybrid(&self, name: &str, vector_size: u64) -> Result<()> {
         use qdrant_client::qdrant::{
             CreateCollectionBuilder,
             Distance,
@@ -51,7 +51,7 @@ impl QdrantClient {
     }
 
     /// Create a simple collection with only dense vectors
-    async fn create_collection(&self, name: &str, vector_size: u64) -> Result<()> {
+    pub async fn create_collection(&self, name: &str, vector_size: u64) -> Result<()> {
         use qdrant_client::qdrant::{CreateCollectionBuilder, Distance, VectorParamsBuilder};
 
         self.inner.create_collection(
@@ -82,10 +82,10 @@ impl QdrantClient {
     }
 
     /// Ensure collection exists, create if missing
-    async fn ensure_collection(&self, collection_name: &str) -> Result<()> {
+    pub async fn ensure_collection(&self, collection_name: &str, vector_size: u64) -> Result<()> {
         if !self.collection_exists(collection_name).await? {
             tracing::info!("Creating hybrid collection: {}", collection_name);
-            self.create_collection_hybrid(collection_name, 768).await?;
+            self.create_collection_hybrid(collection_name,vector_size).await?;
         }
 
         Ok(())

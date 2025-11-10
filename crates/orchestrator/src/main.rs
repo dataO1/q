@@ -10,7 +10,7 @@ async fn main() -> anyhow::Result<()> {  // ← Changed from Result<()> to anyho
     let config_path = std::env::var("CONFIG_PATH")
         .unwrap_or_else(|_| "config.toml".to_string());
 
-    let config = SystemConfig::load(&config_path)?;
+    let config = SystemConfig::from_file(&config_path)?;
 
     // Initialize orchestrator system with full config
     let orchestrator = OrchestratorSystem::new(&config).await?;

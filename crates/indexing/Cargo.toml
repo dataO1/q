@@ -3,6 +3,10 @@ name = "ai-agent-indexing"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "indexer"
+path = "src/bin/indexer.rs"
+
 [dependencies]
 ai-agent-common = { path = "../common" }
 ai-agent-storage = { path = "../storage" }
@@ -16,17 +20,21 @@ serde_json = "*"
 anyhow = "*"
 async-trait = "*"
 tracing = "*"
+tracing-subscriber = { version = "*", features = ["env-filter"] }
 ignore = "*"
 mime_guess = "*"
 dirs = "*"
 # Swiftide with correct features
-swiftide = { version = "*", features = ["ollama", "qdrant", "tree-sitter",
-"fastembed", "redis"] }
+swiftide = { version = "*", features = ["ollama", "qdrant", "tree-sitter", "fastembed", "redis"] }
 swiftide-indexing = "*"
 swiftide-integrations = { version = "*", features = ["ollama", "qdrant"] }
+redis = "*"
+toml = "*"
+clap = "*"
 
 [dev-dependencies]
 tempfile = "*"
 tokio-test = "*"
 mime_guess = "*"
 dirs = "*"
+redis = "*"
