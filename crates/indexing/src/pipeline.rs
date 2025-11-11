@@ -110,13 +110,14 @@ impl IndexingPipeline {
             .context("Failed to initialize sparse embedder")?
             .to_owned();
         let prompt_client = Ollama::builder()
-            .default_prompt_model("qwen2.5-coder:7b")
+            .default_prompt_model("llama3.1:8b")
             .build()
             .context("Failed to build Ollama prompt client")?;
 
         let file_loader = FileLoader::new(path).with_extensions(extensions);
         let mut pipeline = Pipeline::from_loader(file_loader);
         pipeline = pipeline
+            .filter_cached(self.redis_cache.clone())
             .then(MetadataTitle::new(prompt_client.clone()))
             .then(MetadataSummary::new(prompt_client.clone()))
             .then(MetadataKeywords::new(prompt_client.clone()))
@@ -126,8 +127,6 @@ impl IndexingPipeline {
             pipeline = pipeline.then(MetadataQACode::from_client(prompt_client.clone()).build()?)
         }
         pipeline = pipeline.then_chunk(ChunkAdaptive::default())
-        // 2. Filter cached (skip unchanged chunks via Redis)
-        // .filter_cached(self.redis_cache.clone());
         // 4. Sparse embeddings
         .then_in_batch(
             transformers::SparseEmbed::new(sparse_embedding_model.clone())
