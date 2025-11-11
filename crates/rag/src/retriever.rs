@@ -70,12 +70,12 @@ impl RetrieverSource for QdrantRetriever {
 }
 
 pub struct MultiSourceRetriever {
-    sources: Vec<Arc<dyn RetrieverSource>>,
+    sources: Vec<Arc<dyn RetrieverSource + Send + Sync>>,
     embedder: Arc<SparseTextEmbedding>,
 }
 
 impl MultiSourceRetriever {
-pub async fn new(qdrant_url: &str) -> Result<Self> {
+    pub async fn new(qdrant_url: &str) -> Result<Self> {
         let qdrant_client = QdrantClient::new(qdrant_url)?;
         let embedder = SparseTextEmbedding::try_new(
                 SparseInitOptions::new(SparseModel::SPLADEPPV1)
@@ -87,6 +87,21 @@ pub async fn new(qdrant_url: &str) -> Result<Self> {
             embedder: Arc::new(embedder),
         })
     }
+    pub fn embedder(&self) -> &Arc<SparseTextEmbedding> {
+        &self.embedder
+    }
+
+    pub fn sources(&self) -> &[Arc<dyn RetrieverSource + Send + Sync>] {
+        &self.sources
+    }
+
+    pub fn embed_query(
+        &self,
+        texts: Vec<&str>,
+        _context: Option<&ProjectScope>,
+    ) -> Result<Vec<SparseEmbedding>> {
+        self.embedder.embed(texts, None)
+    }
 
     /// Retrieve all sources, then rerank and deduplicate combined results before streaming out in batches
     pub fn retrieve_stream<'a>(
@@ -95,8 +110,9 @@ pub async fn new(qdrant_url: &str) -> Result<Self> {
         project_scope: &'a ProjectScope,
     ) -> Pin<Box<dyn Stream<Item = Result<Vec<ContextFragment>>> + Send + 'a>> {
         let sources = self.sources.clone();
+        let queries = queries.clone(); // clone here to move into async block
 
-        Box::pin(try_stream! {
+        let stream = Box::pin(try_stream! {
             // Collect all results from all sources
             let mut all_results = Vec::<(ContextFragment, SparseEmbedding)>::new();
 
@@ -112,18 +128,43 @@ pub async fn new(qdrant_url: &str) -> Result<Self> {
 
             // Generate query embedding for reranking - TODO replace with actual embedding
             let query_text = queries.get(0).map(|(_, q)| q.as_str()).unwrap_or("");
-            let query_embedding = self.embedder.embed(vec![query_text; 1],None)
-                .context("Failed to create query embedding")?
-                .first().unwrap();
+            let q = vec![query_text; 1];
+            let query_embedding = self.embedder.embed(q, None)?;
 
             // Rerank & deduplicate on combined results
-            let reranked = Reranker::rerank_and_deduplicate(query_embedding, &all_results);
+            let reranked = Reranker::rerank_and_deduplicate(query_embedding.first().unwrap(), &all_results);
 
-            // Stream reranked results in batches (e.g., batches of 10)
-            for batch in &reranked.into_iter().chunks(10) {
-                let batch_vec: Vec<_> = batch.collect();
-                yield batch_vec;
+            // Stream reranked results in batches of 10
+            for batch in reranked.as_slice().chunks(10) {
+                // Clone references to get owned Vec<ContextFragment>
+                let batch_owned: Vec<ContextFragment> = batch.iter()
+                    .map(|fragment| fragment.clone())
+                    .collect();
+
+                yield batch_owned;
             }
-        })
+        });
+        stream
+    }
+}
+
+#[async_trait]
+impl RetrieverSource for MultiSourceRetriever {
+    fn priority(&self) -> Priority {
+        0
+    }
+
+    async fn retrieve(
+        &self,
+        queries: Vec<(CollectionTier, String)>,
+        project_scope: &ProjectScope,
+    ) -> Result<Vec<(ContextFragment, SparseEmbedding)>> {
+        // Collect combined results from all sources
+        let mut all_results = Vec::new();
+        for source in self.sources.iter() {
+            let partial_results = source.retrieve(queries.clone(), project_scope).await?;
+            all_results.extend(partial_results);
+        }
+        Ok(all_results)
     }
 }
