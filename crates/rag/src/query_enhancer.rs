@@ -2,31 +2,63 @@ use anyhow::{Context, Result};
 use ai_agent_common::{ProjectScope, ConversationId};
 use async_trait::async_trait;
 use moka::future::Cache;
-use redis::AsyncCommands;
-use rust_tokenizers::{tokenizer::Tokenizer, BertTokenizer};
+use tokenizers::pre_tokenizers::whitespace::Whitespace;
+use tokenizers::processors::template::TemplateProcessing;
+use tokenizers::{Tokenizer, models::wordpiece::WordPiece, normalizers::BertNormalizer};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 pub struct QueryEnhancer {
     ollama_client: OllamaClient,
     mem_cache: Cache<String, String>,
-    redis_client: redis::Client,
+    redis_client: RedisCache,
     redis_cache_prefix: String,
-    tokenizer: BertTokenizer,
+    tokenizer: Tokenizer,
+}
+
+fn create_bert_tokenizer(vocab_path: &str) -> tokenizers::Result<Tokenizer> {
+    let wordpiece = WordPiece::from_file(vocab_path)
+        .unk_token("[UNK]".into())
+        .build()?;
+
+    let mut tokenizer = Tokenizer::new(wordpiece);
+
+    // Set BERT-style normalizer
+    tokenizer.with_normalizer(Some(BertNormalizer::default()));
+
+    // Set whitespace pre-tokenizer (common choice)
+    tokenizer.with_pre_tokenizer(Some(Whitespace::default()));
+
+    // Set post-processor to add special tokens like [CLS], [SEP]
+    let template_processing = TemplateProcessing::builder()
+        .try_single("[CLS] $A [SEP]")?
+        .try_pair("[CLS] $A [SEP] $B [SEP]")?
+        .special_tokens(vec![
+            (String::from("[CLS]"), 101u32),
+            (String::from("[SEP]"), 102u32),
+        ])
+        .build()?;
+    tokenizer.with_post_processor(Some(template_processing));
+
+    Ok(tokenizer)
 }
 
 impl QueryEnhancer {
-    pub fn new(redis_url: &str) -> Result<Self> {
+
+
+    pub fn new(redis_url: &str) -> tokenizers::Result<Self> {
         Ok(Self {
             ollama_client: OllamaClient::new(),
             mem_cache: Cache::new(10000),
-            redis_client: redis::Client::open(redis_url)?,
+            redis_client: RedisCache(redis_url)?,
             redis_cache_prefix: "query_enhancer_cache:".to_string(),
-            tokenizer: BertTokenizer::from_file("path/to/vocab.txt", false).unwrap(), // adjust vocab path
+            tokenizer: create_bert_tokenizer(&"")?, // adjust vocab path
         })
     }
+
 
     /// Apply simple heuristics: synonym expansions, normalization, token filtering
     fn heuristic_expand(&self, query: &str) -> Vec<String> {
@@ -89,7 +121,7 @@ impl QueryEnhancer {
     }
 
     /// Fully enhanced multi-source per-source query generator with layered cache including heuristics and LLM enhancement
-    pub async fn enhance_for_sources(
+    pub async fn enhance(
         &self,
         raw_query: &str,
         project_scope: &ProjectScope,

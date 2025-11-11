@@ -88,19 +88,10 @@ impl CollectionTier {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectScope {
     pub root: PathBuf,
-    pub project_type: ProjectType,
-    pub language: Vec<String>,
+    pub languages: Vec<String>,
     pub current_file: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ProjectType {
-    Rust,
-    JavaScript,
-    Python,
-    Mixed,
-    Unknown,
-}
 
 /// Task type for routing decisions
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -259,25 +250,29 @@ pub enum Language {
     Unknown,
 }
 
-#[derive(Clone, Debug)]
-pub struct ProjectScope {
-    /// Absolute path to root of project repo or workspace
-    pub root_path: String,
-    /// Percentage-split of languages present in the project
-    pub language_distribution: Vec<(Language, f32)>,
+/// Represents a retrieved context document or snippet for RAG
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ContextFragment {
+    /// The main textual content of the fragment
+    pub content: String,
+
+    /// A short summary or title of the fragment
+    pub summary: String,
+
+    /// Source identifier or file path for provenance
+    pub source: String,
+
+    /// Similarity or relevance score (e.g., from retriever)
+    pub score: f32,
 }
 
-
-// common/types.rs
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgentContext {
-    /// Normalized project root directory path
-    pub project_root: String,
-
-    /// Active or relevant programming/document languages for the task
-    pub languages: Vec<String>,
-
-    /// Relevant file types (source, config, docs, etc.)
-    pub file_types: Vec<String>,
+impl ContextFragment {
+    pub fn new(content: impl Into<String>, summary: impl Into<String>, source: impl Into<String>, score: f32) -> Self {
+        Self {
+            content: content.into(),
+            summary: summary.into(),
+            source: source.into(),
+            score,
+        }
+    }
 }

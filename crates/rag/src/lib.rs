@@ -14,7 +14,8 @@ use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use ai_agent_common::{CollectionTier, ContextFragment, ProjectScope, ConversationId};
+use ai_agent_common::{CollectionTier, ContextFragment, ConversationId, ProjectScope, SystemConfig};
+use crate::reranker::Reranker;
 use crate::retriever::{MultiSourceRetriever, Priority};
 use crate::query_enhancer::QueryEnhancer;
 
@@ -24,18 +25,16 @@ pub struct SmartMultiSourceRag {
     query_enhancer: QueryEnhancer,
     source_router: source_router::SourceRouter,
     retriever: MultiSourceRetriever,
-    reranker: Reranker,
 }
 
 impl SmartMultiSourceRag {
     /// Initialize RAG cores
-    pub async fn new(qdrant_url: &str) -> Result<Self> {
+    pub async fn new(config: &SystemConfig) -> anyhow::Result<Self> {
         Ok(Self {
             context_manager: context_manager::ContextManager::new().await?,
-            query_enhancer: QueryEnhancer::new(redis_url),
-            source_router: source_router::SourceRouter::new(),
-            retriever: MultiSourceRetriever::new(qdrant_url).await?,
-            reranker: Reranker::new(),
+            query_enhancer: QueryEnhancer::new(&config.storage.redis_url.as_ref().unwrap())?,
+            source_router: source_router::SourceRouter::new()?,
+            retriever: MultiSourceRetriever::new(&config.storage.qdrant_url).await?,
         })
     }
 
@@ -82,7 +81,7 @@ impl SmartMultiSourceRag {
 
                 if !batch.is_empty() {
                     // Step 5: Rerank batch of fragments before yield
-                    let reranked = rag.reranker.rerank_and_deduplicate(batch).await.context("Reranking failed")?;
+                    let reranked = Reranker::rerank_and_deduplicate(query_embedding,batch);
 
                     for fragment in reranked {
                         yield fragment;

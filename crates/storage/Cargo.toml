@@ -15,7 +15,10 @@ anyhow = "*"
 tracing = "*"
 uuid = { version = "*", features = ["v4", "serde"] }
 chrono = "*"             # Date utilities
-swiftide = { version = "*", features = ["qdrant"] }
+swiftide = { version = "*", features = ["qdrant", "fastembed"] }
+qdrant-client = "*"
+async-trait = "*"
+fastembed = "*"
 
 
 [dev-dependencies]

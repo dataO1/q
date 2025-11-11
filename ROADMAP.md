@@ -30,19 +30,19 @@
         + Design async APIs supporting parallel multi-source retrieval.
         + Support batch processing and streaming response patterns.
         + Coordinate context-aware filtering and query augmentation.
-    1. Query Enhancer Component
+    2. Query Enhancer Component
         + Implement context-aware query reformulation.
         + Use history and context signals to enhance user queries.
         + Integrate small LLM or predefined heuristics for source-specific query generation.
-    2. Source Router Heuristics
+    3. Source Router Heuristics
         + Develop heuristic logic to route queries to local workspace, personal files, online docs, and history sources.
         + Use keyword matching, task type, and context signals.
         + Support LLM-based routing fallback for ambiguity.
-    3. Multi-Source Retriever
+    4. Multi-Source Retriever
         + Implement parallel retrieval from Qdrant, PostgreSQL history, web scrapers, and local caches.
         + Support layered metadata filtering (project root, language, file type).
         + Optimize batching and streaming of retrieved data.
-    4. FastEmbed Reranker
+    5. FastEmbed Reranker
         + Implement embedding-based reranking and deduplication.
         + Use cosine similarity with thresholding.
         + Support dynamic weighting based on recency, dependency chain, and conversation signals.

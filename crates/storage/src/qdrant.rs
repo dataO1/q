@@ -1,173 +1,170 @@
-use anyhow::{Context, Result};
-use async_trait::async_trait;
-use qdrant_client::prelude::*;
-use qdrant_client::qdrant::{
-    Condition, FieldCondition, Filter, Match, MatchValue, SearchPoints,
-};
-use std::sync::Arc;
+use anyhow::{Context, Result, anyhow};
+use qdrant_client::qdrant::r#match::MatchValue;
+use swiftide::integrations::qdrant::{qdrant_client, Qdrant as SwiftideQdrant};
+use swiftide::indexing::EmbeddedField;
+use qdrant_client::qdrant::{Condition, Filter, SearchPointsBuilder};
+use qdrant_client::Qdrant;
+use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use ai_agent_common::{ContextFragment, ProjectScope};
 
-use ai_agent_common::{AgentContext, CollectionTier, ContextFragment, ProjectScope};
-
+/// Hybrid Qdrant client combining Swiftide for indexing and raw qdrant-client for filtered queries
 pub struct QdrantClient {
-    client: Arc<qdrant_client::client::QdrantClient>,
+    url: String,
+    raw_client: Qdrant,
+    embedder: TextEmbedding,
 }
 
 impl QdrantClient {
-    pub fn new(url: &str) -> Result<Self> {
-        let client = qdrant_client::client::QdrantClient::from_url(url).build()?;
+    /// Create new Qdrant client
+    pub async fn new(url: &str) -> anyhow::Result<Self> {
+        let raw_client = Qdrant::from_url(url)
+            .build()
+            .context("Failed to connect to Qdrant")?;
+        let options = InitOptions::new(EmbeddingModel::AllMiniLML6V2);
+        let embedder = TextEmbedding::try_new(
+            options
+        ).context("Failed to initialize FastEmbed embedder")?;
+
         Ok(Self {
-            client: Arc::new(client),
+            url: url.to_string(),
+            raw_client,
+            embedder,
         })
     }
 
-    /// Build Qdrant metadata filter from AgentContext
-    fn build_metadata_filter(&self, agent_ctx: &AgentContext) -> Filter {
-        let mut must_conditions = vec![];
-
-        // Filter 1: Exact match on project_root
-        must_conditions.push(Condition {
-            condition_one_of: None,
-            field: Some(FieldCondition {
-                key: "project_root".to_string(),
-                r#match: Some(Match {
-                    match_value: Some(MatchValue::Keyword(agent_ctx.project_root.clone())),
-                }),
-                range: None,
-                geo_bounding_box: None,
-                geo_radius: None,
-                values_count: None,
-            }),
-        });
-
-        // Filter 2: Match any language in agent_ctx.languages (OR condition)
-        if !agent_ctx.languages.is_empty() {
-            let lang_matches: Vec<Condition> = agent_ctx
-                .languages
-                .iter()
-                .map(|lang| Condition {
-                    condition_one_of: None,
-                    field: Some(FieldCondition {
-                        key: "language".to_string(),
-                        r#match: Some(Match {
-                            match_value: Some(MatchValue::Keyword(lang.clone())),
-                        }),
-                        range: None,
-                        geo_bounding_box: None,
-                        geo_radius: None,
-                        values_count: None,
-                    }),
-                })
-                .collect();
-
-            // Wrap in should condition (OR)
-            if !lang_matches.is_empty() {
-                must_conditions.push(Condition {
-                    condition_one_of: Some(qdrant_client::qdrant::Filter {
-                        should: lang_matches,
-                        must: vec![],
-                        must_not: vec![],
-                    }),
-                    field: None,
-                });
-            }
-        }
-
-        // Filter 3: Match any file_type in agent_ctx.file_types (OR condition)
-        if !agent_ctx.file_types.is_empty() {
-            let filetype_matches: Vec<Condition> = agent_ctx
-                .file_types
-                .iter()
-                .map(|ft| Condition {
-                    condition_one_of: None,
-                    field: Some(FieldCondition {
-                        key: "file_type".to_string(),
-                        r#match: Some(Match {
-                            match_value: Some(MatchValue::Keyword(ft.clone())),
-                        }),
-                        range: None,
-                        geo_bounding_box: None,
-                        geo_radius: None,
-                        values_count: None,
-                    }),
-                })
-                .collect();
-
-            if !filetype_matches.is_empty() {
-                must_conditions.push(Condition {
-                    condition_one_of: Some(qdrant_client::qdrant::Filter {
-                        should: filetype_matches,
-                        must: vec![],
-                        must_not: vec![],
-                    }),
-                    field: None,
-                });
-            }
-        }
-
-        Filter {
-            must: must_conditions,
-            must_not: vec![],
-            should: vec![],
-        }
+    /// Get Swiftide Qdrant client for indexing pipelines
+    pub fn indexing_client(&self, collection: &str) -> Result<SwiftideQdrant> {
+        SwiftideQdrant::try_from_url(&self.url)?
+            .vector_size(384)
+            .batch_size(50)
+            .with_vector(EmbeddedField::Combined)
+            .with_sparse_vector(EmbeddedField::Combined)
+            .collection_name(collection)
+            .build()
+            .context("Failed to build Swiftide Qdrant client")
     }
 
-    /// Query Qdrant collections with metadata pre-filtering
-    pub async fn query_collections(
+    /// Query with metadata filtering using raw qdrant-client
+    pub async fn query_with_filters(
         &self,
-        queries: Vec<(CollectionTier, String)>,
-        project_scope: &ProjectScope,
-        agent_ctx: &AgentContext,
+        collection: &str,
+        query: &str,
+        ctx: &ProjectScope,
+        limit: u64,
     ) -> Result<Vec<ContextFragment>> {
-        let mut results = vec![];
-        let filter = self.build_metadata_filter(agent_ctx);
+        // Generate query embedding
+        let query_embeddings = self.embedder
+            .embed(vec![query.to_string()], None)
+            .context("Failed to embed query")?;
 
-        for (tier, query_text) in queries {
-            let collection_name = tier.to_string();
+        let query_vector = query_embeddings
+            .first()
+            .context("No embedding generated")?
+            .clone();
 
-            // Generate embedding vector for the query_text
-            // TODO: Replace this placeholder with actual embedding generation
-            let query_vector = vec![0.0f32; 384]; // Placeholder dimension
+        // Build metadata filter
+        let filter = self.build_metadata_filter(&ctx)?;
 
-            let search_result = self
-                .client
-                .search_points(&SearchPoints {
-                    collection_name: collection_name.clone(),
-                    vector: query_vector,
-                    filter: Some(filter.clone()),
-                    limit: 50,
-                    with_payload: Some(true.into()),
-                    ..Default::default()
-                })
-                .await
-                .context(format!("Qdrant search failed for collection {}", collection_name))?;
+        // Execute search with filter
+        let search_result = self.raw_client
+            .search_points(
+                SearchPointsBuilder::new(collection, query_vector, limit)
+                    .filter(filter)
+                    .with_payload(true)
+            )
+            .await
+            .context("Qdrant search failed")?;
 
-            // Convert Qdrant points to ContextFragments
-            for scored_point in search_result.result {
-                let payload = scored_point.payload;
-
-                let fragment = ContextFragment {
+        // Convert to ContextFragments
+        Ok(search_result
+            .result
+            .into_iter()
+            .map(|point| {
+                let payload = point.payload;
+                ContextFragment {
                     content: payload
                         .get("content")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("")
+                        .unwrap_or(&"".to_string())
                         .to_string(),
                     summary: payload
                         .get("summary")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("")
+                        .unwrap_or(&"".to_string())
                         .to_string(),
                     source: payload
                         .get("source")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
+                        .unwrap_or(&"".to_string())
                         .to_string(),
-                    score: scored_point.score,
-                };
+                    score: point.score,
+                }
+            })
+            .collect())
+    }
 
-                results.push(fragment);
-            }
-        }
+    /// Build Qdrant metadata filter from AgentContext
+    fn build_metadata_filter(&self, ctx: &ProjectScope) -> Result<Filter> {
+        use qdrant_client::qdrant::{condition::ConditionOneOf, FieldCondition, Match};
 
-        Ok(results)
+        let root = ctx.root.to_str()
+            .ok_or(anyhow!("Invalid UTF-8 in path"))?
+            .to_string();
+
+        let mut must_conditions = vec![];
+
+        // Project root exact match
+        must_conditions.push(Condition {
+            condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
+                // TODO: this assumes the project_root field in the db entry
+                key: "project_root".to_string(),
+                r#match: Some(Match::from(MatchValue::Text(root))),
+                ..Default::default()
+            })),
+        });
+
+        Ok(Filter {
+            must: must_conditions,
+            ..Default::default()
+        })
+    }
+
+    /// Health check
+    pub async fn health_check(&self) -> Result<()> {
+        self.raw_client
+            .health_check()
+            .await
+            .context("Qdrant health check failed")?;
+        Ok(())
+    }
+
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_client_creation() {
+        let client = QdrantClient::new("http://localhost:6333").await;
+        assert!(client.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_filter_building() {
+        let client = QdrantClient::new("http://localhost:6333").await.unwrap();
+        let ctx = ProjectScope {
+            root: PathBuf::from("/workspace".to_string()),
+            languages: vec!["rust".to_string()],
+            current_file: Some(PathBuf::from("data.txt".to_string())),
+        };
+
+        let filter = client.build_metadata_filter(&ctx);
+        assert!(filter.is_ok());
     }
 }
