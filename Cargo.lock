@@ -72,6 +72,8 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "strum",
+ "strum_macros",
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
@@ -198,13 +200,17 @@ dependencies = [
  "reqwest 0.12.24",
  "rig-core",
  "serde",
+ "serde_json",
  "sha2",
  "simsimd",
+ "strum",
+ "strum_macros",
  "swiftide",
  "swiftide-indexing",
  "swiftide-integrations",
  "tokenizers",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

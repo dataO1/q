@@ -73,3 +73,6 @@ mcp-core = "*"  # Adjust version
 
 # Collections
 dashmap = "*"
+
+strum = "*"
+strum_macros = "*"

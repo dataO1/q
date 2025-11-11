@@ -8,6 +8,26 @@ pub struct SystemConfig {
     pub rag: RagConfig,
     pub orchestrator: OrchestratorConfig,
     pub storage: StorageConfig,
+    pub embedding: EmbeddingConfig,
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingConfig {
+    pub ollama_host: String,
+    pub ollama_port: u16,
+    pub model: String,
+    pub batch_size: usize,
+}
+impl EmbeddingConfig {
+    fn default() -> EmbeddingConfig {
+         return Self{
+            ollama_host:"http://localhost".to_string(),
+            ollama_port:11434,
+            model : "nomic-embed-text".to_string(),
+            batch_size : 32
+         }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,6 +153,10 @@ pub struct StorageConfig {
 }
 
 impl SystemConfig {
+    pub fn new(indexing: IndexingConfig, rag: RagConfig, orchestrator: OrchestratorConfig, storage: StorageConfig, embedding: EmbeddingConfig) -> Self {
+        Self { indexing, rag, orchestrator, storage, embedding }
+    }
+
     /// Load configuration from TOML file
     pub fn from_file(path: &str) -> Result<Self> {
         let contents = fs::read_to_string(path)
@@ -225,6 +249,7 @@ impl Default for SystemConfig {
                 postgres_url: "postgresql://localhost/ai_agent".to_string(),
                 redis_url: Some("redis://localhost:6379".to_string()),
             },
+            embedding: EmbeddingConfig::default()
         }
     }
 }

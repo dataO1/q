@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::{fmt::Display, path::PathBuf};
 use std::fmt;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
+use strum_macros::EnumIter;
 
 /// Unique identifier for tasks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -53,7 +54,7 @@ impl fmt::Display for ConversationId {
 }
 
 /// Collection tier for Qdrant (3-layer data filtering)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter)]
 pub enum CollectionTier {
     System,        // System files (/etc, man pages)
     Personal,      // Personal documents
@@ -71,16 +72,6 @@ impl CollectionTier {
             Self::Dependencies => "external_deps",
             Self::Online => "online_docs",
         }
-    }
-
-    pub fn all() -> Vec<Self> {
-        vec![
-            Self::System,
-            Self::Personal,
-            Self::Workspace,
-            Self::Dependencies,
-            Self::Online,
-        ]
     }
 }
 
