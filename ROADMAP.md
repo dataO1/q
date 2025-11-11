@@ -24,10 +24,28 @@
         * Batch processing for efficiency
         * Dense vector generation
 - Phase 3 - RAG (Week 3):
-    * Query enhancer
-    * Source router (heuristics)
-    * Multi-source retriever
-    * FastEmbed reranker
+    1. General RAG Framework and Context Manager
+        + Define core interfaces and abstractions for query enhancement, source routing, retrieval, and reranking.
+        + Integrate common logic models from the existing library crate.
+        + Design async APIs supporting parallel multi-source retrieval.
+        + Support batch processing and streaming response patterns.
+        + Coordinate context-aware filtering and query augmentation.
+    1. Query Enhancer Component
+        + Implement context-aware query reformulation.
+        + Use history and context signals to enhance user queries.
+        + Integrate small LLM or predefined heuristics for source-specific query generation.
+    2. Source Router Heuristics
+        + Develop heuristic logic to route queries to local workspace, personal files, online docs, and history sources.
+        + Use keyword matching, task type, and context signals.
+        + Support LLM-based routing fallback for ambiguity.
+    3. Multi-Source Retriever
+        + Implement parallel retrieval from Qdrant, PostgreSQL history, web scrapers, and local caches.
+        + Support layered metadata filtering (project root, language, file type).
+        + Optimize batching and streaming of retrieved data.
+    4. FastEmbed Reranker
+        + Implement embedding-based reranking and deduplication.
+        + Use cosine similarity with thresholding.
+        + Support dynamic weighting based on recency, dependency chain, and conversation signals.
 - Phase 4 - History (Week 4):
     * Buffer memory (LRU)
     * PostgreSQL semantic search

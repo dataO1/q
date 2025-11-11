@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 ai-agent-common = { path = "../common" }
+indexing = { path = "../indexing" }
 tokio = { version = "*", features = ["full"] }
 fastembed = "*"
 reqwest = { version = "*", features = ["json", "rustls-tls"] }
@@ -13,4 +14,5 @@ serde = "*"
 anyhow = "*"
 rig-core = "*"
 async-trait = "*"
+async-recursion = "*"
 petgraph = "*"

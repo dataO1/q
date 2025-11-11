@@ -66,6 +66,12 @@ cargo test -p ai-agent-indexing test_gitignore_filtering
 # Run all indexing tests
 cargo test -p ai-agent-indexing --test pipeline_test -- --ignored --test-threads=1
 
+
+echo ""
+echo "Running RAG crate tests..."
+cargo test -p ai-agent-rag --ignored
+
+
 # Cleanup
 echo ""
 echo "🧹 Cleaning up test infrastructure..."

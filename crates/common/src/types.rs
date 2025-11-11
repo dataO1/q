@@ -234,3 +234,50 @@ pub enum StatusEvent {
         error: String,
     },
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Language {
+    Rust,
+    Python,
+    JavaScript,
+    TypeScript,
+    Java,
+    C,
+    Cpp,
+    Go,
+    Haskell,
+    Lua,
+    YAML,
+    Bash,
+    HTML,
+    JSON,
+    Ruby,
+    Asciidoc,
+    XML,
+    Markdown,
+    Yarn,
+    Unknown,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProjectScope {
+    /// Absolute path to root of project repo or workspace
+    pub root_path: String,
+    /// Percentage-split of languages present in the project
+    pub language_distribution: Vec<(Language, f32)>,
+}
+
+
+// common/types.rs
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentContext {
+    /// Normalized project root directory path
+    pub project_root: String,
+
+    /// Active or relevant programming/document languages for the task
+    pub languages: Vec<String>,
+
+    /// Relevant file types (source, config, docs, etc.)
+    pub file_types: Vec<String>,
+}

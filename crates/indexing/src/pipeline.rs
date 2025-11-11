@@ -118,9 +118,9 @@ impl IndexingPipeline {
         let mut pipeline = Pipeline::from_loader(file_loader);
         pipeline = pipeline
             .filter_cached(self.redis_cache.clone())
-            .then(MetadataTitle::new(prompt_client.clone()))
-            .then(MetadataSummary::new(prompt_client.clone()))
-            .then(MetadataKeywords::new(prompt_client.clone()))
+            // .then(MetadataTitle::new(prompt_client.clone()))
+            // .then(MetadataSummary::new(prompt_client.clone()))
+            // .then(MetadataKeywords::new(prompt_client.clone()))
             .then(ExtractMetadataTransformer::new());
 
         if self.config.enable_qa_metadata{

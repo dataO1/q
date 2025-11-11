@@ -3,6 +3,82 @@ use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use mime_guess;
+use common::types::Language;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use tokio::fs;
+use tokio_stream::wrappers::ReadDirStream;
+use tokio_stream::StreamExt;
+
+/// Mapping file extensions to Language enum for supported tree-sitter languages
+fn extension_to_language(ext: &str) -> Option<Language> {
+    match ext {
+        "rs" => Some(Language::Rust),
+        "py" => Some(Language::Python),
+        "js" => Some(Language::JavaScript),
+        "ts" => Some(Language::TypeScript),
+        "java" => Some(Language::Java),
+        "c" => Some(Language::C),
+        "cpp" | "cc" | "cxx" | "hpp" | "h" => Some(Language::Cpp),
+        "go" => Some(Language::Go),
+        "hs" => Some(Language::Haskell),
+        "lua" => Some(Language::Lua),
+        "yaml" | "yml" => Some(Language::YAML),
+        "sh" | "bash" => Some(Language::Bash),
+        "html" | "htm" => Some(Language::HTML),
+        "json" => Some(Language::JSON),
+        "rb" => Some(Language::Ruby),
+        "adoc" => Some(Language::Asciidoc),
+        "xml" => Some(Language::XML),
+        "md" => Some(Language::Markdown),
+        "yarn" => Some(Language::Yarn),
+        _ => None,
+    }
+}
+
+/// Detects language distribution within project_root by counting mapped file extensions
+pub async fn detect_language(project_root: &Path) -> Vec<(Language, f32)> {
+    let mut language_counts: HashMap<Language, usize> = HashMap::new();
+    let mut total_files = 0;
+
+    let mut dirs_to_visit = vec![project_root.to_path_buf()];
+
+    while let Some(dir_path) = dirs_to_visit.pop() {
+        let read_dir = match fs::read_dir(&dir_path).await {
+            Ok(rd) => rd,
+            Err(_) => continue,
+        };
+
+        let mut stream = ReadDirStream::new(read_dir);
+        while let Some(entry_res) = stream.next().await {
+            if let Ok(entry) = entry_res {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs_to_visit.push(path);
+                } else {
+                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                        if let Some(lang) = extension_to_language(ext) {
+                            *language_counts.entry(lang).or_insert(0) += 1;
+                            total_files += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Calculate percentage distribution
+    let mut distribution = Vec::new();
+    if total_files > 0 {
+        for (lang, count) in language_counts {
+            let percentage = (count as f32) / (total_files as f32);
+            distribution.push((lang, percentage));
+        }
+    }
+
+    distribution.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    distribution
+}
 
 /// Trait for path classification
 #[async_trait]
