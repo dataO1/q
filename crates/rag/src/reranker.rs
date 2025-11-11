@@ -2,7 +2,7 @@
 use anyhow::Result;
 use ai_agent_common::ContextFragment;
 use fastembed::SparseEmbedding;
-use simsimd::cosine_similarity; // simsimd crate for cosine similarity on slices
+use simsimd::{SpatialSimilarity};
 
 const SIMILARITY_THRESHOLD: f32 = 0.85;
 
@@ -29,8 +29,8 @@ impl Reranker {
         }
 
         // Compute magnitudes using simsimd on values slices
-        let mag_a = cosine_similarity(&a.values, &a.values).sqrt();
-        let mag_b = cosine_similarity(&b.values, &b.values).sqrt();
+        let mag_a = SpatialSimilarity::cosine(&a.values, &a.values).unwrap_or(0.0).sqrt() as f32;
+        let mag_b = SpatialSimilarity::cosine(&b.values, &b.values).unwrap_or(0.0).sqrt() as f32;
 
         if mag_a == 0.0 || mag_b == 0.0 {
             return 0.0;

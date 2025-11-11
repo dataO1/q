@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use async_recursion::async_recursion;
-use common::git;
-use common::types::{Language, ProjectScope};
-use indexing::classifier;
+use ai_agent_common::git;
+use ai_agent_common::types::{Language, ProjectScope};
+use ai_agent_indexing::classifier;
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::io;
@@ -20,7 +20,7 @@ impl ContextManager {
     #[async_recursion]
     pub async fn detect_project_scope(&self, start_path: Option<PathBuf>) -> Result<ProjectScope> {
         // Start path or cwd fallback
-        let path = match start_path {
+        let path = match start_path.clone() {
             Some(p) => p,
             None => std::env::current_dir().context("Failed to get current directory")?,
         };
@@ -28,14 +28,20 @@ impl ContextManager {
         // Detect git root asynchronously via common::git helpers
         let git_root = git::find_git_root(&path).await.context("Git root detection failed")?;
 
-        let root_path = git_root.unwrap_or(path);
+        let root = git_root.unwrap_or(path);
+
+        let current_file = match start_path{
+            Some(p)=> {if p.is_file() {Some(p)} else {None}},
+            None => None,
+        };
 
         // Language distribution detection through indexing classifier
-        let language_distribution = classifier::detect_language(&root_path).await;
+        let language_distribution = classifier::detect_languages(&root).await;
 
         Ok(ProjectScope {
-            root_path: root_path.to_string_lossy().to_string(),
+            root,
             language_distribution,
+            current_file: current_file
         })
     }
 

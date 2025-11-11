@@ -2,6 +2,7 @@ use ai_agent_storage::QdrantClient;
 use anyhow::{Context, Result};
 use async_stream::try_stream;
 use async_trait::async_trait;
+use fastembed::{SparseEmbedding, SparseInitOptions, SparseModel, SparseTextEmbedding};
 use futures::stream::{Stream, StreamExt};
 use std::collections::BTreeMap;
 use std::pin::Pin;
@@ -20,7 +21,7 @@ pub trait RetrieverSource: Send + Sync {
         &self,
         queries: Vec<(CollectionTier, String)>,
         project_scope: &ProjectScope,
-    ) -> Result<Vec<(ContextFragment, SparseVector<f32>)>>;
+    ) -> Result<Vec<(ContextFragment, SparseEmbedding)>>;
 
     fn retrieve_stream<'a>(
         &'a self,
@@ -63,20 +64,23 @@ impl RetrieverSource for QdrantRetriever {
         &self,
         queries: Vec<(CollectionTier, String)>,
         project_scope: &ProjectScope,
-        agent_ctx: &AgentContext,
-    ) -> Result<Vec<(ContextFragment, SparseVector<f32>)>> {
-        self.client.query_collections(queries, project_scope, agent_ctx).await
+    ) -> Result<Vec<(ContextFragment, SparseEmbedding)>> {
+        self.client.query_collections(queries, project_scope).await
     }
 }
 
 pub struct MultiSourceRetriever {
     sources: Vec<Arc<dyn RetrieverSource>>,
+    embedder: Arc<SparseTextEmbedding>,
 }
 
 impl MultiSourceRetriever {
 pub async fn new(qdrant_url: &str) -> Result<Self> {
         let qdrant_client = QdrantClient::new(qdrant_url)?;
-        let embedder = Embedder::load(embedder_model_path).await?;
+        let embedder = SparseTextEmbedding::try_new(
+                SparseInitOptions::new(SparseModel::SPLADEPPV1)
+                    .with_show_download_progress(true), // Optional: show download progress
+            )?;
 
         Ok(Self {
             sources: vec![Arc::new(QdrantRetriever::new(qdrant_client))],
@@ -94,7 +98,7 @@ pub async fn new(qdrant_url: &str) -> Result<Self> {
 
         Box::pin(try_stream! {
             // Collect all results from all sources
-            let mut all_results = Vec::<(ContextFragment, SparseVector<f32>)>::new();
+            let mut all_results = Vec::<(ContextFragment, SparseEmbedding)>::new();
 
             for source in sources.into_iter() {
                 let partial_results = source.retrieve(queries.clone(), project_scope).await?;
@@ -108,10 +112,12 @@ pub async fn new(qdrant_url: &str) -> Result<Self> {
 
             // Generate query embedding for reranking - TODO replace with actual embedding
             let query_text = queries.get(0).map(|(_, q)| q.as_str()).unwrap_or("");
-            let query_embedding = SparseVector::from_dense(&vec![0f32; 384]);
+            let query_embedding = self.embedder.embed(vec![query_text; 1],None)
+                .context("Failed to create query embedding")?
+                .first().unwrap();
 
             // Rerank & deduplicate on combined results
-            let reranked = Reranker::rerank_and_deduplicate(&query_embedding, &all_results);
+            let reranked = Reranker::rerank_and_deduplicate(query_embedding, &all_results);
 
             // Stream reranked results in batches (e.g., batches of 10)
             for batch in &reranked.into_iter().chunks(10) {

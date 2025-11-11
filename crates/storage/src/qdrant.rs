@@ -147,20 +147,22 @@ impl QdrantClient {
 mod tests {
     use std::path::PathBuf;
 
+    use ai_agent_common::Language;
+
     use super::*;
 
     #[tokio::test]
     async fn test_client_creation() {
-        let client = QdrantClient::new("http://localhost:6333").await;
+        let client = QdrantClient::new("http://localhost:6333");
         assert!(client.is_ok());
     }
 
     #[tokio::test]
     async fn test_filter_building() {
-        let client = QdrantClient::new("http://localhost:6333").await.unwrap();
+        let client = QdrantClient::new("http://localhost:6333").unwrap();
         let ctx = ProjectScope {
             root: PathBuf::from("/workspace".to_string()),
-            languages: vec!["rust".to_string()],
+            language_distribution: vec![(Language::Rust, 100f32)],
             current_file: Some(PathBuf::from("data.txt".to_string())),
         };
 

@@ -6,13 +6,13 @@ edition = "2021"
 [dependencies]
 ai-agent-common = { path = "../common" }
 ai-agent-storage = { path = "../storage" }
+ai-agent-indexing = { path = "../indexing" }
 tokio = { version = "*", features = ["full"] }
 swiftide = { version = "*", features = ["ollama", "qdrant", "tree-sitter", "fastembed", "redis"] }
 swiftide-indexing = "*"
 swiftide-integrations = { version = "*", features = ["ollama", "qdrant"] }
 fastembed = "*"
 reqwest = { version = "*", features = ["json", "rustls-tls"] }
-qdrant-client = "*"
 serde = "*"
 anyhow = "*"
 rig-core = "*"
@@ -26,3 +26,4 @@ tokenizers = "*"
 sha2 = "*"
 hex = "*"
 simsimd = "*"
+ollama-rs = "*"

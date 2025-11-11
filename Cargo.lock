@@ -183,6 +183,7 @@ name = "ai-agent-rag"
 version = "0.1.0"
 dependencies = [
  "ai-agent-common",
+ "ai-agent-indexing",
  "ai-agent-storage",
  "anyhow",
  "async-recursion",
@@ -192,8 +193,8 @@ dependencies = [
  "futures",
  "hex",
  "moka",
+ "ollama-rs",
  "petgraph",
- "qdrant-client",
  "reqwest 0.12.24",
  "rig-core",
  "serde",
@@ -3136,6 +3137,23 @@ name = "number_prefix"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
+
+[[package]]
+name = "ollama-rs"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "659dd1460a1079db751a236b301e78e63486758fee7e2db1ddcd2372c264be36"
+dependencies = [
+ "async-stream",
+ "log",
+ "reqwest 0.12.24",
+ "schemars",
+ "serde",
+ "serde_json",
+ "static_assertions",
+ "thiserror 2.0.17",
+ "url",
+]
 
 [[package]]
 name = "once_cell"
