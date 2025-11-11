@@ -17,7 +17,7 @@ pub async fn initialize_storage(
     postgres.run_migrations().await?;
 
     // Initialize Qdrant
-    let qdrant = QdrantClient::new(qdrant_url).await?;
+    let qdrant = QdrantClient::new(qdrant_url)?;
 
     // Initialize Redis if URL provided
     let redis = if let Some(url) = redis_url {

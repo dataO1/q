@@ -118,6 +118,7 @@ dependencies = [
  "swiftide-integrations",
  "tempfile",
  "tokio",
+ "tokio-stream",
  "tokio-test",
  "toml 0.9.8",
  "tracing",
@@ -189,6 +190,7 @@ dependencies = [
  "async-trait",
  "fastembed",
  "futures",
+ "hex",
  "moka",
  "petgraph",
  "qdrant-client",
@@ -196,6 +198,10 @@ dependencies = [
  "rig-core",
  "serde",
  "sha2",
+ "simsimd",
+ "swiftide",
+ "swiftide-indexing",
+ "swiftide-integrations",
  "tokenizers",
  "tokio",
 ]
@@ -4549,6 +4555,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95890f873bec569a0362c235787f3aca6e1e887302ba4840839bcc6459c42da6"
 dependencies = [
  "quote",
+]
+
+[[package]]
+name = "simsimd"
+version = "6.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b631147f2632f13d5696fb53481608187db60bd52832698ac7361aae35f34564"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

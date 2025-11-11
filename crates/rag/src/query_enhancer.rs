@@ -1,3 +1,4 @@
+use ai_agent_storage::RedisCache;
 use anyhow::{Context, Result};
 use ai_agent_common::{ProjectScope, ConversationId};
 use async_trait::async_trait;
@@ -48,20 +49,20 @@ fn create_bert_tokenizer(vocab_path: &str) -> tokenizers::Result<Tokenizer> {
 
 impl QueryEnhancer {
 
-
-    pub fn new(redis_url: &str) -> tokenizers::Result<Self> {
+    pub async fn new(redis_url: &str) -> anyhow::Result<Self> {
         Ok(Self {
             ollama_client: OllamaClient::new(),
             mem_cache: Cache::new(10000),
-            redis_client: RedisCache(redis_url)?,
+            redis_client: RedisCache::new(redis_url).await?,
             redis_cache_prefix: "query_enhancer_cache:".to_string(),
-            tokenizer: create_bert_tokenizer(&"")?, // adjust vocab path
+            tokenizer: create_bert_tokenizer(&"") // adjust vocab path
+                .map_err(|e| anyhow::Error::msg(format!("{}", e)))?,
         })
     }
 
 
     /// Apply simple heuristics: synonym expansions, normalization, token filtering
-    fn heuristic_expand(&self, query: &str) -> Vec<String> {
+    fn heuristic_expand(&self, query: &str) -> anyhow::Result<Vec<String>> {
         let mut results = Vec::new();
 
         // Normalize whitespace
@@ -75,14 +76,16 @@ impl QueryEnhancer {
         }
 
         // Token filter heuristic (remove stopwords)
-        let tokens = self.tokenizer.tokenize(&norm);
+        let encoding = self.tokenizer.encode(norm, false)
+            .map_err(|e| anyhow::Error::msg(format!("{}", e)))?;
+        let tokens = encoding.get_tokens();
         let filtered_tokens: Vec<&str> = tokens.iter()
             .filter(|t| !self.is_stopword(t))
             .map(|t| t.as_str())
             .collect();
         results.push(filtered_tokens.join(" "));
 
-        results
+        Ok(results)
     }
 
     fn is_stopword(&self, token: &str) -> bool {
@@ -92,15 +95,13 @@ impl QueryEnhancer {
     }
 
     async fn redis_get(&self, key: &str) -> Result<Option<String>> {
-        let mut conn = self.redis_client.get_async_connection().await?;
         let full_key = format!("{}{}", self.redis_cache_prefix, key);
-        Ok(conn.get(full_key).await?)
+        Ok(self.redis_client.get(&full_key).await?)
     }
 
-    async fn redis_set(&self, key: &str, value: &str, ttl_secs: usize) -> Result<()> {
-        let mut conn = self.redis_client.get_async_connection().await?;
+    async fn redis_set(&self, key: &str, value: &str, ttl_secs: u64) -> Result<()> {
         let full_key = format!("{}{}", self.redis_cache_prefix, key);
-        let _: () = conn.set_ex(full_key, value, ttl_secs).await?;
+        self.redis_client.set_ex(&full_key, value, ttl_secs).await?;
         Ok(())
     }
 
@@ -136,7 +137,7 @@ impl QueryEnhancer {
             let cache_key = self.compute_cache_key(raw_query, conversation_id, source_name, description, project_scope, HEURISTIC_VERSION);
 
             // Check in-memory cache first
-            if let Some(cached) = self.mem_cache.get(&cache_key) {
+            if let Some(cached) = self.mem_cache.get(&cache_key).await {
                 results.insert(source_name.to_string(), cached.clone());
                 continue;
             }

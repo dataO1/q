@@ -3,9 +3,8 @@ use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use mime_guess;
-use common::types::Language;
+use ai_agent_common::types::Language;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio_stream::wrappers::ReadDirStream;
 use tokio_stream::StreamExt;
@@ -37,7 +36,7 @@ fn extension_to_language(ext: &str) -> Option<Language> {
 }
 
 /// Detects language distribution within project_root by counting mapped file extensions
-pub async fn detect_language(project_root: &Path) -> Vec<(Language, f32)> {
+pub async fn detect_languages(project_root: &Path) -> Vec<(Language, f32)> {
     let mut language_counts: HashMap<Language, usize> = HashMap::new();
     let mut total_files = 0;
 
@@ -116,7 +115,7 @@ impl PathClassifier {
             if let Some(tier) = classifier.classify(path).await {
                 return Ok(ClassificationResult {
                     tier,
-                    language: detect_language(path),
+                    languages: detect_languages(path).await,
                     file_type: detect_file_type(path),
                     project_root: find_project_root(path),
                     mime_type: detect_mime_type(path),
@@ -127,7 +126,7 @@ impl PathClassifier {
         // Default to workspace if no match
         Ok(ClassificationResult {
             tier: CollectionTier::Workspace,
-            language: detect_language(path),
+            languages: detect_languages(path).await,
             file_type: detect_file_type(path),
             project_root: find_project_root(path),
             mime_type: detect_mime_type(path),
@@ -139,7 +138,7 @@ impl PathClassifier {
 #[derive(Debug, Clone)]
 pub struct ClassificationResult {
     pub tier: CollectionTier,
-    pub language: Option<String>,
+    pub languages: Vec<(Language,f32)>,
     pub file_type: String,
     pub project_root: Option<PathBuf>,
     pub mime_type: Option<String>,
@@ -349,68 +348,6 @@ impl PathClassifierTrait for DependenciesClassifier {
 // Helper Functions
 // ============================================================================
 
-/// Detect programming language from file extension and content
-
-pub fn detect_language(path: &Path) -> Option<String> {
-    let ext = path.extension()?.to_str()?;
-
-    let language = match ext {
-        // Systems programming
-        "rs" => "rust",
-        "c" => "c",
-        "cpp" | "cc" | "cxx" | "h" | "hpp" => "cpp",
-        "go" => "go",
-        "zig" => "zig",
-
-        // High-level languages
-        "py" | "pyw" => "python",
-        "js" | "mjs" | "cjs" => "javascript",
-        "ts" | "tsx" => "typescript",
-        "java" => "java",
-        "kt" | "kts" => "kotlin",
-        "scala" | "sc" => "scala",
-        "rb" => "ruby",
-        "php" => "php",
-        "swift" => "swift",
-
-        // Functional
-        "hs" | "lhs" => "haskell",
-        "ml" | "mli" => "ocaml",
-        "fs" | "fsx" | "fsi" => "fsharp",
-        "elm" => "elm",
-        "clj" | "cljs" | "cljc" => "clojure",
-
-        // Shell/scripting
-        "sh" | "bash" | "zsh" => "shell",
-        "fish" => "fish",
-        "nu" => "nushell",
-
-        // Web
-        "html" | "htm" => "html",
-        "css" | "scss" | "sass" | "less" => "css",
-        "vue" => "vue",
-        "jsx" => "jsx",
-        "svelte" => "svelte",
-
-        // Data/Config
-        "json" => "json",
-        "yaml" | "yml" => "yaml",
-        "toml" => "toml",
-        "xml" => "xml",
-        "csv" => "csv",
-        "sql" => "sql",
-
-        // Documentation
-        "md" | "markdown" => "markdown",
-        "rst" => "restructuredtext",
-        "tex" => "latex",
-        "org" => "org-mode",
-
-        _ => return None,
-    };
-
-    Some(language.to_string())
-}
 
 /// Detect file type category
 pub fn detect_file_type(path: &Path) -> String {
@@ -518,12 +455,12 @@ mod tests {
         assert_eq!(result.tier, CollectionTier::Dependencies);
     }
 
-    #[test]
-    fn test_detect_language() {
-        assert_eq!(detect_language(Path::new("main.rs")), Some("rust".to_string()));
-        assert_eq!(detect_language(Path::new("app.py")), Some("python".to_string()));
-        assert_eq!(detect_language(Path::new("script.js")), Some("javascript".to_string()));
-        assert_eq!(detect_language(Path::new("unknown.xyz")), None);
+    #[tokio::test]
+    async fn test_detect_language() {
+        assert_eq!(detect_languages(Path::new("main.rs")).await, [(Language::Rust,100f32)]);
+        assert_eq!(detect_languages(Path::new("app.py")).await,[(Language::Python,100f32)]);
+        assert_eq!(detect_languages(Path::new("script.js")).await, [(Language::JavaScript,100f32)]);
+        assert_eq!(detect_languages(Path::new("unknown.xyz")).await, [(Language::Unknown, 100f32)]);
     }
 
     #[test]

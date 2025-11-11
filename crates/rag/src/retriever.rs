@@ -1,3 +1,4 @@
+use ai_agent_storage::QdrantClient;
 use anyhow::{Context, Result};
 use async_stream::try_stream;
 use async_trait::async_trait;
@@ -6,9 +7,8 @@ use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use ai_agent_common::{AgentContext, CollectionTier, ContextFragment, ProjectScope};
-use crate::{qdrant::QdrantClient, reranker::Reranker};
-use fastembed::SparseVector;
+use ai_agent_common::{CollectionTier, ContextFragment, ProjectScope};
+use crate::{reranker::Reranker};
 
 pub type Priority = u8;
 
@@ -20,21 +20,18 @@ pub trait RetrieverSource: Send + Sync {
         &self,
         queries: Vec<(CollectionTier, String)>,
         project_scope: &ProjectScope,
-        agent_ctx: &AgentContext,
     ) -> Result<Vec<(ContextFragment, SparseVector<f32>)>>;
 
     fn retrieve_stream<'a>(
         &'a self,
         queries: Vec<(CollectionTier, String)>,
         project_scope: &'a ProjectScope,
-        agent_ctx: &'a AgentContext,
     ) -> Pin<Box<dyn Stream<Item = Result<ContextFragment>> + Send + 'a>> {
         let queries_clone = queries.clone();
         let project_scope_clone = project_scope.clone();
-        let agent_ctx_clone = agent_ctx.clone();
 
         let stream = try_stream! {
-            let results = self.retrieve(queries_clone, &project_scope_clone, &agent_ctx_clone).await?;
+            let results = self.retrieve(queries_clone, &project_scope_clone).await?;
             for (frag, _emb) in results {
                 yield frag;
             }
@@ -92,7 +89,6 @@ pub async fn new(qdrant_url: &str) -> Result<Self> {
         &'a self,
         queries: Vec<(CollectionTier, String)>,
         project_scope: &'a ProjectScope,
-        agent_ctx: &'a AgentContext,
     ) -> Pin<Box<dyn Stream<Item = Result<Vec<ContextFragment>>> + Send + 'a>> {
         let sources = self.sources.clone();
 
@@ -101,7 +97,7 @@ pub async fn new(qdrant_url: &str) -> Result<Self> {
             let mut all_results = Vec::<(ContextFragment, SparseVector<f32>)>::new();
 
             for source in sources.into_iter() {
-                let partial_results = source.retrieve(queries.clone(), project_scope, agent_ctx).await?;
+                let partial_results = source.retrieve(queries.clone(), project_scope).await?;
                 all_results.extend(partial_results);
             }
 

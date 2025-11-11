@@ -16,7 +16,7 @@ pub struct QdrantClient {
 
 impl QdrantClient {
     /// Create new Qdrant client
-    pub async fn new(url: &str) -> anyhow::Result<Self> {
+    pub fn new(url: &str) -> anyhow::Result<Self> {
         let raw_client = Qdrant::from_url(url)
             .build()
             .context("Failed to connect to Qdrant")?;

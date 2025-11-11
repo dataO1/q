@@ -88,8 +88,8 @@ impl CollectionTier {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectScope {
     pub root: PathBuf,
-    pub languages: Vec<String>,
     pub current_file: Option<PathBuf>,
+    pub language_distribution: Vec<(Language,f32)>
 }
 
 
@@ -226,7 +226,7 @@ pub enum StatusEvent {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Language {
     Rust,
     Python,

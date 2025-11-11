@@ -31,7 +31,7 @@ pub struct IndexingPipeline {
 impl IndexingPipeline {
     /// Create a new indexing pipeline from configuration
     /// Create a new indexing pipeline with hybrid search support
-     pub fn new(config: &SystemConfig) -> Result<Self> {
+    pub fn new(config: &SystemConfig) -> Result<Self> {
         tracing::debug!("Creating IndexingPipeline");
 
 

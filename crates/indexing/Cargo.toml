@@ -11,6 +11,7 @@ path = "src/bin/indexer.rs"
 ai-agent-common = { path = "../common" }
 ai-agent-storage = { path = "../storage" }
 tokio = { version = "*", features = ["full"] }
+tokio-stream = "*"
 notify = "*"
 reqwest = { version = "*", features = ["json", "rustls-tls"] }
 qdrant-client = "*"

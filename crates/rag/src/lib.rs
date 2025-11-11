@@ -32,7 +32,7 @@ impl SmartMultiSourceRag {
     pub async fn new(config: &SystemConfig) -> anyhow::Result<Self> {
         Ok(Self {
             context_manager: context_manager::ContextManager::new().await?,
-            query_enhancer: QueryEnhancer::new(&config.storage.redis_url.as_ref().unwrap())?,
+            query_enhancer: QueryEnhancer::new(&config.storage.redis_url.as_ref().unwrap()).await?,
             source_router: source_router::SourceRouter::new()?,
             retriever: MultiSourceRetriever::new(&config.storage.qdrant_url).await?,
         })
@@ -58,7 +58,7 @@ impl SmartMultiSourceRag {
                 .await.context("Source routing failed")?;
 
             // Step 3: Prepare priority-ordered streams from MultiSourceRetriever
-            let prioritized_streams = rag.retriever.retrieve_prioritized_streams(source_queries, project_scope);
+            let prioritized_streams = rag.retriever.retrieve_stream(source_queries, project_scope);
 
             // Group streams by priority in a BTreeMap to ensure ascending order of priority
             let mut streams_by_priority: BTreeMap<Priority, Vec<_>> = BTreeMap::new();
