@@ -148,9 +148,6 @@ impl QdrantClient {
     fn build_metadata_filter(&self, ctx: &ProjectScope) -> Result<Filter> {
         use qdrant_client::qdrant::{condition::ConditionOneOf, FieldCondition, Match};
 
-        let root = ctx.root.to_str()
-            .ok_or(anyhow!("Invalid UTF-8 in path"))?
-            .to_string();
 
         let mut must_conditions = vec![];
 
@@ -159,7 +156,7 @@ impl QdrantClient {
             condition_one_of: Some(ConditionOneOf::Field(FieldCondition {
                 // TODO: this assumes the project_root field in the db entry
                 key: "project_root".to_string(),
-                r#match: Some(Match::from(MatchValue::Text(root))),
+                r#match: Some(Match::from(MatchValue::Text(ctx.root.clone()))),
                 ..Default::default()
             })),
         });
@@ -202,7 +199,7 @@ mod tests {
     async fn test_filter_building() {
         let client = QdrantClient::new("http://localhost:6333").unwrap();
         let ctx = ProjectScope {
-            root: PathBuf::from("/workspace".to_string()),
+            root: "/workspace".to_string(),
             language_distribution: vec![(Language::Rust, 100f32)],
             current_file: Some(PathBuf::from("data.txt".to_string())),
         };

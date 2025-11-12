@@ -3,9 +3,8 @@ use async_recursion::async_recursion;
 use ai_agent_common::git;
 use ai_agent_common::types::{Language, ProjectScope};
 use ai_agent_indexing::classifier;
+use std::env::current_dir;
 use std::path::PathBuf;
-use tokio::fs;
-use tokio::io;
 
 /// Manages context state and project scope within the RAG system
 pub struct ContextManager {}
@@ -18,28 +17,27 @@ impl ContextManager {
 
     /// Detects project scope including git root and language distribution asynchronously.
     #[async_recursion]
-    pub async fn detect_project_scope(&self, start_path: Option<PathBuf>) -> Result<ProjectScope> {
+    pub async fn detect_project_scope(&self, start_path_string: Option<String>) -> Result<ProjectScope> {
         // Start path or cwd fallback
-        let path = match start_path.clone() {
+        let path_string = match start_path_string.clone() {
             Some(p) => p,
-            None => std::env::current_dir().context("Failed to get current directory")?,
+            None => current_dir().context("Failed to get current directory")?.to_str().unwrap().to_string(),
         };
+
+        let path = PathBuf::from(path_string.clone());
 
         // Detect git root asynchronously via common::git helpers
         let git_root = git::find_git_root(&path).await.context("Git root detection failed")?;
 
-        let root = git_root.unwrap_or(path);
+        let root = git_root.unwrap_or(path.clone());
+        let root_path = root.to_str().unwrap_or(&path_string).to_string();
 
-        let current_file = match start_path{
-            Some(p)=> {if p.is_file() {Some(p)} else {None}},
-            None => None,
-        };
-
+        let current_file = if path.is_file() {Some(path)} else {None};
         // Language distribution detection through indexing classifier
         let language_distribution = classifier::detect_languages(&root).await;
 
         Ok(ProjectScope {
-            root,
+            root:root_path,
             language_distribution,
             current_file: current_file
         })

@@ -7,6 +7,12 @@ watch_enabled = true
 chunk_size = 512
 enable_qa_metadata = false  # ← Enable this for better retrieval (slower)
 
+[indexing.embedding]
+ollama_host= "http://localhost"
+ollama_port= 11434
+model= "placeholder, not used"
+batch_size= 1024
+
 [indexing.filters]
 respect_gitignore = true
 include_hidden = false
@@ -22,6 +28,7 @@ redis_url = "redis://localhost:16379"       # Test Redis
 [rag]
 max_results = 5
 query_enhancement_model = "qwen2.5:7b"
+classification_model = "phi3:mini"
 
 [rag.reranking_weights]
 conversation_boost = 1.2

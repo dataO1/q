@@ -55,8 +55,8 @@ impl QueryEnhancer {
             mem_cache: Cache::new(10000),
             redis_client: RedisCache::new(redis_url).await?,
             redis_cache_prefix: "query_enhancer_cache:".to_string(),
-            tokenizer: create_bert_tokenizer(&"") // adjust vocab path
-                .map_err(|e| anyhow::Error::msg(format!("{}", e)))?,
+            tokenizer: create_bert_tokenizer(&"vocab.txt") // adjust vocab path
+                .map_err(|e| anyhow::Error::msg(format!("{}", e))).context("Failed to read tokenizers config file")?,
         })
     }
 

@@ -8,7 +8,6 @@ pub struct SystemConfig {
     pub rag: RagConfig,
     pub orchestrator: OrchestratorConfig,
     pub storage: StorageConfig,
-    pub embedding: EmbeddingConfig,
 }
 
 
@@ -40,6 +39,7 @@ pub struct IndexingConfig {
     #[serde(default)]
     pub filters: IndexingFilters,
     pub enable_qa_metadata: bool,
+    pub embedding: EmbeddingConfig,
 }
 
 /// File filtering configuration
@@ -80,7 +80,8 @@ impl Default for IndexingConfig{
             watch_enabled: true,
             chunk_size: 512,
             filters: IndexingFilters::default(),
-            enable_qa_metadata: false
+            enable_qa_metadata: false,
+            embedding: EmbeddingConfig::default()
         }
     }
 }
@@ -121,6 +122,7 @@ impl Default for IndexingFilters {
 pub struct RagConfig {
     pub reranking_weights: RerankingWeights,
     pub query_enhancement_model: String,
+    pub classification_model: String,
     pub max_results: usize,
 }
 
@@ -153,8 +155,8 @@ pub struct StorageConfig {
 }
 
 impl SystemConfig {
-    pub fn new(indexing: IndexingConfig, rag: RagConfig, orchestrator: OrchestratorConfig, storage: StorageConfig, embedding: EmbeddingConfig) -> Self {
-        Self { indexing, rag, orchestrator, storage, embedding }
+    pub fn new(indexing: IndexingConfig, rag: RagConfig, orchestrator: OrchestratorConfig, storage: StorageConfig) -> Self {
+        Self { indexing, rag, orchestrator, storage}
     }
 
     /// Load configuration from TOML file
@@ -229,7 +231,8 @@ impl Default for SystemConfig {
                 watch_enabled: true,
                 chunk_size: 512,
                 filters: IndexingFilters::default(),
-                enable_qa_metadata: false
+                enable_qa_metadata: false,
+                embedding: EmbeddingConfig::default()
             },
             rag: RagConfig {
                 reranking_weights: RerankingWeights {
@@ -238,6 +241,7 @@ impl Default for SystemConfig {
                     dependency_boost: 1.3,
                 },
                 query_enhancement_model: "qwen2.5:7b".to_string(),
+                classification_model: "phi3:mini".to_string(),
                 max_results: 5,
             },
             orchestrator: OrchestratorConfig {
@@ -249,7 +253,6 @@ impl Default for SystemConfig {
                 postgres_url: "postgresql://localhost/ai_agent".to_string(),
                 redis_url: Some("redis://localhost:6379".to_string()),
             },
-            embedding: EmbeddingConfig::default()
         }
     }
 }

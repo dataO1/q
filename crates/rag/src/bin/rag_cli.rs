@@ -1,16 +1,19 @@
+use ai_agent_rag::SmartMultiSourceRag;
 // src/bin/rag_cli.rs
 use anyhow::Result;
 use std::env;
 use std::io::{self, Write};
 
-use ai_agent_common::{AgentContext, CollectionTier, ProjectScope};
+use ai_agent_common::{CollectionTier, ConversationId, Language, ProjectScope, SystemConfig};
 use futures::StreamExt;
-use retriever::MultiSourceRetriever;
 
 #[tokio::main]
 async fn main() -> Result<()> {
 
-    let config = SystemConfig::from_file(config_path.to_str().unwrap()).unwrap();
+    let _ = env_logger::builder().is_test(true).try_init();
+    let config_path = std::env::var("CONFIG_PATH")
+        .unwrap_or_else(|_| "config.dev.toml".to_string());
+    let config = SystemConfig::from_file(&config_path).unwrap();
     // Parse query from CLI args
     let mut args = env::args().skip(1);
     let query = match args.next() {
@@ -24,25 +27,16 @@ async fn main() -> Result<()> {
     // Detect current working directory (project_root)
     let cwd = env::current_dir()?.to_string_lossy().into_owned();
 
-    // Create a simple AgentContext with example languages and file types
-    let agent_ctx = AgentContext {
-        project_root: cwd.clone(),
-        languages: vec!["rust".to_string(), "python".to_string()],
-        file_types: vec!["source".to_string(), "docs".to_string()],
-    };
-
     // Example ProjectScope
-    let project_scope = ProjectScope {
-        language_distribution: vec!["rust".to_string()], // example distribution
-    };
+    let project_scope = ProjectScope::new(cwd.clone(), None, vec![(Language::Rust, 1f32)]);
+    let conversation_id = ConversationId::new();
 
     // Create retriever and run query
     let qdrant_url = "http://localhost:6333"; // adjust as needed
-    let rag = SmartMultiSourceRag::new(qdrant_url).await?;
+    let rag = SmartMultiSourceRag::new(&config).await?;
 
-    let queries = vec![(CollectionTier::Code, query)];
 
-    let mut stream = rag.retrieve_stream(queries, &project_scope, &agent_ctx);
+    let mut stream = rag.retrieve_stream(&query, &project_scope, &conversation_id).await?;
 
     // Stream results in batches and print summaries incrementally
     let stdout = io::stdout();
@@ -50,16 +44,14 @@ async fn main() -> Result<()> {
 
     while let Some(batch_result) = stream.next().await {
         match batch_result {
-            Ok(batch) => {
-                writeln!(handle, "=== Batch ({} results) ===", batch.len())?;
-                for fragment in batch {
-                    writeln!(handle, "Summary: {}", fragment.summary)?;
-                    writeln!(handle, "Content preview: {:.100}", fragment.content)?;
-                    writeln!(handle, "Source: {}", fragment.source)?;
-                    writeln!(handle, "Score: {:.4}", fragment.score)?;
-                    writeln!(handle, "------------")?;
-                    handle.flush()?;
-                }
+            Ok(fragment) => {
+                // writeln!(handle, "=== Batch ({} results) ===", batch.len())?;
+                writeln!(handle, "Summary: {}", fragment.summary)?;
+                writeln!(handle, "Content preview: {:.100}", fragment.content)?;
+                writeln!(handle, "Source: {}", fragment.source)?;
+                writeln!(handle, "Score: {:.4}", fragment.score)?;
+                writeln!(handle, "------------")?;
+                handle.flush()?;
             }
             Err(e) => {
                 eprintln!("Error streaming results: {:?}", e);

@@ -37,7 +37,7 @@ impl SmartMultiSourceRag {
         Ok(Self {
             context_manager: context_manager::ContextManager::new().await?,
             query_enhancer: QueryEnhancer::new(&config.storage.redis_url.as_ref().unwrap()).await?,
-            source_router: source_router::SourceRouter::new(&config.embedding)?,
+            source_router: source_router::SourceRouter::new(&config)?,
             retriever: MultiSourceRetriever::new(&config.storage.qdrant_url).await?,
             embedder: Arc::new(SparseTextEmbedding::try_new(
                 SparseInitOptions::new(SparseModel::SPLADEPPV1)

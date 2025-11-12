@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, path::PathBuf};
-use std::fmt;
+use std::{path::PathBuf};
+use std::fmt::{self, Display};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use strum_macros::EnumIter;
+use strum_macros::Display;
+use schemars::JsonSchema;
 
 /// Unique identifier for tasks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -54,7 +56,7 @@ impl fmt::Display for ConversationId {
 }
 
 /// Collection tier for Qdrant (3-layer data filtering)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter)]
+#[derive(JsonSchema,Display,Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter)]
 pub enum CollectionTier {
     System,        // System files (/etc, man pages)
     Personal,      // Personal documents
@@ -78,9 +80,19 @@ impl CollectionTier {
 /// Project scope information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectScope {
-    pub root: PathBuf,
+    pub root: String,
     pub current_file: Option<PathBuf>,
     pub language_distribution: Vec<(Language,f32)>
+}
+
+impl ProjectScope{
+    pub fn new(root: String, current_file: Option<PathBuf>, language_distribution: Vec<(Language,f32)>)->Self{
+        Self{
+            root,
+            current_file,
+            language_distribution,
+            }
+        }
 }
 
 

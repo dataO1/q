@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use ai_agent_common::{CollectionTier, EmbeddingConfig, ProjectScope};
+use ai_agent_common::{CollectionTier, EmbeddingConfig, ProjectScope, SystemConfig};
 use futures::executor::block_on;
-use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, MessageRole}, completion::request::GenerationRequest, parameters::FormatType}, Ollama};
+use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, MessageRole}, completion::request::GenerationRequest, parameters::{FormatType, JsonStructure}}, Ollama};
 use strum::IntoEnumIterator;
 use swiftide::chat_completion::ChatCompletionRequest;
 use tracing::info; // You must bring the trait into scope
@@ -10,13 +10,15 @@ use tracing::info; // You must bring the trait into scope
 /// SourceRouter with hybrid intent detection: keywords + fallback LLM classification
 pub struct SourceRouter {
     ollama: Ollama,
+    classification_model: String,
 }
 
 impl SourceRouter {
     /// Create new SourceRouter with Ollama client endpoint URL
-    pub fn new(config: &EmbeddingConfig) -> anyhow::Result<Self> {
+    pub fn new(config: &SystemConfig) -> anyhow::Result<Self> {
         Ok(Self {
-            ollama: Ollama::new(&config.ollama_host, config.ollama_port),
+            ollama: Ollama::new(&config.indexing.embedding.ollama_host, config.indexing.embedding.ollama_port),
+            classification_model: config.rag.classification_model.clone()
         })
     }
 
@@ -25,52 +27,54 @@ impl SourceRouter {
     /// Fallback async Ollama LLM call for intent classification,
     /// returns vector of CollectionTiers or empty vec for unknown
     pub async fn classify_intent_llm(&self, query: &str) -> anyhow::Result<Vec<CollectionTier>> {
-        // Example prompt for zero-shot classification
-        let categories: Vec<String> = CollectionTier::iter().into_iter().map(|tier| format!("{:?}",tier)).collect();
+        // Generate JSON schema structure from Rust type
+        let json_structure = JsonStructure::new::<Vec<CollectionTier>>();
 
-        let template = format!(r#"{{
-          "type": "array",
-          "categories": "{:?}"
-        }}"#,categories);
+        let categories: Vec<String> = CollectionTier::iter()
+            .map(|tier| tier.to_string())
+            .collect();
+
+        let categories_display = serde_json::to_string(&categories)?;
 
         let system_prompt = format!(
-        "You are a precise classification system. Your ONLY task is to classify user queries into one or more of these categories: {:?}. You must respond ONLY with valid JSON in the exact format specified. Do not include any explanations, comments, or additional text outside the JSON structure.",
-            categories,
+            "You are a precise classification system. Your ONLY task is to classify user queries into one or more of these categories: {}. You must respond ONLY with valid JSON conforming to the given schema. No explanations or extra text.",
+            categories_display
         );
+
         let user_prompt = format!(
-        "
-        Classify the following query into one or more categories:
-
-        Categories: {:?}
-
-        Query: {:?}
-
-        Output only valid JSON with the classification results.
-        ",
-            categories,
+            "Classify this query into one or more categories:\n\nCategories: {}\n\nQuery: {}\n\nOutput JSON array only.",
+            categories_display,
             query
         );
+
         let messages = vec![
             ChatMessage {
                 role: MessageRole::System,
                 content: system_prompt,
                 tool_calls: vec![],
                 images: None,
-                thinking: None
+                thinking: None,
             },
             ChatMessage {
                 role: MessageRole::User,
                 content: user_prompt,
                 tool_calls: vec![],
                 images: None,
-                thinking: None
+                thinking: None,
             },
         ];
-        let request = ChatMessageRequest::new( "phi3-mini".to_string(), messages,).template(template);
+
+        let request = ChatMessageRequest::new(self.classification_model.clone(), messages)
+            .format(FormatType::StructuredJson(Box::new(json_structure)));
+
         let response = self.ollama.send_chat_messages(request).await?.message.content;
-        info!("Classification: {}", response);
-        let items: Vec<CollectionTier> = serde_json::from_str(&response)?;
-        Ok(items)
+
+        info!("Classification Result: {}", response);
+
+        // Deserialize response into your output type
+        let classification_output: Vec<CollectionTier> = serde_json::from_str(&response)?;
+
+        Ok(classification_output)
     }
 
     /// Main routing function - calls fast heuristic first,
