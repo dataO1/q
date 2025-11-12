@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
     let project_scope = ProjectScope::new(cwd.clone(), None, vec![(Language::Rust, 1f32)]);
     let conversation_id = ConversationId::new();
 
-    let embedding_client = EmbeddingClient::new(&"jeffh/intfloat-e5-base-v2:f32".to_string(),SparseModel::SPLADEPPV1)?;
+    let embedding_client = EmbeddingClient::new(&config.embedding.dense_model)?;
     let rag = SmartMultiSourceRag::new(&config, &embedding_client).await?;
 
 

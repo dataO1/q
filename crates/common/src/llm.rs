@@ -8,12 +8,13 @@ pub struct EmbeddingClient{
     pub embedder_sparse: FastEmbed
 }
 impl EmbeddingClient{
-    pub fn new(dense_model: &String, sparse_model: SparseModel)-> anyhow::Result<Self>{
+    pub fn new(dense_model: &String)-> anyhow::Result<Self>{
         let embedder_dense = Ollama::builder()
             .default_embed_model(dense_model)
             .build()
             .context("Failed to build dense embedding model client")?;
         tracing::debug!("Initializing FastEmbed sparse...");
+        let sparse_model = SparseModel::SPLADEPPV1;
         let sparse_options = SparseInitOptions::new(sparse_model);
         let model_sparse = SparseTextEmbedding::try_new(sparse_options)?;
         let model_type = EmbeddingModelType::Sparse(model_sparse);

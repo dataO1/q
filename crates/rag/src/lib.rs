@@ -41,7 +41,7 @@ impl<'a> SmartMultiSourceRag<'a> {
             context_manager: context_manager::ContextManager::new().await?,
             query_enhancer: QueryEnhancer::new(&config.storage.redis_url.as_ref().unwrap()).await?,
             source_router: source_router::SourceRouter::new(&config)?,
-            retriever: MultiSourceRetriever::<'a>::new(&qdrant_client).await?,
+            retriever: MultiSourceRetriever::<'a>::new(&qdrant_client, &embedder).await?,
             embedder: Arc::new(embedder.clone())
 
         })

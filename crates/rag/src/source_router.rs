@@ -17,7 +17,7 @@ impl SourceRouter {
     /// Create new SourceRouter with Ollama client endpoint URL
     pub fn new(config: &SystemConfig) -> anyhow::Result<Self> {
         Ok(Self {
-            ollama: Ollama::new(&config.indexing.embedding.ollama_host, config.indexing.embedding.ollama_port),
+            ollama: Ollama::new(&config.embedding.ollama_host, config.embedding.ollama_port),
             classification_model: config.rag.classification_model.clone()
         })
     }

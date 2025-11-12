@@ -103,12 +103,10 @@ pub struct MultiSourceRetriever<'a> {
 }
 
 impl<'a> MultiSourceRetriever<'a> {
-    pub async fn new(qdrant_client: &QdrantClient<'a>) -> Result<Self> {
-
-        let embedder = EmbeddingClient::new(&"jeffh/intfloat-e5-base-v2:f32".to_string(),SparseModel::SPLADEPPV1)?;
+    pub async fn new(qdrant_client: &QdrantClient<'a>, embedder: &EmbeddingClient) -> Result<Self> {
         Ok(Self {
             sources: vec![Arc::new(QdrantRetriever::<'a>::new(qdrant_client.clone()))],
-            embedder: Arc::new(embedder),
+            embedder: Arc::new(embedder.clone()),
         })
     }
 

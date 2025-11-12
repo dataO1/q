@@ -10,7 +10,7 @@ enable_qa_metadata = false  # ← Enable this for better retrieval (slower)
 [embedding]
 ollama_host= "http://localhost"
 ollama_port= 11434
-sparse_model= "placeholder, not used"
+dense_model= "jeffh/intfloat-e5-base-v2:f32"
 # dense_model= "placeholder, not used"
 # batch_size= 1024
 
