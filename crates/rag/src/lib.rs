@@ -7,6 +7,8 @@ pub mod source_router;
 pub mod retriever;
 pub mod reranker;
 
+use ai_agent_common::llm::EmbeddingClient;
+use ai_agent_storage::QdrantClient;
 use anyhow::{Context, Result};
 use async_stream::try_stream;
 use fastembed::{SparseEmbedding, SparseInitOptions, SparseModel, SparseTextEmbedding};
@@ -23,26 +25,24 @@ use crate::retriever::{MultiSourceRetriever, Priority};
 use crate::query_enhancer::QueryEnhancer;
 
 /// Main RAG pipeline struct
-pub struct SmartMultiSourceRag {
+pub struct SmartMultiSourceRag<'a> {
     context_manager: context_manager::ContextManager,
     query_enhancer: QueryEnhancer,
     source_router: source_router::SourceRouter,
-    retriever: MultiSourceRetriever,
-    embedder: Arc<SparseTextEmbedding>,
+    retriever: MultiSourceRetriever<'a>,
+    embedder: Arc<EmbeddingClient>,
 }
 
-impl SmartMultiSourceRag {
+impl<'a> SmartMultiSourceRag<'a> {
     /// Initialize RAG cores
-    pub async fn new(config: &SystemConfig) -> anyhow::Result<Self> {
+    pub async fn new(config: &SystemConfig, embedder: &'a EmbeddingClient) -> anyhow::Result<Self> {
+        let qdrant_client = QdrantClient::<'a>::new(&config.storage.qdrant_url,embedder)?;
         Ok(Self {
             context_manager: context_manager::ContextManager::new().await?,
             query_enhancer: QueryEnhancer::new(&config.storage.redis_url.as_ref().unwrap()).await?,
             source_router: source_router::SourceRouter::new(&config)?,
-            retriever: MultiSourceRetriever::new(&config.storage.qdrant_url).await?,
-            embedder: Arc::new(SparseTextEmbedding::try_new(
-                SparseInitOptions::new(SparseModel::SPLADEPPV1)
-                    .with_show_download_progress(true), // Optional: show download progress
-            )?)
+            retriever: MultiSourceRetriever::<'a>::new(&qdrant_client).await?,
+            embedder: Arc::new(embedder.clone())
 
         })
     }
@@ -69,7 +69,7 @@ impl SmartMultiSourceRag {
     }
 
     /// Runs the multi-stage priority batched streaming retrieval pipeline
-    pub async fn retrieve_stream<'a>(
+    pub async fn retrieve_stream(
         &'a self,
         raw_query: &'a str,
         project_scope: &'a ProjectScope,

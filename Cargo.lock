@@ -70,15 +70,20 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "fastembed",
  "schemars",
  "serde",
  "serde_json",
  "strum",
  "strum_macros",
+ "swiftide",
+ "swiftide-indexing",
+ "swiftide-integrations",
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
  "toml 0.9.8",
+ "tracing",
  "uuid",
 ]
 
@@ -108,6 +113,7 @@ dependencies = [
  "clap",
  "derive_builder 0.20.2",
  "dirs",
+ "fastembed",
  "ignore",
  "mime_guess",
  "notify",

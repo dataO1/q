@@ -1,6 +1,8 @@
+use ai_agent_common::llm::EmbeddingClient;
 use ai_agent_rag::SmartMultiSourceRag;
 // src/bin/rag_cli.rs
 use anyhow::Result;
+use fastembed::SparseModel;
 use std::env;
 use std::io::{self, Write};
 
@@ -31,9 +33,8 @@ async fn main() -> Result<()> {
     let project_scope = ProjectScope::new(cwd.clone(), None, vec![(Language::Rust, 1f32)]);
     let conversation_id = ConversationId::new();
 
-    // Create retriever and run query
-    let qdrant_url = "http://localhost:6333"; // adjust as needed
-    let rag = SmartMultiSourceRag::new(&config).await?;
+    let embedding_client = EmbeddingClient::new(&"jeffh/intfloat-e5-base-v2:f32".to_string(),SparseModel::SPLADEPPV1)?;
+    let rag = SmartMultiSourceRag::new(&config, &embedding_client).await?;
 
 
     let mut stream = rag.retrieve_stream(&query, &project_scope, &conversation_id).await?;

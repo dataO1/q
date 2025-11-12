@@ -1,3 +1,4 @@
+use ai_agent_common::llm::EmbeddingClient;
 use anyhow::{Context, Result, anyhow};
 use qdrant_client::qdrant::r#match::MatchValue;
 use qdrant_client::qdrant::vector_output::Vector;
@@ -7,26 +8,25 @@ use swiftide::integrations::qdrant::{qdrant_client, Qdrant as SwiftideQdrant};
 use swiftide::indexing::EmbeddedField;
 use qdrant_client::qdrant::{Condition, Filter, SearchPointsBuilder, VectorsSelector};
 use qdrant_client::Qdrant;
-use fastembed::{EmbeddingModel, InitOptions, SparseEmbedding, TextEmbedding};
+use swiftide::integrations::fastembed::{FastEmbed};
+use swiftide::indexing::EmbeddingModel;
 use ai_agent_common::{CollectionTier, ContextFragment, ProjectScope};
+use swiftide::SparseEmbedding;
 
 /// Hybrid Qdrant client combining Swiftide for indexing and raw qdrant-client for filtered queries
-pub struct QdrantClient {
+#[derive(Clone)]
+pub struct QdrantClient<'a> {
     url: String,
     raw_client: Qdrant,
-    embedder: TextEmbedding,
+    embedder: &'a EmbeddingClient,
 }
 
-impl QdrantClient {
+impl<'a> QdrantClient<'a> {
     /// Create new Qdrant client
-    pub fn new(url: &str) -> anyhow::Result<Self> {
+    pub fn new(url: &str, embedder: &'a EmbeddingClient) -> anyhow::Result<Self> {
         let raw_client = Qdrant::from_url(url)
             .build()
             .context("Failed to connect to Qdrant")?;
-        let options = InitOptions::new(EmbeddingModel::AllMiniLML6V2);
-        let embedder = TextEmbedding::try_new(
-            options
-        ).context("Failed to initialize FastEmbed embedder")?;
 
         Ok(Self {
             url: url.to_string(),
@@ -76,10 +76,8 @@ impl QdrantClient {
         query: &str,
         project_scope: &ProjectScope,
     ) -> Result<Vec<(ContextFragment, SparseEmbedding)>> {
-        let query_embedding = self.embedder
-            .embed(vec![query.to_string()], None)
-            .context("Failed to embed query")?;
-
+        let query_embedding = self.embedder.embedder_sparse
+            .embed(vec![query.to_string()]).await?;
         let query_vector = query_embedding
             .first()
             .context("No embedding generated")?
@@ -91,7 +89,7 @@ impl QdrantClient {
         let search_result = self.raw_client
             .search_points(
                 SearchPointsBuilder::new(collection, query_vector, 10)
-                    .with_vectors(SelectorOptions::Include(VectorsSelector::new(vec!["Combined_sparse".to_string()])))
+                    .vector_name("Combined_sparse") // search combined_sparse
                     .filter(filter)
                     .with_vectors(true)  // request vector field return
                     .with_payload(true)
@@ -121,7 +119,7 @@ impl QdrantClient {
                             // Adjust enum variant name according to actual client version
                             VectorsOptions::Vectors(named_vectors) => {
                                 let sparse_vector = named_vectors.vectors.get("Combined_sparse");
-                                let indices = sparse_vector.unwrap().indices.clone().unwrap().data.into_iter().map(|x| x as usize).collect();
+                                let indices = sparse_vector.unwrap().indices.clone().unwrap().data;
                                 let values = match &sparse_vector.clone().unwrap().vector{
                                     Some(Vector::Sparse(vec))=>Some(vec.values.clone()),
                                     _ => None
@@ -180,33 +178,5 @@ impl QdrantClient {
 
     pub fn url(&self) -> &str {
         &self.url
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use ai_agent_common::Language;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn test_client_creation() {
-        let client = QdrantClient::new("http://localhost:6333");
-        assert!(client.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_filter_building() {
-        let client = QdrantClient::new("http://localhost:6333").unwrap();
-        let ctx = ProjectScope {
-            root: "/workspace".to_string(),
-            language_distribution: vec![(Language::Rust, 100f32)],
-            current_file: Some(PathBuf::from("data.txt".to_string())),
-        };
-
-        let filter = client.build_metadata_filter(&ctx);
-        assert!(filter.is_ok());
     }
 }

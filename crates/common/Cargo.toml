@@ -15,6 +15,11 @@ tokio = { workspace = true }
 strum_macros = { workspace = true }
 strum = { workspace = true }
 schemars = "*"
+swiftide = { version = "*", features = ["ollama", "qdrant", "tree-sitter", "fastembed", "redis"] }
+swiftide-indexing = "*"
+swiftide-integrations = { version = "*", features = ["ollama", "qdrant"] }
+tracing = "*"
+fastembed = "*"
 
 [dev-dependencies]
 tempfile = "3"

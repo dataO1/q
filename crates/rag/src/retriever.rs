@@ -2,17 +2,16 @@ use ai_agent_storage::QdrantClient;
 use anyhow::{Context, Result};
 use async_stream::try_stream;
 use async_trait::async_trait;
-use fastembed::{SparseEmbedding, SparseInitOptions, SparseModel, SparseTextEmbedding};
+use fastembed::SparseModel;
 use futures::{future::join_all, stream::{iter, select_all, FuturesUnordered}, Stream};
-use tokio::time::sleep;
-use tokio_stream::StreamMap;
 use std::{collections::BTreeMap, time::Duration};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::collections::HashMap;
 use futures::stream::StreamExt;
+use swiftide::{indexing::EmbeddingModel, SparseEmbedding};
 
-use ai_agent_common::{CollectionTier, ContextFragment, ProjectScope};
+use ai_agent_common::{llm::EmbeddingClient, CollectionTier, ContextFragment, ProjectScope};
 use crate::{reranker::Reranker};
 
 pub type Priority = u8;
@@ -71,12 +70,12 @@ pub trait RetrieverSource: Send + Sync {
     }
 }
 
-pub struct QdrantRetriever {
-    client: Arc<QdrantClient>,
+pub struct QdrantRetriever<'a> {
+    client: Arc<QdrantClient<'a>>,
 }
 
-impl QdrantRetriever {
-    pub fn new(client: QdrantClient) -> Self {
+impl<'a> QdrantRetriever<'a> {
+    pub fn new(client: QdrantClient<'a>) -> Self {
         Self {
             client: Arc::new(client),
         }
@@ -84,7 +83,7 @@ impl QdrantRetriever {
 }
 
 #[async_trait]
-impl RetrieverSource for QdrantRetriever {
+impl<'a> RetrieverSource for QdrantRetriever<'a> {
     fn priority(&self) -> Priority {
         1
     }
@@ -98,40 +97,20 @@ impl RetrieverSource for QdrantRetriever {
     }
 }
 
-pub struct MultiSourceRetriever {
-    sources: Vec<Arc<dyn RetrieverSource + Send + Sync>>,
-    embedder: Arc<SparseTextEmbedding>,
+pub struct MultiSourceRetriever<'a> {
+    sources: Vec<Arc<dyn RetrieverSource + Send + Sync + 'a>>,
+    embedder: Arc<EmbeddingClient>,
 }
 
-impl MultiSourceRetriever {
-    pub async fn new(qdrant_url: &str) -> Result<Self> {
-        let qdrant_client = QdrantClient::new(qdrant_url)?;
-        let embedder = SparseTextEmbedding::try_new(
-                SparseInitOptions::new(SparseModel::SPLADEPPV1)
-                    .with_show_download_progress(true), // Optional: show download progress
-            )?;
+impl<'a> MultiSourceRetriever<'a> {
+    pub async fn new(qdrant_client: &QdrantClient<'a>) -> Result<Self> {
 
+        let embedder = EmbeddingClient::new(&"jeffh/intfloat-e5-base-v2:f32".to_string(),SparseModel::SPLADEPPV1)?;
         Ok(Self {
-            sources: vec![Arc::new(QdrantRetriever::new(qdrant_client))],
+            sources: vec![Arc::new(QdrantRetriever::<'a>::new(qdrant_client.clone()))],
             embedder: Arc::new(embedder),
         })
     }
-    pub fn embedder(&self) -> &Arc<SparseTextEmbedding> {
-        &self.embedder
-    }
-
-    pub fn sources(&self) -> &[Arc<dyn RetrieverSource + Send + Sync>] {
-        &self.sources
-    }
-
-    pub fn embed_query(
-        &self,
-        texts: Vec<&str>,
-        _context: Option<&ProjectScope>,
-    ) -> Result<Vec<SparseEmbedding>> {
-        self.embedder.embed(texts, None)
-    }
-
 
     async fn process_stream(&self, mut stream: impl Stream<Item = Result<(ContextFragment,SparseEmbedding)>> + Unpin) {
         while let Some(item) = stream.next().await {
@@ -143,7 +122,7 @@ impl MultiSourceRetriever {
     }
 
     /// Retrieve all sources, then rerank and deduplicate combined results before streaming out in batches
-    pub fn retrieve_stream<'a>(
+    pub fn retrieve_stream(
         &'a self,
         raw_query: &'a str,
         queries: HashMap<CollectionTier, Vec<String>>,
@@ -161,7 +140,7 @@ impl MultiSourceRetriever {
                 let partial_results = source.retrieve_stream(queries.clone(), &project_scope);
                 all_streams.push(partial_results);
             }
-            let query_embeddings = self.embedder.embed(vec![raw_query], None)?;
+            let query_embeddings = self.embedder.embedder_sparse.embed(vec![raw_query.to_string()]).await?;
             let query_embedding = query_embeddings.get(0).unwrap();
 
             // Group streams by priority in a BTreeMap to ensure ascending order of priority
@@ -183,8 +162,9 @@ impl MultiSourceRetriever {
                 }
                 if !batch.is_empty() {
                     // Step 5: Rerank batch of fragments before yield
-                    let reranked = Reranker::rerank_and_deduplicate(&query_embedding,&batch);
-
+                    // let reranked = Reranker::rerank_and_deduplicate(&query_embedding,&batch);
+                    // TODO:: implement readl reranking
+                    let reranked: Vec<ContextFragment> = batch.into_iter().map(|x| x.0).collect();
                     for fragment in reranked {
                         yield fragment;
                     }

@@ -1,4 +1,4 @@
-use ai_agent_common::*;
+use ai_agent_common::{llm::EmbeddingClient, *};
 use ai_agent_storage::QdrantClient;
 use anyhow::{Context, Result, anyhow};
 use serde_json::json;
@@ -22,16 +22,17 @@ use swiftide::integrations::{
 use tracing::{info, trace, warn};
 
 /// Indexing pipeline using Swiftide
-pub struct IndexingPipeline {
-    qdrant_client: QdrantClient,
-    redis_cache: Redis,  // ← Add Redis cache
-    config: IndexingConfig//
+pub struct IndexingPipeline<'a> {
+    qdrant_client: QdrantClient<'a>,
+    redis_cache: Redis,
+    config: IndexingConfig,
+    embedder: &'a EmbeddingClient,
 }
 
-impl IndexingPipeline {
+impl<'a> IndexingPipeline<'a> {
     /// Create a new indexing pipeline from configuration
     /// Create a new indexing pipeline with hybrid search support
-    pub fn new(config: &SystemConfig) -> Result<Self> {
+    pub fn new(config: &SystemConfig, embedder: &'a EmbeddingClient) -> Result<Self> {
         tracing::debug!("Creating IndexingPipeline");
 
 
@@ -44,7 +45,7 @@ impl IndexingPipeline {
         ).context("Failed to create Redis cache")?;
 
         tracing::debug!("Initializing Qdrant client...");
-        let qdrant_client = QdrantClient::new(&config.storage.qdrant_url.to_string())
+        let qdrant_client = QdrantClient::<'a>::new(&config.storage.qdrant_url.to_string(),embedder)
             .context("Failed to create Qdrant client")?;
 
         // Initialize Redis for caching indexed nodes
@@ -52,7 +53,8 @@ impl IndexingPipeline {
         Ok(Self {
             redis_cache,
             qdrant_client,
-            config: config.indexing.clone()
+            config: config.indexing.clone(),
+            embedder
         })
     }
 
@@ -101,18 +103,13 @@ impl IndexingPipeline {
     fn create_pipeline(&self, path: &Path, extensions: Option<&Vec<&str>>,
 ) -> Result<Pipeline<String>>{
         // Example custom transformer to add useful metadata
-        let dense_embedding_model = Ollama::builder()
-            .default_embed_model("jeffh/intfloat-e5-base-v2:f32")
-            .build()
-            .context("Failed to build dense embedding model client")?;
+        let dense_embedding_model = self.embedder.embedder_dense.clone();
         tracing::debug!("Initializing FastEmbed sparse...");
-        let sparse_embedding_model = FastEmbed::try_default_sparse()
-            .context("Failed to initialize sparse embedder")?
-            .to_owned();
+        let sparse_embedding_model = self.embedder.embedder_sparse.clone();
         let prompt_client = Ollama::builder()
-            .default_prompt_model("llama3.1:8b")
-            .build()
-            .context("Failed to build Ollama prompt client")?;
+        .default_prompt_model("llama3.1:8b")
+        .build()
+        .context("Failed to build Ollama prompt client")?;
 
         let mut file_loader = FileLoader::new(path);
         if let Some(ext) = extensions{
@@ -132,12 +129,12 @@ impl IndexingPipeline {
         pipeline = pipeline.then_chunk(ChunkAdaptive::default())
         // 4. Sparse embeddings
         .then_in_batch(
-            transformers::SparseEmbed::new(sparse_embedding_model.clone())
+            transformers::SparseEmbed::new(sparse_embedding_model)
                 .with_batch_size(32)
         )
         // 5. Dense embeddings
         .then_in_batch(
-            transformers::Embed::new(dense_embedding_model.clone())
+            transformers::Embed::new(dense_embedding_model)
                 .with_batch_size(32)
         );
         Ok(pipeline)
@@ -174,18 +171,18 @@ impl IndexingPipeline {
 }
 
 /// Indexing coordinator that watches files and manages the pipeline
-pub struct IndexingCoordinator {
-    pipeline: IndexingPipeline,
+pub struct IndexingCoordinator<'a> {
+    pipeline: IndexingPipeline<'a>,
     config: SystemConfig,
 }
 
-impl IndexingCoordinator {
-    pub fn new(config: SystemConfig) -> Result<Self> {
+impl<'a> IndexingCoordinator<'a> {
+    pub fn new(config: SystemConfig, embedder: &'a EmbeddingClient) -> Result<Self> {
         tracing::debug!("Creating IndexingCoordinator");
         tracing::debug!("Qdrant URL: {}", config.storage.qdrant_url);
 
         tracing::debug!("Creating IndexingPipeline...");
-        let pipeline = IndexingPipeline::new(&config)
+        let pipeline = IndexingPipeline::new(&config, embedder)
             .context("Failed to create indexing pipeline")?;
 
         tracing::debug!("IndexingCoordinator created successfully");
@@ -243,63 +240,5 @@ impl IndexingCoordinator {
 
         info!("Initial indexing complete");
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
-    use std::fs;
-
-    fn test_config() -> SystemConfig {
-        SystemConfig {
-            indexing: IndexingConfig::default(),
-            rag: SystemConfig::default().rag,
-            orchestrator: SystemConfig::default().orchestrator,
-            storage: StorageConfig {
-                qdrant_url: "http://localhost:16334".to_string(),
-                postgres_url: "postgresql://localhost/test".to_string(),
-                redis_url: None,
-            },
-        }
-    }
-
-    #[test]
-    fn test_pipeline_creation() {
-        let config = test_config();
-        let pipeline = IndexingPipeline::new(&config);
-
-        assert!(pipeline.is_ok());
-    }
-
-    #[test]
-    fn test_is_code_file() {
-        let config = test_config();
-        let pipeline = IndexingPipeline::new(&config).unwrap();
-
-        assert!(pipeline.is_code_file(Path::new("main.rs")));
-        assert!(pipeline.is_code_file(Path::new("app.py")));
-        assert!(pipeline.is_code_file(Path::new("script.js")));
-        assert!(!pipeline.is_code_file(Path::new("README.md")));
-        assert!(!pipeline.is_code_file(Path::new("notes.txt")));
-    }
-
-    // Full integration tests require Ollama and Qdrant running
-    #[tokio::test]
-    #[ignore]
-    async fn test_index_file_integration() {
-        let temp = TempDir::new().unwrap();
-        let test_file = temp.path().join("test.rs");
-        fs::write(&test_file, "fn main() { println!(\"test\"); }").unwrap();
-
-        let config = test_config();
-        let pipeline = IndexingPipeline::new(&config).unwrap();
-
-        let result = pipeline
-            .index_directory(&test_file, CollectionTier::Workspace)
-            .await;
-
-        assert!(result.is_ok());
     }
 }

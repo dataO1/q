@@ -1,14 +1,16 @@
-use ai_agent_common::config::{SystemConfig};
+use ai_agent_common::{config::SystemConfig, llm::EmbeddingClient};
 use ai_agent_indexing::pipeline::IndexingCoordinator;
 use ai_agent_indexing::watcher::FileWatcher;
 use ai_agent_indexing::classifier::PathClassifier;
 use ai_agent_storage::QdrantClient;
 use anyhow::Result;
-use swiftide::integrations::qdrant::Qdrant;
+use fastembed::SparseModel;
+use swiftide::{integrations::qdrant::Qdrant, traits::EmbeddingModel};
 use tracing::{debug, error, info};
 use clap::Parser;
 use tracing_subscriber::{fmt, EnvFilter};
 use tracing::Level;
+
 
 #[derive(Parser)]
 #[command(name = "indexer")]
@@ -44,9 +46,10 @@ async fn main() -> Result<()> {
     let config = SystemConfig::load_config(&cli.config)?;
     debug!("Loaded config: {:#?}", config);  // ← Add debug
 
+    let embedding_client = EmbeddingClient::new(&"jeffh/intfloat-e5-base-v2:f32".to_string(),SparseModel::SPLADEPPV1)?;
     // Verify services
     info!("🔍 Verifying services...");
-    if let Err(e) = verify_services(&config).await {
+    if let Err(e) = verify_services(&config, &embedding_client).await {
         error!("Service verification failed: {:?}", e);
         error!("Backtrace: {:?}", std::backtrace::Backtrace::force_capture());
         return Err(e);
@@ -54,7 +57,7 @@ async fn main() -> Result<()> {
 
     // Initialize coordinator with debug
     debug!("Creating IndexingCoordinator...");
-    let coordinator = IndexingCoordinator::new(config.clone())
+    let coordinator = IndexingCoordinator::new(config.clone(), &embedding_client)
         .map_err(|e| {
             error!("Failed to create coordinator: {:?}", e);
             error!("Backtrace: {:?}", std::backtrace::Backtrace::force_capture());
@@ -117,10 +120,10 @@ async fn main() -> Result<()> {
 }
 
 /// Verify required services are running
-async fn verify_services(config: &SystemConfig) -> Result<()> {
+async fn verify_services(config: &SystemConfig, embedder: &EmbeddingClient) -> Result<()> {
     info!("🔍 Verifying services...");
     // Check Qdrant
-    let client = QdrantClient::new(&config.storage.qdrant_url)?;
+    let client = QdrantClient::new(&config.storage.qdrant_url, embedder)?;
     // let client = Qdrant::try_from_url(&config.storage.qdrant_url)?.build()?;
     match client.health_check().await{
         Ok(_) => info!("✅ Qdrant: {}", config.storage.qdrant_url),

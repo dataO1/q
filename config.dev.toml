@@ -7,11 +7,12 @@ watch_enabled = true
 chunk_size = 512
 enable_qa_metadata = false  # ← Enable this for better retrieval (slower)
 
-[indexing.embedding]
+[embedding]
 ollama_host= "http://localhost"
 ollama_port= 11434
-model= "placeholder, not used"
-batch_size= 1024
+sparse_model= "placeholder, not used"
+# dense_model= "placeholder, not used"
+# batch_size= 1024
 
 [indexing.filters]
 respect_gitignore = true
