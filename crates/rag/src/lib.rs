@@ -10,7 +10,7 @@ pub mod reranker;
 use ai_agent_common::llm::EmbeddingClient;
 use ai_agent_storage::QdrantClient;
 use anyhow::{Context, Result};
-use futures::{Stream, StreamExt};
+use futures::{Stream};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -21,11 +21,9 @@ use crate::query_enhancer::QueryEnhancer;
 
 /// Main RAG pipeline struct
 pub struct SmartMultiSourceRag<'a> {
-    context_manager: context_manager::ContextManager,
     query_enhancer: QueryEnhancer,
     source_router: source_router::SourceRouter,
     retriever: MultiSourceRetriever<'a>,
-    embedder: Arc<EmbeddingClient>,
 }
 
 impl<'a> SmartMultiSourceRag<'a> {
@@ -33,12 +31,9 @@ impl<'a> SmartMultiSourceRag<'a> {
     pub async fn new(config: &SystemConfig, embedder: &'a EmbeddingClient) -> anyhow::Result<Self> {
         let qdrant_client = QdrantClient::<'a>::new(&config.storage.qdrant_url,embedder)?;
         Ok(Self {
-            context_manager: context_manager::ContextManager::new().await?,
             query_enhancer: QueryEnhancer::new(&config.storage.redis_url.as_ref().unwrap()).await?,
             source_router: source_router::SourceRouter::new(&config)?,
             retriever: MultiSourceRetriever::<'a>::new(&qdrant_client, &embedder).await?,
-            embedder: Arc::new(embedder.clone())
-
         })
     }
 

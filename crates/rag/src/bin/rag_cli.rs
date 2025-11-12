@@ -1,4 +1,5 @@
 use ai_agent_common::llm::EmbeddingClient;
+use ai_agent_rag::context_manager::ContextManager;
 use ai_agent_rag::SmartMultiSourceRag;
 // src/bin/rag_cli.rs
 use anyhow::Result;
@@ -29,7 +30,7 @@ async fn main() -> Result<()> {
     let cwd = env::current_dir()?.to_string_lossy().into_owned();
 
     // Example ProjectScope
-    let project_scope = ProjectScope::new(cwd.clone(), None, vec![(Language::Rust, 1f32)]);
+    let project_scope = ContextManager::new()?.detect_project_scope(Some(cwd)).await?;
     let conversation_id = ConversationId::new();
 
     let embedding_client = EmbeddingClient::new(&config.embedding.dense_model)?;

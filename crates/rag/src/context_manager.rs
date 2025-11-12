@@ -11,7 +11,7 @@ pub struct ContextManager {}
 
 impl ContextManager {
     /// Async constructor
-    pub async fn new() -> Result<Self> {
+    pub fn new() -> Result<Self> {
         Ok(Self {})
     }
 
