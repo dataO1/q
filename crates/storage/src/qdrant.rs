@@ -2,9 +2,10 @@ use anyhow::{Context, Result, anyhow};
 use qdrant_client::qdrant::r#match::MatchValue;
 use qdrant_client::qdrant::vector_output::Vector;
 use qdrant_client::qdrant::vectors_output::VectorsOptions;
+use qdrant_client::qdrant::with_vectors_selector::SelectorOptions;
 use swiftide::integrations::qdrant::{qdrant_client, Qdrant as SwiftideQdrant};
 use swiftide::indexing::EmbeddedField;
-use qdrant_client::qdrant::{Condition, Filter, SearchPointsBuilder};
+use qdrant_client::qdrant::{Condition, Filter, SearchPointsBuilder, VectorsSelector};
 use qdrant_client::Qdrant;
 use fastembed::{EmbeddingModel, InitOptions, SparseEmbedding, TextEmbedding};
 use ai_agent_common::{CollectionTier, ContextFragment, ProjectScope};
@@ -37,7 +38,7 @@ impl QdrantClient {
     /// Get Swiftide Qdrant client for indexing pipelines
     pub fn indexing_client(&self, collection: &str) -> Result<SwiftideQdrant> {
         SwiftideQdrant::try_from_url(&self.url)?
-            .vector_size(384)
+            .vector_size(768)
             .batch_size(50)
             .with_vector(EmbeddedField::Combined)
             .with_sparse_vector(EmbeddedField::Combined)
@@ -57,7 +58,7 @@ impl QdrantClient {
         // For each tier + query tuple, run query_with_filters with appropriate collection name or parameters
         for (tier, query) in queries {
             // Derive collection name or namespace from the tier
-            let collection_name = tier.collection_name();
+            let collection_name = tier.to_string();
 
             // Run query with filters for this collection and query text
             let mut results = self.query_with_filters(&collection_name, &query, project_scope).await?;
@@ -90,6 +91,7 @@ impl QdrantClient {
         let search_result = self.raw_client
             .search_points(
                 SearchPointsBuilder::new(collection, query_vector, 10)
+                    .with_vectors(SelectorOptions::Include(VectorsSelector::new(vec!["Combined_sparse".to_string()])))
                     .filter(filter)
                     .with_vectors(true)  // request vector field return
                     .with_payload(true)

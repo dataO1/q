@@ -62,19 +62,7 @@ pub enum CollectionTier {
     Personal,      // Personal documents
     Workspace,     // Active projects
     Dependencies,  // External libraries
-    Online,        // Web docs
-}
-
-impl CollectionTier {
-    pub fn collection_name(&self) -> &'static str {
-        match self {
-            Self::System => "system_knowledge",
-            Self::Personal => "personal_docs",
-            Self::Workspace => "workspace_dev",
-            Self::Dependencies => "external_deps",
-            Self::Online => "online_docs",
-        }
-    }
+    // Online,        // Web docs
 }
 
 /// Project scope information

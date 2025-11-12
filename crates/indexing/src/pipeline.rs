@@ -58,15 +58,15 @@ impl IndexingPipeline {
 
     /// Index a single file with Redis-based deduplication
 /// Index a file with automatic upsert (updates existing points by ID)
-    pub async fn index_directory(&self, file_path: &Path, tier: CollectionTier) -> Result<()> {
-        let collection = tier.collection_name();
+    pub async fn index_directory(&self, file_path: &Path, tier: CollectionTier, extensions: Option<&Vec<&str>>) -> Result<()> {
+        let collection = tier.to_string();
 
         info!("Indexing file: {} → {}", file_path.display(), collection);
 
         // Qdrant builder with upsert enabled (default behavior)
         let qdrant = self.qdrant_client.indexing_client(&collection)?;
 
-        let pipeline = self.create_pipeline(file_path,&["rs", "md"])
+        let pipeline = self.create_pipeline(file_path,extensions)
             .map_err(|err| {
                 tracing::error!("Failed to create pipeline: {:?}", err);
                 err
@@ -98,7 +98,7 @@ impl IndexingPipeline {
         })
     }
 
-    fn create_pipeline(&self, path: &Path, extensions: &[&str],
+    fn create_pipeline(&self, path: &Path, extensions: Option<&Vec<&str>>,
 ) -> Result<Pipeline<String>>{
         // Example custom transformer to add useful metadata
         let dense_embedding_model = Ollama::builder()
@@ -114,10 +114,13 @@ impl IndexingPipeline {
             .build()
             .context("Failed to build Ollama prompt client")?;
 
-        let file_loader = FileLoader::new(path).with_extensions(extensions);
+        let mut file_loader = FileLoader::new(path);
+        if let Some(ext) = extensions{
+            file_loader = file_loader.with_extensions(ext);
+        }
         let mut pipeline = Pipeline::from_loader(file_loader);
         pipeline = pipeline
-            .filter_cached(self.redis_cache.clone())
+            // .filter_cached(self.redis_cache.clone())
             // .then(MetadataTitle::new(prompt_client.clone()))
             // .then(MetadataSummary::new(prompt_client.clone()))
             // .then(MetadataKeywords::new(prompt_client.clone()))
@@ -141,19 +144,19 @@ impl IndexingPipeline {
     }
 
     /// Batch index multiple files
-    pub async fn index_batch(
-        &self,
-        files: Vec<(PathBuf, CollectionTier)>,
-    ) -> Result<Vec<Result<()>>> {
-        let mut results = Vec::new();
-
-        for (file_path, tier) in files {
-            let result = self.index_directory(&file_path, tier).await;
-            results.push(result);
-        }
-
-        Ok(results)
-    }
+    // pub async fn index_batch(
+    //     &self,
+    //     files: Vec<(PathBuf, CollectionTier)>,
+    // ) -> Result<Vec<Result<()>>> {
+    //     let mut results = Vec::new();
+    //
+    //     for (file_path, tier) in files {
+    //         let result = self.index_directory(&file_path, tier).await;
+    //         results.push(result);
+    //     }
+    //
+    //     Ok(results)
+    // }
 
     /// Check if file is a code file
     pub fn is_code_file(&self, path: &Path) -> bool {
@@ -198,7 +201,7 @@ impl IndexingCoordinator {
     ) -> Result<()> {
         match event_type {
             "created" | "modified" => {
-                self.pipeline.index_directory(path, tier).await?;
+                self.pipeline.index_directory(path, tier,None).await?;
             }
             "deleted" => {
                 // TODO: Implement deletion from Qdrant
@@ -217,24 +220,24 @@ impl IndexingCoordinator {
 
         // Index workspace paths
         for path in &self.config.indexing.workspace_paths {
-            let extensions =  &["rs", "py", "js", "ts", "md"];
+            let extensions =  vec!["rs", "py", "js", "ts", "md"];
             self.pipeline
-                .index_directory(path, CollectionTier::Workspace)
+                .index_directory(path, CollectionTier::Workspace, Some(&extensions))
                 .await?;
         }
 
         // Index personal paths
         for path in &self.config.indexing.personal_paths {
-            let extensions =   &["md", "txt", "org"];
+            let extensions =   vec!["md", "txt", "org"];
             self.pipeline
-                .index_directory(path, CollectionTier::Personal)
+                .index_directory(path, CollectionTier::Personal, Some(&extensions))
                 .await?;
         }
 
         // Index system paths
         for path in &self.config.indexing.system_paths {
             self.pipeline
-                .index_directory(path, CollectionTier::System)
+                .index_directory(path, CollectionTier::System,None)
                 .await?;
         }
 
