@@ -151,20 +151,18 @@ impl MultiSourceRetriever {
     ) -> Pin<Box<dyn Stream<Item = Result<ContextFragment>> + Send + 'a>> {
 
         let stream = Box::pin(try_stream! {
-            let sources = self.sources.clone();
-            let queries = queries.clone(); // clone here to move into async block
-            let raw_query = raw_query.clone(); // clone here to move into async block
-            let project_scope = project_scope.clone(); // clone here to move into async block
             // Collect all results from all sources
-            // let mut all_streams = Vec::<RetrieverSourcePrioStream>::new();
-            let all_streams:  Vec<RetrieverSourcePrioStream> = sources.into_iter().map(move |source|{
-                source.retrieve_stream(queries, &project_scope)
-            }).collect();
-            // for source in sources.into_iter() {
-            //     let partial_results = source.retrieve_stream(queries.clone(), project_scope);
-            //     all_streams.push(partial_results.clone());
-            // }
-            let query_embedding = self.embedder.embed(vec![raw_query], None)?.get(0).unwrap();
+            let mut all_streams = Vec::<RetrieverSourcePrioStream>::new();
+
+            // let all_streams:  Vec<RetrieverSourcePrioStream> = sources.into_iter().map(|source|{
+            //     source.retrieve_stream(queries.clone(), &project_scope.clone())
+            // }).collect();
+            for source in self.sources.iter() {
+                let partial_results = source.retrieve_stream(queries.clone(), &project_scope);
+                all_streams.push(partial_results);
+            }
+            let query_embeddings = self.embedder.embed(vec![raw_query], None)?;
+            let query_embedding = query_embeddings.get(0).unwrap();
 
             // Group streams by priority in a BTreeMap to ensure ascending order of priority
             let mut streams_by_priority: BTreeMap<Priority, Vec<_>> = BTreeMap::new();
