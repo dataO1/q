@@ -73,7 +73,7 @@ impl<'a> SmartMultiSourceRag<'a> {
             .await.context("Source routing failed")?;
 
         // Enhance per tier (parallel, context-aware)
-        let enhanced_queries = self.enhance_queries(&source_queries, project_scope,conversation_id).await?;
+        let enhanced_queries = self.enhance_queries(&source_queries, project_scope,conversation_id).await.context("Enhancing queries failed!")?;
 
         // Step 3: Prepare priority-ordered streams from MultiSourceRetriever
         let prioritized_streams = rag.retriever.retrieve_stream(raw_query,enhanced_queries, project_scope);

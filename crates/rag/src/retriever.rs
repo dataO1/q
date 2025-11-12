@@ -22,7 +22,7 @@ pub trait RetrieverSource: Send + Sync {
         &self,
         queries: Vec<(CollectionTier, String)>,
         project_scope: &ProjectScope,
-    ) -> Result<Vec<(ContextFragment, SparseEmbedding)>>;
+    ) -> Result<Vec<ContextFragment>>;
 
 
     fn retrieve_stream<'a>(
@@ -45,7 +45,7 @@ pub trait RetrieverSource: Send + Sync {
                     .await?;
 
                 // Map to Vec<Result<ContextFragment>>
-                let fragments = results.into_iter().map(|(frag, emb)| Ok((frag,emb))).collect::<Vec<_>>();
+                let fragments = results.into_iter().map(|frag| Ok(frag)).collect::<Vec<_>>();
 
                 Ok::<_, anyhow::Error>(fragments)
             }
@@ -90,7 +90,7 @@ impl<'a> RetrieverSource for QdrantRetriever<'a> {
         &self,
         queries: Vec<(CollectionTier, String)>,
         project_scope: &ProjectScope,
-    ) -> Result<Vec<(ContextFragment, SparseEmbedding)>> {
+    ) -> Result<Vec<ContextFragment>> {
         self.client.query_collections(queries, project_scope).await
     }
 }
@@ -136,9 +136,9 @@ impl<'a> MultiSourceRetriever<'a> {
                 let partial_results = source.retrieve_stream(queries.clone(), &project_scope);
                 all_streams.push(partial_results);
             }
-            let query_embeddings = self.embedder.embedder_sparse.embed(vec![raw_query.to_string()]).await?;
-            let query_embedding = query_embeddings.get(0).unwrap();
-
+            // let query_embeddings = self.embedder.embedder_sparse.embed(vec![raw_query.to_string()]).await?;
+            // let query_embedding = query_embeddings.get(0).unwrap();
+            //
             // Group streams by priority in a BTreeMap to ensure ascending order of priority
             let mut streams_by_priority: BTreeMap<Priority, Vec<_>> = BTreeMap::new();
             for ps in all_streams {
@@ -147,7 +147,7 @@ impl<'a> MultiSourceRetriever<'a> {
 
             //  yield entire batch downstream grouped by priority
             for (_priority, mut streams) in streams_by_priority {
-                let mut batch: Vec<(ContextFragment,SparseEmbedding)> = Vec::new();
+                let mut batch: Vec<ContextFragment> = Vec::new();
 
                 // Drain all streams for this priority concurrently
                 for mut stream in streams.drain(..) {
@@ -160,8 +160,8 @@ impl<'a> MultiSourceRetriever<'a> {
                     // Step 5: Rerank batch of fragments before yield
                     // let reranked = Reranker::rerank_and_deduplicate(&query_embedding,&batch);
                     // TODO:: implement readl reranking
-                    let reranked: Vec<ContextFragment> = batch.into_iter().map(|x| x.0).collect();
-                    for fragment in reranked {
+                    // let reranked: Vec<ContextFragment> = batch.into_iter().map(|x| x.0).collect();
+                    for fragment in batch {
                         yield fragment;
                     }
                 }
@@ -172,6 +172,6 @@ impl<'a> MultiSourceRetriever<'a> {
 }
 
 struct RetrieverSourcePrioStream<'a> {
-    stream: Pin<Box<dyn Stream<Item = Result<(ContextFragment,SparseEmbedding)>> + Send + 'a>>,
+    stream: Pin<Box<dyn Stream<Item = Result<ContextFragment>> + Send + 'a>>,
     priority: u8,
 }

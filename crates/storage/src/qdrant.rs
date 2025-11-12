@@ -50,7 +50,7 @@ impl<'a> QdrantClient<'a> {
         &self,
         queries: Vec<(CollectionTier, String)>,
         project_scope: &ProjectScope,
-    ) -> Result<Vec<(ContextFragment, SparseEmbedding)>> {
+    ) -> Result<Vec<ContextFragment>> {
         let mut all_results = Vec::new();
 
         // For each tier + query tuple, run query_with_filters with appropriate collection name or parameters
@@ -73,7 +73,7 @@ impl<'a> QdrantClient<'a> {
         collection: &str,
         query: &str,
         project_scope: &ProjectScope,
-    ) -> Result<Vec<(ContextFragment, SparseEmbedding)>> {
+    ) -> Result<Vec<ContextFragment>> {
         let query_embedding = self.embedder.embedder_sparse
             .embed(vec![query.to_string()]).await?;
         let query_vector = query_embedding
@@ -87,9 +87,9 @@ impl<'a> QdrantClient<'a> {
         let search_result = self.raw_client
             .search_points(
                 SearchPointsBuilder::new(collection, query_vector, 10)
-                    .vector_name("Combined_sparse") // search combined_sparse
+                    // .vector_name("Combined_sparse") // search combined_sparse
                     .filter(filter)
-                    .with_vectors(true)  // request vector field return
+                    // .with_vectors(true)  // request vector field return
                     .with_payload(true)
             )
             .await?;
@@ -109,34 +109,34 @@ impl<'a> QdrantClient<'a> {
 
             // Extract embedding vector from raw vector field
             // Assuming vector is a repeated f32 field (dense)
-            let emb_vec: Option<SparseEmbedding> = match &point.vectors {
-                Some(v) => match &v.vectors_options {
-                    Some(vectors_options) => {
-                        match vectors_options {
-                            // Match on your sparse vector variant, e.g., `VectorsOptions::Sparse`
-                            // Adjust enum variant name according to actual client version
-                            VectorsOptions::Vectors(named_vectors) => {
-                                let sparse_vector = named_vectors.vectors.get("Combined_sparse");
-                                let indices = sparse_vector.unwrap().indices.clone().unwrap().data;
-                                let values = match &sparse_vector.clone().unwrap().vector{
-                                    Some(Vector::Sparse(vec))=>Some(vec.values.clone()),
-                                    _ => None
-                                }.unwrap_or(vec![]);
-                                Some(SparseEmbedding {
-                                    indices,
-                                    values
-                                })
-                            }
-                            _ => None,
-                        }
-                    }
-                    None => None,
-                },  // raw dense vector usually in .f
-                None => None,
-            };
-            let embedding = SparseEmbedding::from(emb_vec.unwrap());
+            // let emb_vec: Option<SparseEmbedding> = match &point.vectors {
+            //     Some(v) => match &v.vectors_options {
+            //         Some(vectors_options) => {
+            //             match vectors_options {
+            //                 // Match on your sparse vector variant, e.g., `VectorsOptions::Sparse`
+            //                 // Adjust enum variant name according to actual client version
+            //                 VectorsOptions::Vectors(named_vectors) => {
+            //                     let sparse_vector = named_vectors.vectors.get("Combined_sparse");
+            //                     let indices = sparse_vector.unwrap().indices.clone().unwrap().data;
+            //                     let values = match &sparse_vector.clone().unwrap().vector{
+            //                         Some(Vector::Sparse(vec))=>Some(vec.values.clone()),
+            //                         _ => None
+            //                     }.unwrap_or(vec![]);
+            //                     Some(SparseEmbedding {
+            //                         indices,
+            //                         values
+            //                     })
+            //                 }
+            //                 _ => None,
+            //             }
+            //         }
+            //         None => None,
+            //     },  // raw dense vector usually in .f
+            //     None => None,
+            // };
+            // let embedding = SparseEmbedding::from(emb_vec.unwrap());
 
-            results.push((fragment, embedding));
+            results.push(fragment);
         }
 
         Ok(results)
