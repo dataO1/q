@@ -106,7 +106,7 @@ impl QdrantClient {
                 content: payload.get("content").and_then(|v| v.as_str()).unwrap_or(&"".to_string()).to_string(),
                 summary: payload.get("summary").and_then(|v| v.as_str()).unwrap_or(&"".to_string()).to_string(),
                 source: payload.get("source").and_then(|v| v.as_str()).unwrap_or(&"unknown".to_string()).to_string(),
-                score: point.score,
+                score: ( point.score * 100f32 ) as usize,
             };
 
             // Extract embedding vector from raw vector field

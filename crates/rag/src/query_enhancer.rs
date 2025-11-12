@@ -1,6 +1,6 @@
 use ai_agent_storage::RedisCache;
 use anyhow::{Context, Result};
-use ai_agent_common::{ProjectScope, ConversationId};
+use ai_agent_common::{CollectionTier, ConversationId, ProjectScope};
 use async_trait::async_trait;
 use moka::future::Cache;
 use tokenizers::pre_tokenizers::whitespace::Whitespace;
@@ -14,7 +14,7 @@ use tokio::sync::RwLock;
 
 pub struct QueryEnhancer {
     ollama_client: OllamaClient,
-    mem_cache: Cache<String, String>,
+    mem_cache: Cache<String, Vec<String>>,
     redis_client: RedisCache,
     redis_cache_prefix: String,
     tokenizer: Tokenizer,
@@ -94,9 +94,9 @@ impl QueryEnhancer {
         stopwords.contains(&token)
     }
 
-    async fn redis_get(&self, key: &str) -> Result<Option<String>> {
+    async fn redis_get(&self, key: &str) -> Result<Option<Vec<String>>> {
         let full_key = format!("{}{}", self.redis_cache_prefix, key);
-        Ok(self.redis_client.get(&full_key).await?)
+        self.redis_client.get(&full_key).await
     }
 
     async fn redis_set(&self, key: &str, value: &str, ttl_secs: u64) -> Result<()> {
@@ -109,14 +109,13 @@ impl QueryEnhancer {
         &self,
         raw_query: &str,
         conversation_id: &ConversationId,
-        source_name: &str,
-        source_desc: &str,
+        tier: CollectionTier,
         project_scope: &ProjectScope,
         heuristic_version: u8,
     ) -> String {
         let key_str = format!(
-            "{}|{}|{}|{}|{:?}|v{}",
-            raw_query, conversation_id, source_name, source_desc, project_scope.language_distribution, heuristic_version
+            "{}|{}|{:?}|{:?}|v{}",
+            raw_query, conversation_id,tier, project_scope.language_distribution, heuristic_version
         );
         hex::encode(Sha256::digest(key_str.as_bytes()))
     }
@@ -127,46 +126,44 @@ impl QueryEnhancer {
         raw_query: &str,
         project_scope: &ProjectScope,
         conversation_id: &ConversationId,
-        source_descriptions: &[(&str, &str)],
-    ) -> Result<HashMap<String, String>> {
-        let mut results = HashMap::new();
+        tier: CollectionTier,
+    ) -> Result<Vec<String>> {
+        let mut results = Vec::<String>::new();
 
         const HEURISTIC_VERSION: u8 = 1; // increment on heuristic changes
 
-        for (source_name, description) in source_descriptions.iter() {
-            let cache_key = self.compute_cache_key(raw_query, conversation_id, source_name, description, project_scope, HEURISTIC_VERSION);
+        let cache_key = self.compute_cache_key(raw_query, conversation_id,tier, project_scope, HEURISTIC_VERSION);
 
-            // Check in-memory cache first
-            if let Some(cached) = self.mem_cache.get(&cache_key).await {
-                results.insert(source_name.to_string(), cached.clone());
-                continue;
-            }
-
-            // Check Redis cache
-            if let Ok(Some(redis_cached)) = self.redis_get(&cache_key).await {
-                self.mem_cache.insert(cache_key.clone(), redis_cached.clone()).await;
-                results.insert(source_name.to_string(), redis_cached);
-                continue;
-            }
-
-            // Apply heuristics to produce query variants
-            let heuristic_variants = self.heuristic_expand(raw_query);
-
-            // Compose LLM prompt with heuristic variants + source description + context
-            let prompt = format!(
-                "Generate an enhanced search query optimized for this source:\n{}\n\nRaw query and heuristic variants:\n{:?}\n\nProject context:\n{:?}\nConversation ID:\n{}",
-                description, heuristic_variants, project_scope, conversation_id
-            );
-
-            // Query Ollama LLM for final enhanced query
-            let enhanced = self.ollama_client.query(&prompt).await?;
-
-            // Cache enhanced query
-            self.mem_cache.insert(cache_key.clone(), enhanced.clone()).await;
-            let _ = self.redis_set(&cache_key, &enhanced, 86400).await;
-
-            results.insert(source_name.to_string(), enhanced);
+        // Check in-memory cache first
+        if let Some(cached) = self.mem_cache.get(&cache_key).await {
+            return Ok(cached);
         }
+
+        // Check Redis cache
+        if let Ok(Some(redis_cached)) = self.redis_get(&cache_key).await {
+            self.mem_cache.insert(cache_key.clone(), redis_cached.clone()).await;
+            return Ok(redis_cached);
+        }
+
+        // Apply heuristics to produce query variants
+        let mut heuristic_variants = self.heuristic_expand(raw_query)?;
+
+        // TODO: generate structured data and multiple queries here
+        // Compose LLM prompt with heuristic variants + source description + context
+        let prompt = format!(
+            "Generate an enhanced search query optimized for this source:\n{:?}\n\nRaw query and heuristic variants:\n{:?}\n\nProject context:\n{:?}\nConversation ID:\n{}",
+            tier, heuristic_variants, project_scope, conversation_id
+        );
+
+        // Query Ollama LLM for final enhanced query
+        let enhanced = self.ollama_client.query(&prompt).await?;
+
+        results.append(&mut heuristic_variants);
+        results.push(enhanced.clone());
+        // Cache enhanced query
+        self.mem_cache.insert(cache_key.clone(),results.clone()).await;
+        let _ = self.redis_set(&cache_key, &enhanced, 86400).await;
+
 
         Ok(results)
     }

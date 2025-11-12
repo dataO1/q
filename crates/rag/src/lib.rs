@@ -9,10 +9,13 @@ pub mod reranker;
 
 use anyhow::{Context, Result};
 use async_stream::try_stream;
-use futures::{Stream, StreamExt};
+use fastembed::{SparseEmbedding, SparseInitOptions, SparseModel, SparseTextEmbedding};
+use futures::{join, Stream, StreamExt};
 use std::collections::BTreeMap;
+use std::future::ready;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::collections::HashMap;
 
 use ai_agent_common::{CollectionTier, ContextFragment, ConversationId, ProjectScope, SystemConfig};
 use crate::reranker::Reranker;
@@ -25,6 +28,7 @@ pub struct SmartMultiSourceRag {
     query_enhancer: QueryEnhancer,
     source_router: source_router::SourceRouter,
     retriever: MultiSourceRetriever,
+    embedder: Arc<SparseTextEmbedding>,
 }
 
 impl SmartMultiSourceRag {
@@ -35,61 +39,54 @@ impl SmartMultiSourceRag {
             query_enhancer: QueryEnhancer::new(&config.storage.redis_url.as_ref().unwrap()).await?,
             source_router: source_router::SourceRouter::new(&config.embedding)?,
             retriever: MultiSourceRetriever::new(&config.storage.qdrant_url).await?,
+            embedder: Arc::new(SparseTextEmbedding::try_new(
+                SparseInitOptions::new(SparseModel::SPLADEPPV1)
+                    .with_show_download_progress(true), // Optional: show download progress
+            )?)
+
         })
     }
 
+    async fn enhance_queries(
+        &self,
+        source_queries: &HashMap<CollectionTier, String>,
+        project_scope: &ProjectScope,
+        conversation_id: &ConversationId
+    ) -> Result<HashMap<CollectionTier, Vec<String>>> {
+        let futures = source_queries.iter().map(|(tier, source_query)| async move {
+            let result_queries = self.query_enhancer
+                .enhance(source_query, project_scope, conversation_id, tier.clone())
+                .await.unwrap_or(vec![source_query.to_string()]);
+            (tier.clone(), result_queries)
+        }).collect::<Vec<_>>();
+
+        let results: Vec<(CollectionTier, Vec<String>)> = futures::future::join_all(futures).await;
+
+        // Convert Vec of tuples into HashMap
+        let enhanced_queries: HashMap<CollectionTier, Vec<String>> = results.into_iter().collect();
+
+        Ok(enhanced_queries)
+    }
+
     /// Runs the multi-stage priority batched streaming retrieval pipeline
-    pub fn retrieve_stream<'a>(
+    pub async fn retrieve_stream<'a>(
         &'a self,
         raw_query: &'a str,
         project_scope: &'a ProjectScope,
         conversation_id: &'a ConversationId,
-    ) -> Pin<Box<dyn Stream<Item = Result<ContextFragment>> + Send + 'a>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ContextFragment>> + Send + 'a>>> {
 
         let rag = Arc::new(self);
 
-        let stream = try_stream! {
-            // Step 1: Enhance query
-            let enhanced_query = rag.query_enhancer.enhance(raw_query, project_scope, conversation_id)
-                .await.context("Query enhancement failed")?;
+        // Step 1: Route query to sources
+        let source_queries = rag.source_router.route_query(&raw_query, project_scope)
+            .await.context("Source routing failed")?;
 
-            // Step 2: Route query to sources
-            let source_queries = rag.source_router.route_query(&enhanced_query, project_scope)
-                .await.context("Source routing failed")?;
+        // Enhance per tier (parallel, context-aware)
+        let enhanced_queries = self.enhance_queries(&source_queries, project_scope,conversation_id).await?;
 
-            // Step 3: Prepare priority-ordered streams from MultiSourceRetriever
-            let prioritized_streams = rag.retriever.retrieve_stream(source_queries, project_scope);
-
-            // Group streams by priority in a BTreeMap to ensure ascending order of priority
-            let mut streams_by_priority: BTreeMap<Priority, Vec<_>> = BTreeMap::new();
-            for ps in prioritized_streams {
-                streams_by_priority.entry(ps.priority).or_default().push(ps.stream);
-            }
-
-            // Step 4: For each priority level, wait until all streams complete, collect all fragments,
-            //         yield entire batch downstream grouped by priority
-            for (_priority, mut streams) in streams_by_priority {
-                let mut batch = Vec::new();
-
-                // Drain all streams for this priority concurrently
-                for mut stream in streams.drain(..) {
-                    while let Some(fragment) = stream.next().await {
-                        let fragment = fragment?;
-                        batch.push(fragment);
-                    }
-                }
-
-                if !batch.is_empty() {
-                    // Step 5: Rerank batch of fragments before yield
-                    let reranked = Reranker::rerank_and_deduplicate(query_embedding,batch);
-
-                    for fragment in reranked {
-                        yield fragment;
-                    }
-                }
-            }
-        };
-
-        Box::pin(stream)
+        // Step 3: Prepare priority-ordered streams from MultiSourceRetriever
+        let prioritized_streams = rag.retriever.retrieve_stream(raw_query,enhanced_queries, project_scope);
+        Ok(prioritized_streams)
     }
 }

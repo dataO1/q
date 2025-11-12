@@ -3,10 +3,14 @@ use anyhow::{Context, Result};
 use async_stream::try_stream;
 use async_trait::async_trait;
 use fastembed::{SparseEmbedding, SparseInitOptions, SparseModel, SparseTextEmbedding};
-use futures::stream::{Stream, StreamExt};
-use std::collections::BTreeMap;
+use futures::{future::join_all, stream::{iter, select_all, FuturesUnordered}, Stream};
+use tokio::time::sleep;
+use tokio_stream::StreamMap;
+use std::{collections::BTreeMap, time::Duration};
 use std::pin::Pin;
 use std::sync::Arc;
+use std::collections::HashMap;
+use futures::stream::StreamExt;
 
 use ai_agent_common::{CollectionTier, ContextFragment, ProjectScope};
 use crate::{reranker::Reranker};
@@ -23,22 +27,47 @@ pub trait RetrieverSource: Send + Sync {
         project_scope: &ProjectScope,
     ) -> Result<Vec<(ContextFragment, SparseEmbedding)>>;
 
+
     fn retrieve_stream<'a>(
         &'a self,
-        queries: Vec<(CollectionTier, String)>,
+        queries: HashMap<CollectionTier, Vec<String>>,
         project_scope: &'a ProjectScope,
-    ) -> Pin<Box<dyn Stream<Item = Result<ContextFragment>> + Send + 'a>> {
-        let queries_clone = queries.clone();
-        let project_scope_clone = project_scope.clone();
+    ) -> RetrieverSourcePrioStream<'a>
+    {
+        // Map each (tier, queries) to an async future that retrieves vectors & converts to Vec<Result<ContextFragment>>
+        let fetch_futures = queries.into_iter().map(|(tier, q_list)| {
+            let project_scope = project_scope.clone();
+            let s_self = self;
+            async move {
+                // Retrieve results: Vec<(ContextFragment, SparseEmbedding)>
+                let results = s_self
+                    .retrieve(
+                        q_list.into_iter().map(|q| (tier.clone(), q)).collect(),
+                        &project_scope,
+                    )
+                    .await?;
 
-        let stream = try_stream! {
-            let results = self.retrieve(queries_clone, &project_scope_clone).await?;
-            for (frag, _emb) in results {
-                yield frag;
+                // Map to Vec<Result<ContextFragment>>
+                let fragments = results.into_iter().map(|(frag, emb)| Ok((frag,emb))).collect::<Vec<_>>();
+
+                Ok::<_, anyhow::Error>(fragments)
             }
-        };
+        });
 
-        Box::pin(stream)
+        // Run all retrieval futures concurrently
+        let fut_unordered = FuturesUnordered::from_iter(fetch_futures);
+
+        // Turn each Vec<Result<ContextFragment>> into a stream; on error, stream yields single Err
+        let stream = fut_unordered
+            .filter_map(|res| async {
+                match res {
+                    Ok(vec) => Some(iter(vec).boxed()),
+                    Err(e) => Some(futures::stream::once(async { Err(e) }).boxed()),
+                }
+            })
+            .flatten();
+
+        RetrieverSourcePrioStream{stream:Box::pin(stream),priority:self.priority()}
     }
 }
 
@@ -103,68 +132,72 @@ impl MultiSourceRetriever {
         self.embedder.embed(texts, None)
     }
 
+
+    async fn process_stream(&self, mut stream: impl Stream<Item = Result<(ContextFragment,SparseEmbedding)>> + Unpin) {
+        while let Some(item) = stream.next().await {
+            // println!("Processing item: {}", item);
+            // Simulate some asynchronous work
+            // sleep(Duration::from_millis((item * 100) as u64)).await;
+        }
+        println!("Stream finished.");
+    }
+
     /// Retrieve all sources, then rerank and deduplicate combined results before streaming out in batches
     pub fn retrieve_stream<'a>(
         &'a self,
-        queries: Vec<(CollectionTier, String)>,
+        raw_query: &'a str,
+        queries: HashMap<CollectionTier, Vec<String>>,
         project_scope: &'a ProjectScope,
-    ) -> Pin<Box<dyn Stream<Item = Result<Vec<ContextFragment>>> + Send + 'a>> {
-        let sources = self.sources.clone();
-        let queries = queries.clone(); // clone here to move into async block
+    ) -> Pin<Box<dyn Stream<Item = Result<ContextFragment>> + Send + 'a>> {
 
         let stream = Box::pin(try_stream! {
+            let sources = self.sources.clone();
+            let queries = queries.clone(); // clone here to move into async block
+            let raw_query = raw_query.clone(); // clone here to move into async block
+            let project_scope = project_scope.clone(); // clone here to move into async block
             // Collect all results from all sources
-            let mut all_results = Vec::<(ContextFragment, SparseEmbedding)>::new();
+            // let mut all_streams = Vec::<RetrieverSourcePrioStream>::new();
+            let all_streams:  Vec<RetrieverSourcePrioStream> = sources.into_iter().map(move |source|{
+                source.retrieve_stream(queries, &project_scope)
+            }).collect();
+            // for source in sources.into_iter() {
+            //     let partial_results = source.retrieve_stream(queries.clone(), project_scope);
+            //     all_streams.push(partial_results.clone());
+            // }
+            let query_embedding = self.embedder.embed(vec![raw_query], None)?.get(0).unwrap();
 
-            for source in sources.into_iter() {
-                let partial_results = source.retrieve(queries.clone(), project_scope).await?;
-                all_results.extend(partial_results);
+            // Group streams by priority in a BTreeMap to ensure ascending order of priority
+            let mut streams_by_priority: BTreeMap<Priority, Vec<_>> = BTreeMap::new();
+            for ps in all_streams {
+                streams_by_priority.entry(ps.priority).or_default().push(ps.stream);
             }
 
-            if all_results.is_empty() {
-                yield Vec::new();
-                return;
-            }
+            //  yield entire batch downstream grouped by priority
+            for (_priority, mut streams) in streams_by_priority {
+                let mut batch: Vec<(ContextFragment,SparseEmbedding)> = Vec::new();
 
-            // Generate query embedding for reranking - TODO replace with actual embedding
-            let query_text = queries.get(0).map(|(_, q)| q.as_str()).unwrap_or("");
-            let q = vec![query_text; 1];
-            let query_embedding = self.embedder.embed(q, None)?;
+                // Drain all streams for this priority concurrently
+                for mut stream in streams.drain(..) {
+                    while let Some(fragment) = stream.next().await {
+                        let fragment = fragment?;
+                        batch.push(fragment);
+                    }
+                }
+                if !batch.is_empty() {
+                    // Step 5: Rerank batch of fragments before yield
+                    let reranked = Reranker::rerank_and_deduplicate(&query_embedding,&batch);
 
-            // Rerank & deduplicate on combined results
-            let reranked = Reranker::rerank_and_deduplicate(query_embedding.first().unwrap(), &all_results);
-
-            // Stream reranked results in batches of 10
-            for batch in reranked.as_slice().chunks(10) {
-                // Clone references to get owned Vec<ContextFragment>
-                let batch_owned: Vec<ContextFragment> = batch.iter()
-                    .map(|fragment| fragment.clone())
-                    .collect();
-
-                yield batch_owned;
+                    for fragment in reranked {
+                        yield fragment;
+                    }
+                }
             }
         });
         stream
     }
 }
 
-#[async_trait]
-impl RetrieverSource for MultiSourceRetriever {
-    fn priority(&self) -> Priority {
-        0
-    }
-
-    async fn retrieve(
-        &self,
-        queries: Vec<(CollectionTier, String)>,
-        project_scope: &ProjectScope,
-    ) -> Result<Vec<(ContextFragment, SparseEmbedding)>> {
-        // Collect combined results from all sources
-        let mut all_results = Vec::new();
-        for source in self.sources.iter() {
-            let partial_results = source.retrieve(queries.clone(), project_scope).await?;
-            all_results.extend(partial_results);
-        }
-        Ok(all_results)
-    }
+struct RetrieverSourcePrioStream<'a> {
+    stream: Pin<Box<dyn Stream<Item = Result<(ContextFragment,SparseEmbedding)>> + Send + 'a>>,
+    priority: u8,
 }

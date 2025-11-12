@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use redis::aio::MultiplexedConnection;
-use redis::AsyncCommands;
+use redis::{AsyncCommands, FromRedisValue};
 use tokio::sync::Mutex;
 use std::sync::Arc;
 
@@ -47,9 +47,9 @@ impl RedisCache {
     }
 
     /// Get a value by key
-    pub async fn get(&self, key: &str) -> Result<Option<String>> {
+    pub async fn get<R>(&self, key: &str) -> Result<Option<R>> where R: FromRedisValue {
         let mut conn = self.connection.lock().await;
-        let val: Option<String> = conn.get(key)
+        let val: Option<R> = conn.get(key)
             .await
             .context("Failed to get Redis key")?;
         Ok(val)
@@ -139,7 +139,7 @@ impl RedisCache {
 
     /// Get and deserialize a JSON value
     pub async fn get_json<T: serde::de::DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
-        match self.get(key).await? {
+        match self.get::<String>(key).await? {
             Some(json_str) => {
                 let value = serde_json::from_str(&json_str)
                     .context("Failed to deserialize JSON from Redis")?;

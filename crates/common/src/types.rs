@@ -242,7 +242,7 @@ pub enum Language {
 }
 
 /// Represents a retrieved context document or snippet for RAG
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash)]
 pub struct ContextFragment {
     /// The main textual content of the fragment
     pub content: String,
@@ -254,11 +254,11 @@ pub struct ContextFragment {
     pub source: String,
 
     /// Similarity or relevance score (e.g., from retriever)
-    pub score: f32,
+    pub score: usize,
 }
 
 impl ContextFragment {
-    pub fn new(content: impl Into<String>, summary: impl Into<String>, source: impl Into<String>, score: f32) -> Self {
+    pub fn new(content: impl Into<String>, summary: impl Into<String>, source: impl Into<String>, score: usize) -> Self {
         Self {
             content: content.into(),
             summary: summary.into(),

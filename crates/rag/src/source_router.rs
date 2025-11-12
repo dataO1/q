@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use ai_agent_common::{CollectionTier, EmbeddingConfig, ProjectScope};
 use futures::executor::block_on;
 use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, MessageRole}, completion::request::GenerationRequest, parameters::FormatType}, Ollama};
@@ -77,14 +79,10 @@ impl SourceRouter {
         &self,
         user_query: &str,
         ctx: &ProjectScope,
-    ) -> anyhow::Result<Vec<(CollectionTier, String)>> {
+    ) -> anyhow::Result<HashMap<CollectionTier, String>> {
         // Fallback to LLM classification
         let tiers = self.classify_intent_llm(user_query).await?;
-        let queries = if tiers.is_empty() {
-            vec![(CollectionTier::Workspace, user_query.to_string())] // default
-        } else {
-            tiers.into_iter().map(|tier| (tier, user_query.to_string())).collect()
-        };
-        Ok(queries)
+        let res = tiers.into_iter().map(|tier| (tier,  user_query.to_string())).collect();
+        Ok(res)
     }
 }
