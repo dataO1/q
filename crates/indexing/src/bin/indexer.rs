@@ -4,11 +4,9 @@ use ai_agent_indexing::watcher::FileWatcher;
 use ai_agent_indexing::classifier::PathClassifier;
 use ai_agent_storage::QdrantClient;
 use anyhow::Result;
-use fastembed::SparseModel;
-use swiftide::{integrations::qdrant::Qdrant, traits::EmbeddingModel};
 use tracing::{debug, error, info};
 use clap::Parser;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::EnvFilter;
 use tracing::Level;
 
 
@@ -71,7 +69,7 @@ async fn main() -> Result<()> {
 
 
     // Event loop
-    if (config.indexing.watch_enabled){
+    if config.indexing.watch_enabled {
         // Collect all paths to watch
         let mut watch_paths = Vec::new();
         watch_paths.extend(config.indexing.workspace_paths.clone());

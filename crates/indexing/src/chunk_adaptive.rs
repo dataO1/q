@@ -1,16 +1,12 @@
 //! Chunk code using tree-sitter
 use std::path::Path;
 
-use anyhow::{Context as _, Result};
 use async_trait::async_trait;
-use derive_builder::Builder;
 
 use serde_json::json;
 use swiftide::{indexing::{transformers::ChunkCode, IndexingStream, TextNode}, traits::ChunkerTransformer};
 use swiftide_indexing::transformers::{ChunkMarkdown, ChunkText};
-use swiftide_integrations::treesitter::SupportedLanguages;
 use tracing::info;
-use tree_sitter::Parser;
 
 const DEFAULT_MAX_CHAR_SIZE: usize = 2056;
 /// The `ChunkCode` struct is responsible for chunking code into smaller pieces

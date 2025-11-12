@@ -2,11 +2,10 @@ use ai_agent_common::llm::EmbeddingClient;
 use ai_agent_rag::SmartMultiSourceRag;
 // src/bin/rag_cli.rs
 use anyhow::Result;
-use fastembed::SparseModel;
 use std::env;
 use std::io::{self, Write};
 
-use ai_agent_common::{CollectionTier, ConversationId, Language, ProjectScope, SystemConfig};
+use ai_agent_common::{ConversationId, Language, ProjectScope, SystemConfig};
 use futures::StreamExt;
 
 #[tokio::main]

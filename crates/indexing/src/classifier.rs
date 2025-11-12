@@ -1,7 +1,7 @@
 use ai_agent_common::*;
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use mime_guess;
 use ai_agent_common::types::Language;
 use std::collections::HashMap;

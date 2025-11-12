@@ -1,10 +1,8 @@
 use std::collections::HashMap;
 
-use ai_agent_common::{CollectionTier, EmbeddingConfig, ProjectScope, SystemConfig};
-use futures::executor::block_on;
-use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, MessageRole}, completion::request::GenerationRequest, parameters::{FormatType, JsonStructure}}, Ollama};
+use ai_agent_common::{CollectionTier, ProjectScope, SystemConfig};
+use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, MessageRole}, parameters::{FormatType, JsonStructure}}, Ollama};
 use strum::IntoEnumIterator;
-use swiftide::chat_completion::ChatCompletionRequest;
 use tracing::info; // You must bring the trait into scope
 
 /// SourceRouter with hybrid intent detection: keywords + fallback LLM classification

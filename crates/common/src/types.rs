@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf};
-use std::fmt::{self, Display};
+use std::fmt::{self};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use strum_macros::EnumIter;

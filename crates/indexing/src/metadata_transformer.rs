@@ -1,8 +1,7 @@
 use anyhow::anyhow;
-use std::{collections::BTreeMap, path::Path};
 use async_trait::async_trait;
 use serde_json::json;
-use swiftide::{indexing::{self, Node, TextNode, Transformer}, traits::WithIndexingDefaults};
+use swiftide::{indexing::{TextNode, Transformer}, traits::WithIndexingDefaults};
 use tree_sitter::{Language, Node as TsNode, Parser};
 
 use tree_sitter_rust;

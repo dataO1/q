@@ -1,25 +1,21 @@
 use ai_agent_common::{llm::EmbeddingClient, *};
 use ai_agent_storage::QdrantClient;
-use anyhow::{Context, Result, anyhow};
-use serde_json::json;
-use swiftide_indexing::transformers::{ MetadataTitle, MetadataKeywords, MetadataSummary };
-use swiftide_integrations::fastembed::FastEmbed;
-use tree_sitter::{Language, Parser};
-use std::path::{Path, PathBuf};
+use anyhow::{Context, Result};
+use std::path::Path;
 use crate::{chunk_adaptive::ChunkAdaptive, metadata_transformer::ExtractMetadataTransformer};
 // Add all the tree-sitter language crates you want to support
 use tree_sitter;
 
 // Correct Swiftide 0.32 imports
 use swiftide::indexing::{
-    loaders::FileLoader, transformers::{self,  MetadataQACode}, Node, Pipeline
+    loaders::FileLoader, transformers::{self,  MetadataQACode}, Pipeline
 };
 use swiftide::integrations::{
     ollama::Ollama,
     redis::Redis,
 };
 
-use tracing::{info, trace, warn};
+use tracing::{info, warn};
 
 /// Indexing pipeline using Swiftide
 pub struct IndexingPipeline<'a> {

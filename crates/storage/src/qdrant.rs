@@ -1,14 +1,12 @@
 use ai_agent_common::llm::EmbeddingClient;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use qdrant_client::qdrant::r#match::MatchValue;
 use qdrant_client::qdrant::vector_output::Vector;
 use qdrant_client::qdrant::vectors_output::VectorsOptions;
-use qdrant_client::qdrant::with_vectors_selector::SelectorOptions;
 use swiftide::integrations::qdrant::{qdrant_client, Qdrant as SwiftideQdrant};
 use swiftide::indexing::EmbeddedField;
-use qdrant_client::qdrant::{Condition, Filter, SearchPointsBuilder, VectorsSelector};
+use qdrant_client::qdrant::{Condition, Filter, SearchPointsBuilder};
 use qdrant_client::Qdrant;
-use swiftide::integrations::fastembed::{FastEmbed};
 use swiftide::indexing::EmbeddingModel;
 use ai_agent_common::{CollectionTier, ContextFragment, ProjectScope};
 use swiftide::SparseEmbedding;

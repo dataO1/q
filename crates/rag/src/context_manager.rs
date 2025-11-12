@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use async_recursion::async_recursion;
 use ai_agent_common::git;
-use ai_agent_common::types::{Language, ProjectScope};
+use ai_agent_common::types::ProjectScope;
 use ai_agent_indexing::classifier;
 use std::env::current_dir;
 use std::path::PathBuf;

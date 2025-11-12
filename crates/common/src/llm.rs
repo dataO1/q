@@ -1,5 +1,5 @@
 use anyhow::Context;
-use fastembed::{EmbeddingModel, InitOptions, SparseInitOptions, SparseModel, SparseTextEmbedding, TextEmbedding};
+use fastembed::{SparseInitOptions, SparseModel, SparseTextEmbedding};
 use swiftide_integrations::{fastembed::{EmbeddingModelType, FastEmbed, FastEmbedBuilder}, ollama::{config::OllamaConfig, Ollama}, openai::GenericOpenAI};
 
 #[derive(Clone)]

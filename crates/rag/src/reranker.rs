@@ -1,5 +1,4 @@
 // reranker.rs
-use anyhow::Result;
 use ai_agent_common::ContextFragment;
 use fastembed::SparseEmbedding;
 use simsimd::{SpatialSimilarity};

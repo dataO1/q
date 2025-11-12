@@ -1,10 +1,9 @@
 use ai_agent_storage::QdrantClient;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_stream::try_stream;
 use async_trait::async_trait;
-use fastembed::SparseModel;
-use futures::{future::join_all, stream::{iter, select_all, FuturesUnordered}, Stream};
-use std::{collections::BTreeMap, time::Duration};
+use futures::{stream::{iter, FuturesUnordered}, Stream};
+use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -12,7 +11,6 @@ use futures::stream::StreamExt;
 use swiftide::{indexing::EmbeddingModel, SparseEmbedding};
 
 use ai_agent_common::{llm::EmbeddingClient, CollectionTier, ContextFragment, ProjectScope};
-use crate::{reranker::Reranker};
 
 pub type Priority = u8;
 

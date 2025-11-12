@@ -1,16 +1,11 @@
 use ai_agent_storage::RedisCache;
 use anyhow::{Context, Result};
 use ai_agent_common::{CollectionTier, ConversationId, ProjectScope};
-use async_trait::async_trait;
 use moka::future::Cache;
 use tokenizers::pre_tokenizers::whitespace::Whitespace;
 use tokenizers::processors::template::TemplateProcessing;
 use tokenizers::{Tokenizer, models::wordpiece::WordPiece, normalizers::BertNormalizer};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::path::Path;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub struct QueryEnhancer {
     ollama_client: OllamaClient,

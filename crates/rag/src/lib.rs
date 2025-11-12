@@ -10,18 +10,13 @@ pub mod reranker;
 use ai_agent_common::llm::EmbeddingClient;
 use ai_agent_storage::QdrantClient;
 use anyhow::{Context, Result};
-use async_stream::try_stream;
-use fastembed::{SparseEmbedding, SparseInitOptions, SparseModel, SparseTextEmbedding};
-use futures::{join, Stream, StreamExt};
-use std::collections::BTreeMap;
-use std::future::ready;
+use futures::{Stream, StreamExt};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::collections::HashMap;
 
 use ai_agent_common::{CollectionTier, ContextFragment, ConversationId, ProjectScope, SystemConfig};
-use crate::reranker::Reranker;
-use crate::retriever::{MultiSourceRetriever, Priority};
+use crate::retriever::MultiSourceRetriever;
 use crate::query_enhancer::QueryEnhancer;
 
 /// Main RAG pipeline struct
