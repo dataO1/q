@@ -29,6 +29,9 @@ impl SourceRouter {
         let json_structure = JsonStructure::new::<Vec<CollectionTier>>();
 
         let categories: Vec<String> = CollectionTier::iter()
+            .filter(|x| x.to_string() == CollectionTier::Workspace.to_string()) // TODO: remove
+                                                                                // this, this is
+                                                                                // just for testing
             .map(|tier| tier.to_string())
             .collect();
 

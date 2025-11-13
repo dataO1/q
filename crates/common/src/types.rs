@@ -62,7 +62,7 @@ pub enum CollectionTier {
     Personal,      // Personal documents
     Workspace,     // Active projects
     Dependencies,  // External libraries
-    // Online,        // Web docs
+    Online,        // Web docs
 }
 
 /// Project scope information

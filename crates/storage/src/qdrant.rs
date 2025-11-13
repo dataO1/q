@@ -87,7 +87,7 @@ impl<'a> QdrantClient<'a> {
         .add_prefetch(
             PrefetchQueryBuilder::default()
                 .using("Combined_sparse")
-                .filter(filter.clone())
+                // .filter(filter.clone())
                 .query(Query::new_nearest(VectorInput::new_sparse(sparse_embedding.indices,sparse_embedding.values)))  // Dense branch
                 .limit(50u64)
                 .build()
@@ -95,7 +95,7 @@ impl<'a> QdrantClient<'a> {
         .add_prefetch(
             PrefetchQueryBuilder::default()
                 .using("Combined")
-                .filter(filter)
+                // .filter(filter)
                 .query(Query::new_nearest(VectorInput::new_dense(dense_embedding.clone())))  // Dense branch
                 .limit(30u64)
                 .score_threshold(0.72)

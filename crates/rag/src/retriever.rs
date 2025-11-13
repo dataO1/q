@@ -3,7 +3,7 @@ use anyhow::Result;
 use async_stream::try_stream;
 use async_trait::async_trait;
 use futures::{stream::{iter, FuturesUnordered}, Stream};
-use std::collections::BTreeMap;
+use std::{cmp::Reverse, collections::BTreeMap};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -159,9 +159,10 @@ impl<'a> MultiSourceRetriever<'a> {
                 if !batch.is_empty() {
                     // Step 5: Rerank batch of fragments before yield
                     // let reranked = Reranker::rerank_and_deduplicate(&query_embedding,&batch);
-                    // TODO:: implement readl reranking
-                    // let reranked: Vec<ContextFragment> = batch.into_iter().map(|x| x.0).collect();
-                    for fragment in batch {
+                    let mut reranked = batch;
+
+                    reranked.sort_by_key(|f| Reverse(f.score));
+                    for fragment in reranked {
                         yield fragment;
                     }
                 }
