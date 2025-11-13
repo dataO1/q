@@ -1,5 +1,6 @@
 use anyhow::anyhow;
 use async_trait::async_trait;
+use repo_root::{projects::GitProject, RepoRoot};
 use serde_json::json;
 use swiftide::{indexing::{TextNode, Transformer}, traits::WithIndexingDefaults};
 use tree_sitter::{Language, Node as TsNode, Parser};
@@ -25,13 +26,15 @@ use tree_sitter_md;
 use tree_sitter_yarn;
 
 #[derive(Clone)]
-pub struct ExtractMetadataTransformer{}
+pub struct ExtractMetadataTransformer{
+    project_root: String
+}
 
 impl WithIndexingDefaults for ExtractMetadataTransformer {}
 
 impl ExtractMetadataTransformer {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(project_root: String) -> Self {
+        Self {project_root}
     }
 
     /// Map file extension to tree-sitter Language
@@ -169,11 +172,15 @@ impl Transformer for ExtractMetadataTransformer {
             let dependencies = self.extract_dependencies(root, &node.chunk.as_bytes());
             let references = self.extract_references(root, &node.chunk.as_bytes());
             let parent_node = root.kind().to_string();
+            // let root_path = RepoRoot::<GitProject>::new(&node.path).path;
+            // let project_root = root_path.to_str().unwrap().to_string();
+
 
             node.metadata.insert("definitions", json!(definitions));
             node.metadata.insert("dependencies", json!(dependencies));
             node.metadata.insert("references", json!(references));
             node.metadata.insert("parent_node", json!(parent_node));
+            node.metadata.insert("project_root", json!(self.project_root));
         }
 
         Ok(node)

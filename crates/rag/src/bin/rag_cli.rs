@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
     let project_scope = ContextManager::new()?.detect_project_scope(Some(cwd)).await?;
     let conversation_id = ConversationId::new();
 
-    let embedding_client = EmbeddingClient::new(&config.embedding.dense_model)?;
+    let embedding_client = EmbeddingClient::new(&config.embedding.dense_model, config.embedding.vector_size)?;
     let rag = SmartMultiSourceRag::new(&config, &embedding_client).await?;
 
 

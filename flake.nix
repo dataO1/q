@@ -27,6 +27,10 @@
             postgresql
             ollama
           ];
+
+          shellHook = ''
+            docker-compose up -d
+          '';
         };
 
         packages = {

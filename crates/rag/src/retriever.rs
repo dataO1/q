@@ -91,7 +91,7 @@ impl<'a> RetrieverSource for QdrantRetriever<'a> {
         queries: Vec<(CollectionTier, String)>,
         project_scope: &ProjectScope,
     ) -> Result<Vec<ContextFragment>> {
-        self.client.query_collections(queries, project_scope).await
+        self.client.query_collections(queries, project_scope,None, None).await
     }
 }
 

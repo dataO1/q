@@ -5,10 +5,12 @@ use swiftide_integrations::{fastembed::{EmbeddingModelType, FastEmbed, FastEmbed
 #[derive(Clone)]
 pub struct EmbeddingClient{
     pub embedder_dense: GenericOpenAI<OllamaConfig>,
+    pub vector_size_dense: u64,
     pub embedder_sparse: FastEmbed
+
 }
 impl EmbeddingClient{
-    pub fn new(dense_model: &String)-> anyhow::Result<Self>{
+    pub fn new(dense_model: &String, vector_size_dense: u64)-> anyhow::Result<Self>{
         let embedder_dense = Ollama::builder()
             .default_embed_model(dense_model)
             .build()
@@ -22,7 +24,8 @@ impl EmbeddingClient{
 
         Ok(Self{
             embedder_sparse,
-            embedder_dense
+            embedder_dense,
+            vector_size_dense
         })
     }
 }

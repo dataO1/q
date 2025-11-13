@@ -3,7 +3,6 @@
 pub mod types;
 pub mod error;
 pub mod config;
-pub mod git;
 pub mod llm;
 
 pub use types::*;

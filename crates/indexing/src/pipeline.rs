@@ -1,6 +1,7 @@
 use ai_agent_common::{llm::EmbeddingClient, *};
 use ai_agent_storage::QdrantClient;
 use anyhow::{Context, Result};
+use repo_root::{projects::GitProject, RepoRoot};
 use std::path::Path;
 use crate::{chunk_adaptive::ChunkAdaptive, metadata_transformer::ExtractMetadataTransformer};
 // Add all the tree-sitter language crates you want to support
@@ -98,6 +99,10 @@ impl<'a> IndexingPipeline<'a> {
 
     fn create_pipeline(&self, path: &Path, extensions: Option<&Vec<&str>>,
 ) -> Result<Pipeline<String>>{
+
+
+        let root_path = RepoRoot::<GitProject>::new(&path).path;
+        let project_root = root_path.to_str().unwrap().to_string();
         // Example custom transformer to add useful metadata
         let dense_embedding_model = self.embedder.embedder_dense.clone();
         tracing::debug!("Initializing FastEmbed sparse...");
@@ -112,12 +117,13 @@ impl<'a> IndexingPipeline<'a> {
             file_loader = file_loader.with_extensions(ext);
         }
         let mut pipeline = Pipeline::from_loader(file_loader);
+            // .with_embed_mode(swiftide::indexing::EmbedMode::Both);
         pipeline = pipeline
             // .filter_cached(self.redis_cache.clone())
             // .then(MetadataTitle::new(prompt_client.clone()))
             // .then(MetadataSummary::new(prompt_client.clone()))
             // .then(MetadataKeywords::new(prompt_client.clone()))
-            .then(ExtractMetadataTransformer::new());
+            .then(ExtractMetadataTransformer::new(project_root));
 
         if self.config.enable_qa_metadata{
             pipeline = pipeline.then(MetadataQACode::from_client(prompt_client.clone()).build()?)
@@ -126,12 +132,12 @@ impl<'a> IndexingPipeline<'a> {
         // 4. Sparse embeddings
         .then_in_batch(
             transformers::SparseEmbed::new(sparse_embedding_model)
-                .with_batch_size(32)
+                .with_batch_size(self.config.batch_size)
         )
         // 5. Dense embeddings
         .then_in_batch(
             transformers::Embed::new(dense_embedding_model)
-                .with_batch_size(32)
+                .with_batch_size(self.config.batch_size)
         );
         Ok(pipeline)
     }

@@ -17,13 +17,15 @@ pub struct EmbeddingConfig {
     pub ollama_host: String,
     pub ollama_port: u16,
     pub dense_model: String,
+    pub vector_size: u64,
 }
 impl EmbeddingConfig {
     fn default() -> EmbeddingConfig {
          return Self{
             ollama_host:"http://localhost".to_string(),
             ollama_port:11434,
-            dense_model : "nomic-embed-text".to_string(),
+            dense_model : "jeffh/intfloat-e5-base-v2:f32".to_string(),
+            vector_size: 786,
          }
     }
 }
@@ -34,10 +36,10 @@ pub struct IndexingConfig {
     pub personal_paths: Vec<PathBuf>,
     pub system_paths: Vec<PathBuf>,
     pub watch_enabled: bool,
-    pub chunk_size: usize,
     #[serde(default)]
     pub filters: IndexingFilters,
     pub enable_qa_metadata: bool,
+    pub batch_size: usize,
 }
 
 /// File filtering configuration
@@ -76,7 +78,7 @@ impl Default for IndexingConfig{
             personal_paths: vec![],
             system_paths: vec![],
             watch_enabled: true,
-            chunk_size: 512,
+            batch_size: 32,
             filters: IndexingFilters::default(),
             enable_qa_metadata: false,
         }
@@ -174,10 +176,10 @@ impl SystemConfig {
     /// Validate configuration values
     pub fn validate(&self) -> Result<()> {
         // Validate indexing config
-        if self.indexing.chunk_size == 0 {
+        if self.indexing.batch_size == 0 {
             anyhow::bail!("chunk_size must be greater than 0");
         }
-        if self.indexing.chunk_size > 4096 {
+        if self.indexing.batch_size > 4096 {
             anyhow::bail!("chunk_size too large (max 4096)");
         }
 
@@ -226,7 +228,7 @@ impl Default for SystemConfig {
                 personal_paths: vec![],
                 system_paths: vec![],
                 watch_enabled: true,
-                chunk_size: 512,
+                batch_size: 32,
                 filters: IndexingFilters::default(),
                 enable_qa_metadata: false,
             },

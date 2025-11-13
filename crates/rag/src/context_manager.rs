@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use async_recursion::async_recursion;
-use ai_agent_common::git;
 use ai_agent_common::types::ProjectScope;
 use ai_agent_indexing::classifier;
+use repo_root::projects::GitProject;
+use repo_root::{ ProjectType, ProjectTypes, RepoRoot};
 use std::env::current_dir;
 use std::path::PathBuf;
 
@@ -27,9 +28,10 @@ impl ContextManager {
         let path = PathBuf::from(path_string.clone());
 
         // Detect git root asynchronously via common::git helpers
-        let git_root = git::find_git_root(&path).await.context("Git root detection failed")?;
+        // let repo_root = git::find_git_root(&path).await.context("Git root detection failed")?;
+        let root = RepoRoot::<GitProject>::new(&path).path;
 
-        let root = git_root.unwrap_or(path.clone());
+
         let root_path = root.to_str().unwrap_or(&path_string).to_string();
 
         let current_file = if path.is_file() {Some(path)} else {None};

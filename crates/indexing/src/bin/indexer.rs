@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
     let config = SystemConfig::load_config(&cli.config)?;
     debug!("Loaded config: {:#?}", config);  // ← Add debug
 
-    let embedding_client = EmbeddingClient::new(&config.embedding.dense_model)?;
+    let embedding_client = EmbeddingClient::new(&config.embedding.dense_model, config.embedding.vector_size)?;
     // Verify services
     info!("🔍 Verifying services...");
     if let Err(e) = verify_services(&config, &embedding_client).await {

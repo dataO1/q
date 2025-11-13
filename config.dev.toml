@@ -1,18 +1,20 @@
 [indexing]
 # workspace_paths = ["./test-workspace"]
-workspace_paths = ["./crates"]
+workspace_paths = ["./crates/indexing"]
 personal_paths = ["./test-notes"]
 system_paths = []
 watch_enabled = true
-chunk_size = 512
+batch_size= 16
 enable_qa_metadata = false  # ← Enable this for better retrieval (slower)
 
 [embedding]
 ollama_host= "http://localhost"
 ollama_port= 11434
-dense_model= "jeffh/intfloat-e5-base-v2:f32"
-# dense_model= "placeholder, not used"
-# batch_size= 1024
+# dense_model= "jeffh/intfloat-e5-base-v2:f32" # too much for lenovo T14
+# dense_model= "nomic-embed-text"
+dense_model= "all-minilm:l6-v2"
+# vector_size = 786
+vector_size = 384 # for nomic-embed-text
 
 [indexing.filters]
 respect_gitignore = true

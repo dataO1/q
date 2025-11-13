@@ -3,13 +3,13 @@ use anyhow::{Context, Result};
 use qdrant_client::qdrant::r#match::MatchValue;
 use qdrant_client::qdrant::vector_output::Vector;
 use qdrant_client::qdrant::vectors_output::VectorsOptions;
-use swiftide::integrations::qdrant::{qdrant_client, Qdrant as SwiftideQdrant};
+use swiftide::integrations::qdrant::{qdrant_client, Qdrant as SwiftideQdrant, SparseVectorConfig, VectorConfig};
 use swiftide::indexing::EmbeddedField;
-use qdrant_client::qdrant::{Condition, Filter, SearchPointsBuilder};
+use qdrant_client::qdrant::{Condition, Filter, QueryPointsBuilder, SearchPointsBuilder};
 use qdrant_client::Qdrant;
 use swiftide::indexing::EmbeddingModel;
 use ai_agent_common::{CollectionTier, ContextFragment, ProjectScope};
-use swiftide::SparseEmbedding;
+use qdrant_client::qdrant::{condition::ConditionOneOf, FieldCondition, Match};
 
 /// Hybrid Qdrant client combining Swiftide for indexing and raw qdrant-client for filtered queries
 #[derive(Clone)]
@@ -36,7 +36,7 @@ impl<'a> QdrantClient<'a> {
     /// Get Swiftide Qdrant client for indexing pipelines
     pub fn indexing_client(&self, collection: &str) -> Result<SwiftideQdrant> {
         SwiftideQdrant::try_from_url(&self.url)?
-            .vector_size(768)
+            .vector_size(self.embedder.vector_size_dense)
             .batch_size(50)
             .with_vector(EmbeddedField::Combined)
             .with_sparse_vector(EmbeddedField::Combined)
@@ -50,6 +50,8 @@ impl<'a> QdrantClient<'a> {
         &self,
         queries: Vec<(CollectionTier, String)>,
         project_scope: &ProjectScope,
+        limit: Option<u64>,
+        score_threshold: Option<f32>,
     ) -> Result<Vec<ContextFragment>> {
         let mut all_results = Vec::new();
 
@@ -59,7 +61,7 @@ impl<'a> QdrantClient<'a> {
             let collection_name = tier.to_string();
 
             // Run query with filters for this collection and query text
-            let mut results = self.query_with_filters(&collection_name, &query, project_scope).await?;
+            let mut results = self.query_with_filters(&collection_name, &query, project_scope, limit, score_threshold).await?;
 
             all_results.append(&mut results);
         }
@@ -73,6 +75,8 @@ impl<'a> QdrantClient<'a> {
         collection: &str,
         query: &str,
         project_scope: &ProjectScope,
+        limit: Option<u64>,
+        score_threshold: Option<f32>,
     ) -> Result<Vec<ContextFragment>> {
         let query_embedding = self.embedder.embedder_sparse
             .embed(vec![query.to_string()]).await?;
@@ -84,15 +88,19 @@ impl<'a> QdrantClient<'a> {
         // Build your filter for metadata (project_scope), omitted here for brevity
         let filter = self.build_metadata_filter(project_scope)?;
 
-        let search_result = self.raw_client
-            .search_points(
-                SearchPointsBuilder::new(collection, query_vector, 10)
-                    // .vector_name("Combined_sparse") // search combined_sparse
-                    .filter(filter)
-                    // .with_vectors(true)  // request vector field return
-                    .with_payload(true)
-            )
-            .await?;
+        let mut query = QueryPointsBuilder::new(collection)
+            .using("Combined_sparse")
+            .using("Combined")
+            .filter(filter)
+            .with_payload(true);
+            if let Some(l) = limit {
+                query = query.limit(l)
+            };
+            if let Some(t) = score_threshold {
+                query = query.score_threshold(t)
+            };
+        let q = query.build();
+        let search_result = self.raw_client.query(q).await?;
 
         let mut results = Vec::new();
 
@@ -106,36 +114,6 @@ impl<'a> QdrantClient<'a> {
                 source: payload.get("source").and_then(|v| v.as_str()).unwrap_or(&"unknown".to_string()).to_string(),
                 score: ( point.score * 100f32 ) as usize,
             };
-
-            // Extract embedding vector from raw vector field
-            // Assuming vector is a repeated f32 field (dense)
-            // let emb_vec: Option<SparseEmbedding> = match &point.vectors {
-            //     Some(v) => match &v.vectors_options {
-            //         Some(vectors_options) => {
-            //             match vectors_options {
-            //                 // Match on your sparse vector variant, e.g., `VectorsOptions::Sparse`
-            //                 // Adjust enum variant name according to actual client version
-            //                 VectorsOptions::Vectors(named_vectors) => {
-            //                     let sparse_vector = named_vectors.vectors.get("Combined_sparse");
-            //                     let indices = sparse_vector.unwrap().indices.clone().unwrap().data;
-            //                     let values = match &sparse_vector.clone().unwrap().vector{
-            //                         Some(Vector::Sparse(vec))=>Some(vec.values.clone()),
-            //                         _ => None
-            //                     }.unwrap_or(vec![]);
-            //                     Some(SparseEmbedding {
-            //                         indices,
-            //                         values
-            //                     })
-            //                 }
-            //                 _ => None,
-            //             }
-            //         }
-            //         None => None,
-            //     },  // raw dense vector usually in .f
-            //     None => None,
-            // };
-            // let embedding = SparseEmbedding::from(emb_vec.unwrap());
-
             results.push(fragment);
         }
 
@@ -144,9 +122,6 @@ impl<'a> QdrantClient<'a> {
 
     /// Build Qdrant metadata filter from AgentContext
     fn build_metadata_filter(&self, ctx: &ProjectScope) -> Result<Filter> {
-        use qdrant_client::qdrant::{condition::ConditionOneOf, FieldCondition, Match};
-
-
         let mut must_conditions = vec![];
 
         // Project root exact match

@@ -55,6 +55,7 @@ tree-sitter-xml = "*"
 # tree-sitter-dockerfile = "*"
 tree-sitter-md = "*"
 tree-sitter-yarn = "*"
+repo-root = "*"
 
 
 [dev-dependencies]
