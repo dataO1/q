@@ -2,6 +2,7 @@ use ai_agent_common::{llm::EmbeddingClient, *};
 use ai_agent_storage::QdrantClient;
 use anyhow::{Context, Result};
 use repo_root::{projects::GitProject, RepoRoot};
+use serde_json::json;
 use std::path::Path;
 use crate::{chunk_adaptive::ChunkAdaptive, metadata_transformer::ExtractMetadataTransformer};
 // Add all the tree-sitter language crates you want to support
@@ -9,7 +10,7 @@ use tree_sitter;
 
 // Correct Swiftide 0.32 imports
 use swiftide::indexing::{
-    loaders::FileLoader, transformers::{self,  MetadataQACode}, Pipeline
+    loaders::FileLoader, transformers::{self,  MetadataQACode}, EmbedMode, Pipeline
 };
 use swiftide::integrations::{
     ollama::Ollama,
@@ -75,6 +76,12 @@ impl<'a> IndexingPipeline<'a> {
             .then_store_with(qdrant)
             .run()
             .await?;
+        // Explicitly unload Ollama
+        // let client = reqwest::Client::new();
+        // client.post("http://localhost:11434/api/generate")
+        //     .json(&json!({"model": "all-minilm", "keep_alive": 0}))
+        //     .send()
+        //     .await?;
         info!("✓ Indexed/updated: {}", file_path.display());
         Ok(())
     }
@@ -107,18 +114,15 @@ impl<'a> IndexingPipeline<'a> {
         let dense_embedding_model = self.embedder.embedder_dense.clone();
         tracing::debug!("Initializing FastEmbed sparse...");
         let sparse_embedding_model = self.embedder.embedder_sparse.clone();
-        let prompt_client = Ollama::builder()
-        .default_prompt_model("llama3.1:8b")
-        .build()
-        .context("Failed to build Ollama prompt client")?;
 
         let mut file_loader = FileLoader::new(path);
         if let Some(ext) = extensions{
             file_loader = file_loader.with_extensions(ext);
         }
-        let mut pipeline = Pipeline::from_loader(file_loader);
-            // .with_embed_mode(swiftide::indexing::EmbedMode::Both);
-        pipeline = pipeline
+        let pipeline = Pipeline::from_loader(file_loader)
+            .with_concurrency(1)
+            .with_embed_mode(EmbedMode::PerField);
+        let mut meta_pipeline = pipeline
             // .filter_cached(self.redis_cache.clone())
             // .then(MetadataTitle::new(prompt_client.clone()))
             // .then(MetadataSummary::new(prompt_client.clone()))
@@ -126,20 +130,27 @@ impl<'a> IndexingPipeline<'a> {
             .then(ExtractMetadataTransformer::new(project_root));
 
         if self.config.enable_qa_metadata{
-            pipeline = pipeline.then(MetadataQACode::from_client(prompt_client.clone()).build()?)
+            let prompt_client = Ollama::builder()
+            .default_prompt_model("llama3.1:8b")
+            .build()
+            .context("Failed to build Ollama prompt client")?;
+            meta_pipeline = meta_pipeline.then(MetadataQACode::from_client(prompt_client).build()?)
         }
-        pipeline = pipeline.then_chunk(ChunkAdaptive::default())
+        let chunked_pipeline = meta_pipeline.then_chunk(ChunkAdaptive::default())
+        // 5. Dense embeddings
+        .then_in_batch(
+            transformers::Embed::new(dense_embedding_model)
+                .with_batch_size(self.config.batch_size)
+        )
         // 4. Sparse embeddings
         .then_in_batch(
             transformers::SparseEmbed::new(sparse_embedding_model)
                 .with_batch_size(self.config.batch_size)
         )
-        // 5. Dense embeddings
-        .then_in_batch(
-            transformers::Embed::new(dense_embedding_model)
-                .with_batch_size(self.config.batch_size)
-        );
-        Ok(pipeline)
+        .log_all()
+        ;
+        // .log_errors();
+        Ok(chunked_pipeline)
     }
 
     /// Batch index multiple files

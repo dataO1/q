@@ -21,6 +21,8 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // #[global_allocator]
+    // static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
     let cli = Cli::parse();
 
     // Enhanced logging with backtrace support

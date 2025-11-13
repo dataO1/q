@@ -36,11 +36,11 @@ impl<'a> QdrantClient<'a> {
     /// Get Swiftide Qdrant client for indexing pipelines
     pub fn indexing_client(&self, collection: &str) -> Result<SwiftideQdrant> {
         SwiftideQdrant::try_from_url(&self.url)?
-            .vector_size(self.embedder.vector_size_dense)
             .batch_size(50)
-            .with_vector(EmbeddedField::Combined)
-            .with_sparse_vector(EmbeddedField::Combined)
+            .vector_size(self.embedder.vector_size_dense)
             .collection_name(collection)
+            .with_vector(EmbeddedField::Chunk)
+            .with_sparse_vector(EmbeddedField::Chunk)
             .build()
             .context("Failed to build Swiftide Qdrant client")
     }
@@ -86,15 +86,15 @@ impl<'a> QdrantClient<'a> {
         let query = QueryPointsBuilder::new(collection)
         .add_prefetch(
             PrefetchQueryBuilder::default()
-                .using("Combined_sparse")
+                .using("Chunk_sparse")
                 // .filter(filter.clone())
                 .query(Query::new_nearest(VectorInput::new_sparse(sparse_embedding.indices,sparse_embedding.values)))  // Dense branch
-                .limit(50u64)
+                .limit(20u64)
                 .build()
         )
         .add_prefetch(
             PrefetchQueryBuilder::default()
-                .using("Combined")
+                .using("Chunk")
                 // .filter(filter)
                 .query(Query::new_nearest(VectorInput::new_dense(dense_embedding.clone())))  // Dense branch
                 .limit(30u64)
@@ -102,11 +102,9 @@ impl<'a> QdrantClient<'a> {
                 .build()
         )
             .query(Query::new_fusion(Fusion::Rrf))
-            // .using("Combined_sparse")
-            // .using("Combined")
             .with_payload(true)
             .limit(limit.unwrap_or(10));
-        let q = query.build();
+        let q = query;
         let search_result = self.raw_client.query(q).await?;
 
         let mut results = Vec::new();

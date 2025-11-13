@@ -8,7 +8,7 @@ use swiftide::{indexing::{transformers::ChunkCode, IndexingStream, TextNode}, tr
 use swiftide_indexing::transformers::{ChunkMarkdown, ChunkText};
 use tracing::info;
 
-const DEFAULT_MAX_CHAR_SIZE: usize = 2056;
+const DEFAULT_MAX_CHAR_SIZE: usize = 2048;
 /// The `ChunkCode` struct is responsible for chunking code into smaller pieces
 /// based on the specified language and chunk size.
 ///
@@ -111,15 +111,15 @@ impl ChunkerTransformer for ChunkAdaptive {
         match lang{
             "markdown" => {
                 info!("Transforming markdown node");
-                ChunkMarkdown::default().transform_node(node).await
+                ChunkMarkdown::from_chunk_range(20..self.chunk_size_markdown).transform_node(node).await
             },
             "text" => {
                 info!("Transforming markdown node");
-                ChunkText::default().transform_node(node).await
+                ChunkText::from_chunk_range(20..self.chunk_size_text).transform_node(node).await
             },
             _ => {
                 info!("Transforming markdown node");
-                ChunkCode::try_for_language_and_chunk_size(lang, 10..self.chunk_size_code).unwrap().transform_node(node).await
+                ChunkCode::try_for_language_and_chunk_size(lang, 20..self.chunk_size_code).unwrap().transform_node(node).await
             }
         }
     }
