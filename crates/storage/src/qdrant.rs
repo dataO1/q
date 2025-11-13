@@ -78,7 +78,7 @@ impl<'a> QdrantClient<'a> {
     ) -> Result<Vec<ContextFragment>> {
         let sparse_embedding: SparseEmbedding = self.embedder.embedder_sparse
             .sparse_embed(vec![query.to_string()]).await?.first().context("Failed to generate sparse query embedding")?.clone();
-        let dense_embedding = self.embedder.embedder_sparse
+        let dense_embedding = self.embedder.embedder_dense
             .embed(vec![query.to_string()]).await?.first().context("Failed to generate dense query embedding")?.clone();
         // Build your filter for metadata (project_scope), omitted here for brevity
         let filter = self.build_metadata_filter(project_scope)?;
@@ -89,7 +89,6 @@ impl<'a> QdrantClient<'a> {
                 .using("Combined_sparse")
                 .filter(filter.clone())
                 .query(Query::new_nearest(VectorInput::new_sparse(sparse_embedding.indices,sparse_embedding.values)))  // Dense branch
-                .using("Combined")
                 .limit(50u64)
                 .build()
         )
@@ -98,7 +97,6 @@ impl<'a> QdrantClient<'a> {
                 .using("Combined")
                 .filter(filter)
                 .query(Query::new_nearest(VectorInput::new_dense(dense_embedding.clone())))  // Dense branch
-                .using("Combined")
                 .limit(30u64)
                 .score_threshold(0.72)
                 .build()
