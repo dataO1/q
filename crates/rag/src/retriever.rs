@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::collections::HashMap;
 use futures::stream::StreamExt;
-use swiftide::{indexing::EmbeddingModel, SparseEmbedding};
+use swiftide::{SparseEmbedding};
 
 use ai_agent_common::{llm::EmbeddingClient, CollectionTier, ContextFragment, ProjectScope};
 
@@ -91,7 +91,7 @@ impl<'a> RetrieverSource for QdrantRetriever<'a> {
         queries: Vec<(CollectionTier, String)>,
         project_scope: &ProjectScope,
     ) -> Result<Vec<ContextFragment>> {
-        self.client.query_collections(queries, project_scope,None, None).await
+        self.client.query_collections(queries, project_scope,None).await
     }
 }
 

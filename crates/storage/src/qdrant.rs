@@ -1,15 +1,15 @@
 use ai_agent_common::llm::EmbeddingClient;
 use anyhow::{Context, Result};
 use qdrant_client::qdrant::r#match::MatchValue;
-use qdrant_client::qdrant::vector_output::Vector;
-use qdrant_client::qdrant::vectors_output::VectorsOptions;
-use swiftide::integrations::qdrant::{qdrant_client, Qdrant as SwiftideQdrant, SparseVectorConfig, VectorConfig};
+use swiftide::integrations::qdrant::{qdrant_client, Qdrant as SwiftideQdrant};
 use swiftide::indexing::EmbeddedField;
-use qdrant_client::qdrant::{Condition, Filter, QueryPointsBuilder, SearchPointsBuilder};
+use qdrant_client::qdrant::{Condition, Filter, Fusion, PrefetchQueryBuilder, Query, QueryPointsBuilder, VectorInput};
 use qdrant_client::Qdrant;
 use swiftide::indexing::EmbeddingModel;
 use ai_agent_common::{CollectionTier, ContextFragment, ProjectScope};
 use qdrant_client::qdrant::{condition::ConditionOneOf, FieldCondition, Match};
+use swiftide::traits::SparseEmbeddingModel;
+use swiftide::{SparseEmbedding, SparseEmbeddings};
 
 /// Hybrid Qdrant client combining Swiftide for indexing and raw qdrant-client for filtered queries
 #[derive(Clone)]
@@ -51,7 +51,6 @@ impl<'a> QdrantClient<'a> {
         queries: Vec<(CollectionTier, String)>,
         project_scope: &ProjectScope,
         limit: Option<u64>,
-        score_threshold: Option<f32>,
     ) -> Result<Vec<ContextFragment>> {
         let mut all_results = Vec::new();
 
@@ -61,7 +60,7 @@ impl<'a> QdrantClient<'a> {
             let collection_name = tier.to_string();
 
             // Run query with filters for this collection and query text
-            let mut results = self.query_with_filters(&collection_name, &query, project_scope, limit, score_threshold).await?;
+            let mut results = self.hybrid_query_with_filters(&collection_name, &query, project_scope, limit).await?;
 
             all_results.append(&mut results);
         }
@@ -70,35 +69,45 @@ impl<'a> QdrantClient<'a> {
     }
 
     /// Query with metadata filtering using raw qdrant-client
-    pub async fn query_with_filters(
+    pub async fn hybrid_query_with_filters(
         &self,
         collection: &str,
         query: &str,
         project_scope: &ProjectScope,
         limit: Option<u64>,
-        score_threshold: Option<f32>,
     ) -> Result<Vec<ContextFragment>> {
-        let query_embedding = self.embedder.embedder_sparse
-            .embed(vec![query.to_string()]).await?;
-        let query_vector = query_embedding
-            .first()
-            .context("No embedding generated")?
-            .clone();
-
+        let sparse_embedding: SparseEmbedding = self.embedder.embedder_sparse
+            .sparse_embed(vec![query.to_string()]).await?.first().context("Failed to generate sparse query embedding")?.clone();
+        let dense_embedding = self.embedder.embedder_sparse
+            .embed(vec![query.to_string()]).await?.first().context("Failed to generate dense query embedding")?.clone();
         // Build your filter for metadata (project_scope), omitted here for brevity
         let filter = self.build_metadata_filter(project_scope)?;
 
-        let mut query = QueryPointsBuilder::new(collection)
-            .using("Combined_sparse")
-            .using("Combined")
-            .filter(filter)
-            .with_payload(true);
-            if let Some(l) = limit {
-                query = query.limit(l)
-            };
-            if let Some(t) = score_threshold {
-                query = query.score_threshold(t)
-            };
+        let query = QueryPointsBuilder::new(collection)
+        .add_prefetch(
+            PrefetchQueryBuilder::default()
+                .using("Combined_sparse")
+                .filter(filter.clone())
+                .query(Query::new_nearest(VectorInput::new_sparse(sparse_embedding.indices,sparse_embedding.values)))  // Dense branch
+                .using("Combined")
+                .limit(50u64)
+                .build()
+        )
+        .add_prefetch(
+            PrefetchQueryBuilder::default()
+                .using("Combined")
+                .filter(filter)
+                .query(Query::new_nearest(VectorInput::new_dense(dense_embedding.clone())))  // Dense branch
+                .using("Combined")
+                .limit(30u64)
+                .score_threshold(0.72)
+                .build()
+        )
+            .query(Query::new_fusion(Fusion::Rrf))
+            // .using("Combined_sparse")
+            // .using("Combined")
+            .with_payload(true)
+            .limit(limit.unwrap_or(10));
         let q = query.build();
         let search_result = self.raw_client.query(q).await?;
 
