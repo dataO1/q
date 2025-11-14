@@ -1,8 +1,10 @@
+use std::{collections::HashMap, fs, path::Path};
+
 use anyhow::{anyhow, Result, Context};
 use async_trait::async_trait;
 use repo_root::{projects::GitProject, RepoRoot};
-use serde_json::json;
-use swiftide::{indexing::{Node, TextNode, Transformer}, traits::WithIndexingDefaults};
+use serde_json::{json, Value};
+use swiftide::{indexing::{Metadata, Node, TextNode, Transformer}, traits::WithIndexingDefaults};
 use tree_sitter::{Language, Node as TsNode, Parser, Query, QueryCursor, Tree, QueryMatches, StreamingIterator, TextProvider};
 use tree_sitter;
 
@@ -26,16 +28,45 @@ use tree_sitter_xml;
 use tree_sitter_md;
 use tree_sitter_yarn;
 
+use crate::metadata_transformer::ExtractMetadataTransformer;
+
 #[derive(Clone)]
 pub struct ExtractMetadataChunkTransformer{
-    tree: Tree,
 }
 
 impl WithIndexingDefaults for ExtractMetadataChunkTransformer {}
 
 impl ExtractMetadataChunkTransformer {
-    pub fn new(tree: Tree) -> Self {
-        Self {tree}
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    fn parse_tstree(&self, contents: Option<&Value>, path: &Path) -> Result<Tree>{
+
+        let language = {
+            let ext : &str = path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+
+            ExtractMetadataTransformer::get_language_from_extension(ext)
+        };
+        match contents {
+            Some(content) => {
+                let parsed_content = serde_json::to_string(content)?;
+                match language{
+                    Some(lang) =>{
+                        let mut parser = Parser::new();
+                        parser.set_language(&lang).expect("Failed to set language");
+
+                        parser.parse(parsed_content,None).context("Failed to parse AST tree for file")
+
+                    },
+                    None => Err(anyhow!(""))
+                }
+            },
+            None => Err(anyhow!(""))
+        }
+
     }
 
     /// Map file extension to tree-sitter Language
@@ -152,112 +183,116 @@ impl ExtractMetadataChunkTransformer {
     ///
     /// # Returns
     /// A vector of nodes representing the call sites or references to the subnode.
-    fn find_references_to_subnode(&self, root_node: TsNode, source: &[u8], subnode: TsNode) -> Vec<String> {
+    fn find_references_to_subnode(&self, root_node: TsNode, source: &[u8], subnode: TsNode) -> Option<Vec<String>> {
         // Extract the identifying text of the subnode, e.g. the function name
-        let name_node = subnode.child_by_field_name("name")
-            .expect("Subnode should have a 'name' child");
-        let function_name = name_node.utf8_text(source).expect("Failed to extract name text");
+        let name_node_option = subnode.child_by_field_name("name");
+        match name_node_option {
+            Some(name_node) =>{
+                let function_name = name_node.utf8_text(source).expect("Failed to extract name text");
 
-        let language = root_node.language();
+                let language = root_node.language();
 
-        // Query for call expressions where the called function's identifier matches the subnode's name
-        let query_str = format!(
-            r#"
-            ; Rust: Function, Struct, Enum, Trait references
-            (
-              (call_expression function: (identifier) @ref_func) (#eq? @ref_func "{}")
-            )
-            (
-              (struct_expression (identifier) @ref_struct) (#eq? @ref_struct "{}")
-            )
-            (
-              (type_identifier) @ref_type (#eq? @ref_type "{}")
-            )
-            (
-              (trait_reference) @ref_trait (#eq? @ref_trait "{}")
-            )
+                // Query for call expressions where the called function's identifier matches the subnode's name
+                let query_str = format!(
+                    r#"
+                    ; Rust: Function, Struct, Enum, Trait references
+                    (
+                      (call_expression function: (identifier) @ref_func) (#eq? @ref_func "{}")
+                    )
+                    (
+                      (struct_expression (identifier) @ref_struct) (#eq? @ref_struct "{}")
+                    )
+                    (
+                      (type_identifier) @ref_type (#eq? @ref_type "{}")
+                    )
+                    (
+                      (trait_reference) @ref_trait (#eq? @ref_trait "{}")
+                    )
 
-            ; Python: Function call, Class instantiation
-            (
-              (call function: (identifier) @ref_func) (#eq? @ref_func "{}")
-            )
-            (
-              (class_definition name: (identifier) @ref_class) (#eq? @ref_class "{}")
-            )
+                    ; Python: Function call, Class instantiation
+                    (
+                      (call function: (identifier) @ref_func) (#eq? @ref_func "{}")
+                    )
+                    (
+                      (class_definition name: (identifier) @ref_class) (#eq? @ref_class "{}")
+                    )
 
-            ; JavaScript: Function call, Class reference
-            (
-              (call_expression function: (identifier) @ref_func) (#eq? @ref_func "{}")
-            )
-            (
-              (class_declaration name: (identifier) @ref_class) (#eq? @ref_class "{}")
-            )
+                    ; JavaScript: Function call, Class reference
+                    (
+                      (call_expression function: (identifier) @ref_func) (#eq? @ref_func "{}")
+                    )
+                    (
+                      (class_declaration name: (identifier) @ref_class) (#eq? @ref_class "{}")
+                    )
 
-            ; Java: Method call, Class reference, Interface reference
-            (
-              (method_invocation name: (identifier) @ref_func) (#eq? @ref_func "{}")
-            )
-            (
-              (class_declaration name: (identifier) @ref_class) (#eq? @ref_class "{}")
-            )
-            (
-              (interface_declaration name: (identifier) @ref_interface) (#eq? @ref_interface "{}")
-            )
+                    ; Java: Method call, Class reference, Interface reference
+                    (
+                      (method_invocation name: (identifier) @ref_func) (#eq? @ref_func "{}")
+                    )
+                    (
+                      (class_declaration name: (identifier) @ref_class) (#eq? @ref_class "{}")
+                    )
+                    (
+                      (interface_declaration name: (identifier) @ref_interface) (#eq? @ref_interface "{}")
+                    )
 
-            ; C: Function call, Struct reference
-            (
-              (call_expression function: (identifier) @ref_func) (#eq? @ref_func "{}")
-            )
-            (
-              (struct_specifier name: (type_identifier) @ref_struct) (#eq? @ref_struct "{}")
-            )
+                    ; C: Function call, Struct reference
+                    (
+                      (call_expression function: (identifier) @ref_func) (#eq? @ref_func "{}")
+                    )
+                    (
+                      (struct_specifier name: (type_identifier) @ref_struct) (#eq? @ref_struct "{}")
+                    )
 
-            ; Go: Function call, Struct, Interface references
-            (
-              (call_expression function: (identifier) @ref_func) (#eq? @ref_func "{}")
-            )
-            (
-              (type_spec name: (type_identifier) @ref_struct) (#eq? @ref_struct "{}")
-            )
-            (
-              (interface_type) @ref_interface
-            )
-            "#,
-            function_name,
-            function_name,
-            function_name,
-            function_name,
-            function_name,
-            function_name,
-            function_name,
-            function_name,
-            function_name,
-            function_name,
-            function_name,
-            function_name,
-            function_name,
-            function_name,
-            function_name,
-        );
+                    ; Go: Function call, Struct, Interface references
+                    (
+                      (call_expression function: (identifier) @ref_func) (#eq? @ref_func "{}")
+                    )
+                    (
+                      (type_spec name: (type_identifier) @ref_struct) (#eq? @ref_struct "{}")
+                    )
+                    (
+                      (interface_type) @ref_interface
+                    )
+                    "#,
+                    function_name,
+                    function_name,
+                    function_name,
+                    function_name,
+                    function_name,
+                    function_name,
+                    function_name,
+                    function_name,
+                    function_name,
+                    function_name,
+                    function_name,
+                    function_name,
+                    function_name,
+                    function_name,
+                    function_name,
+                );
 
-        let query = Query::new(&language, &query_str)
-            .expect("Failed to compile tree-sitter query");
-        let mut cursor = QueryCursor::new();
-        let mut references = Vec::new();
-        let mut matches = cursor.matches(&query, root_node, source);
+                let query = Query::new(&language, &query_str)
+                    .expect("Failed to compile tree-sitter query");
+                let mut cursor = QueryCursor::new();
+                let mut references = Vec::new();
+                let mut matches = cursor.matches(&query, root_node, source);
 
-        while let Some(mat) = matches.next() {
-            for cap in mat.captures {
-                    match query.capture_names()[cap.index as usize] {
-                        "ref_func" | "ref_struct" | "ref_class" | "ref_interface" | "ref_trait" => {
-                            references.push(cap.node.to_string());
+                while let Some(mat) = matches.next() {
+                    for cap in mat.captures {
+                            match query.capture_names()[cap.index as usize] {
+                                "ref_func" | "ref_struct" | "ref_class" | "ref_interface" | "ref_trait" => {
+                                    references.push(cap.node.to_string());
+                                }
+                                _ => {}
+                            }
                         }
-                        _ => {}
-                    }
                 }
-        }
 
-        references
+                Some(references)
+            },
+            None => None
+        }
     }
 
     /// Find all call_expression nodes inside the given node
@@ -292,11 +327,39 @@ impl ExtractMetadataChunkTransformer {
         calls
     }
 
-    fn parse_string_to_node(&self, source_code: &str) -> Result<Tree> {
+    fn parse_string_to_node(&self, source_code: &str, path: &Path) -> Result<Tree> {
+
+        let language = {
+            let ext : &str = path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+
+            ExtractMetadataTransformer::get_language_from_extension(ext)
+        }.context("Failed to infer language type from extension")?;
         let mut parser = Parser::new();
-        parser.set_language(&self.tree.language()).expect("Error loading grammar");
+        parser.set_language(&language).expect("Error loading grammar");
         parser.parse(source_code, None).context("Failed to parse AST")
     }
+}
+
+fn filter_fields_out(metadata: &Metadata, fields: &[&str]) -> HashMap<String, Value> {
+    metadata
+        .iter()
+        .filter(|(key, _)| !fields.contains(&key.as_str()))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
+fn create_filtered_metadata(metadata: &Metadata, fields: &[&str]) -> Metadata {
+    let mut new_metadata = Metadata::default();
+
+    for field in fields {
+        if let Some(value) = metadata.get(field) {
+            new_metadata.insert(field.to_string(), value.clone());
+        }
+    }
+
+    new_metadata
 }
 
 #[async_trait]
@@ -305,11 +368,16 @@ impl Transformer for ExtractMetadataChunkTransformer {
     type Output = String;
 
     async fn transform_node(&self, mut node: TextNode) -> anyhow::Result<TextNode> {
-        let root = self.tree.root_node();
-        let subtree = self.parse_string_to_node(&node.chunk)?;
+        let original_content = node.metadata.get("original_content");
+        let language = node.metadata.get("language");
+        let lang_value =  language.context("Failed to retrieve langauge from previous chunk")?;
+        let lang = serde_json::to_string(&lang_value)?;
+        let tree = self.parse_tstree(original_content, &node.path)?;
+        let root = tree.root_node();
+        let subtree = self.parse_string_to_node(&node.chunk, &node.path)?;
 
         // let references = self.extract_references(root, &node.chunk.as_bytes());
-        let references = self.find_references_to_subnode(root, &node.chunk.as_bytes(), subtree.root_node());
+        let references_option = self.find_references_to_subnode(root, &node.chunk.as_bytes(), subtree.root_node());
         let calls = self.find_all_calls_in_node(root, &node.chunk.as_bytes());
 
         let definitions = self.extract_definitions(root, &node.chunk.as_bytes());
@@ -318,14 +386,17 @@ impl Transformer for ExtractMetadataChunkTransformer {
         let parent_node = root.kind().to_string();
         // let root_path = RepoRoot::<GitProject>::new(&node.path).path;
         // let project_root = root_path.to_str().unwrap().to_string();
-
-
-        node.metadata.insert("called_by", json!(references));
+        let filtered_hashmap = filter_fields_out(&node.metadata, &vec!["original_content"]);
+        let mut filtered_metadata = Metadata::default();
+        filtered_metadata.extend(filtered_hashmap);
+        node.metadata = filtered_metadata;
+        if let Some(references) = references_option {
+            node.metadata.insert("called_by", json!(references));
+        }
         node.metadata.insert("calls", json!(calls));
         node.metadata.insert("definitions", json!(definitions));
         node.metadata.insert("kind", json!(kind));
         node.metadata.insert("imports", json!(imports));
-        node.metadata.insert("references", json!(references));
         node.metadata.insert("parent_node", json!(parent_node));
 
         Ok(node)

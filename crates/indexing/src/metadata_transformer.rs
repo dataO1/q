@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use std::{fs, path::Path}; use anyhow::{ anyhow, Result, Context };
 use async_trait::async_trait;
 use repo_root::{projects::GitProject, RepoRoot};
 use serde_json::json;
@@ -28,14 +28,37 @@ use tree_sitter_yarn;
 #[derive(Clone)]
 pub struct ExtractMetadataTransformer{
     project_root: String,
-    tree: Tree,
 }
 
 impl WithIndexingDefaults for ExtractMetadataTransformer {}
 
 impl ExtractMetadataTransformer {
-    pub fn new(project_root: String, tree: Tree) -> Self {
-        Self {project_root, tree}
+    pub fn new(project_root: String) -> Self {
+        Self {project_root}
+    }
+
+
+    fn get_tstree(&self, path: &Path) -> Result<Tree>{
+
+        let lang = {
+            let ext : &str = path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+
+            ExtractMetadataTransformer::get_language_from_extension(ext)
+        };
+
+        if lang.is_none() {
+            // No language found - return node unchanged
+            return Err(anyhow!("Failed to extract metadata for unknown language"));
+        }
+
+        let mut parser = Parser::new();
+        parser.set_language(&lang.unwrap()).expect("Failed to set language");
+
+        let contents = fs::read_to_string(path)?;
+
+        parser.parse(contents,None).context("Failed to parse AST tree for file")
     }
 
     /// Map file extension to tree-sitter Language
@@ -148,12 +171,14 @@ impl Transformer for ExtractMetadataTransformer {
     type Input = String;
     type Output = String;
 
-    async fn transform_node(&self, mut node: TextNode) -> anyhow::Result<TextNode> {
-        let root = self.tree.root_node();
-        let language = self.tree.language().name();
+    async fn transform_node(&self, mut node: TextNode) -> Result<TextNode> {
+        let tree = self.get_tstree(&node.path)?;
+        let root = tree.root_node();
+        let language = tree.language().name();
         let dependencies = self.extract_dependencies(root, &node.chunk.as_bytes());
 
 
+        node.metadata.insert("original_content", json!(node.chunk));
         node.metadata.insert("language", json!(language));
         node.metadata.insert("dependencies", json!(dependencies));
         node.metadata.insert("project_root", json!(self.project_root));

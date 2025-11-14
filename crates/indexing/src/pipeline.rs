@@ -104,28 +104,6 @@ impl<'a> IndexingPipeline<'a> {
         })
     }
 
-    fn getTSTree(&self, path: &Path) -> Result<Tree>{
-
-        let lang = {
-            let ext : &str = path.extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
-
-            ExtractMetadataTransformer::get_language_from_extension(ext)
-        };
-
-        if lang.is_none() {
-            // No language found - return node unchanged
-            return Err(anyhow!("Failed to extract metadata for unknown language"));
-        }
-
-        let mut parser = Parser::new();
-        parser.set_language(&lang.unwrap()).expect("Failed to set language");
-
-        let contents = fs::read_to_string(path)?;
-
-        parser.parse(contents,None).context("Failed to parse AST tree for file")
-    }
 
     fn create_pipeline(&self, path: &Path, extensions: Option<&Vec<&str>>,
 ) -> Result<Pipeline<String>>{
@@ -134,8 +112,7 @@ impl<'a> IndexingPipeline<'a> {
         let root_path = RepoRoot::<GitProject>::new(&path).path;
         let project_root = root_path.to_str().unwrap().to_string();
 
-        let tree = self.getTSTree(path)?;
-        let metadatatransformer = ExtractMetadataTransformer::new(project_root, tree.clone());
+        let metadatatransformer = ExtractMetadataTransformer::new(project_root);
 
 
         // Example custom transformer to add useful metadata
@@ -166,7 +143,7 @@ impl<'a> IndexingPipeline<'a> {
         }
         let chunked_pipeline = meta_pipeline.then_chunk(ChunkAdaptive::default())
 
-        .then(ExtractMetadataChunkTransformer::new(tree))
+        .then(ExtractMetadataChunkTransformer::new())
         // 5. Dense embeddings
         .then_in_batch(
             transformers::Embed::new(dense_embedding_model)
