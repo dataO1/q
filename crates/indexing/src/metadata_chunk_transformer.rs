@@ -1,11 +1,13 @@
 use std::{collections::HashMap, fs, path::Path};
 
+use ai_agent_common::{Language, LanguageIter};
+use strum::IntoEnumIterator;
 use anyhow::{anyhow, Result, Context};
 use async_trait::async_trait;
 use repo_root::{projects::GitProject, RepoRoot};
 use serde_json::{json, Value};
 use swiftide::{indexing::{Metadata, Node, TextNode, Transformer}, traits::WithIndexingDefaults};
-use tree_sitter::{Language, Node as TsNode, Parser, Query, QueryCursor, Tree, QueryMatches, StreamingIterator, TextProvider};
+use tree_sitter::{{Language as TSLanguage}, Node as TsNode, Parser, Query, QueryCursor, Tree, QueryMatches, StreamingIterator, TextProvider};
 use tree_sitter;
 
 use tree_sitter_rust;
@@ -70,7 +72,7 @@ impl ExtractMetadataChunkTransformer {
     }
 
     /// Map file extension to tree-sitter Language
-    pub fn get_language_from_extension(extension: &str) -> Option<Language> {
+    pub fn get_language_from_extension(extension: &str) -> Option<TSLanguage> {
         match extension.to_lowercase().as_str() {
             "rs" => Some(tree_sitter_rust::LANGUAGE.into()),
             "py" => Some(tree_sitter_python::LANGUAGE.into()),
@@ -295,36 +297,64 @@ impl ExtractMetadataChunkTransformer {
         }
     }
 
-    /// Find all call_expression nodes inside the given node
-    ///
-    /// # Parameters
-    /// - `parent_node`: The node inside which to search for call expressions
-    /// - `source`: The source code bytes for text extraction
-    ///
-    /// # Returns
-    /// A vector of nodes corresponding to all calls found inside `parent_node`
-    fn find_all_calls_in_node(&self, parent_node: TsNode, source: &[u8]) -> Vec<String> {
-        let language = parent_node.language();
-        // Query to find all call_expression nodes
-        let query_str = "(call_expression)";
-
-        let query = Query::new(&language, query_str).expect("Invalid query");
-        let mut cursor = QueryCursor::new();
-
-        let mut calls = Vec::new();
-        let matches = cursor.matches(&query, parent_node, source);
-        let mut matches_iter = matches;
-
-        // Iterate over matches using next()
-        while let Some(mat) = matches_iter.next() {
-            for cap in mat.captures {
-                if query.capture_names()[cap.index as usize] == "" || query.capture_names()[cap.index as usize] == "call_expression" {
-                    calls.push(cap.node.to_string());
-                }
+    // Language-specific query mapping
+    fn get_call_query_for_language(&self, language: &String) -> Option<&'static str> {
+        let languages: Vec<String> = Language::iter().map(|l| l.to_string())
+            .filter(|l| l !="Markdown")
+            .collect();
+        if languages.contains(language) {
+                Some("(call_expression)")
             }
+            else {
+                None
+        }
+    }
+
+    fn find_all_calls_in_node(
+        &self,
+        parent_node: TsNode,
+        source: &[u8],
+        language_name: &String,
+        path: &Path,
+    ) -> Option<Vec<String>> {
+        // Check if the language supports call expressions
+        let query_str = match self.get_call_query_for_language(language_name) {
+            Some(q) => q,
+            None => {
+                // Return empty vector for languages without call expressions
+                return Some(Vec::new());
+            }
+        };
+
+        let language = {
+            let ext : &str = path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+
+            ExtractMetadataTransformer::get_language_from_extension(ext)
+        };
+        match language{
+            Some(lang) => {
+                match Query::new(&lang, query_str){
+                    Ok(q) =>{
+                        let mut cursor = QueryCursor::new();
+                        let mut calls = Vec::new();
+                        let mut matches = cursor.matches(&q, parent_node, source);
+
+                        while let Some(mat) = matches.next() {
+                            for cap in mat.captures {
+                                calls.push(cap.node.to_string());
+                            }
+                        }
+
+                        Some(calls)
+                    },
+                    Err(_) => None
+                }
+            },
+            None => None
         }
 
-        calls
     }
 
     fn parse_string_to_node(&self, source_code: &str, path: &Path) -> Result<Tree> {
@@ -378,14 +408,12 @@ impl Transformer for ExtractMetadataChunkTransformer {
 
         // let references = self.extract_references(root, &node.chunk.as_bytes());
         let references_option = self.find_references_to_subnode(root, &node.chunk.as_bytes(), subtree.root_node());
-        let calls = self.find_all_calls_in_node(root, &node.chunk.as_bytes());
+        let calls_options = self.find_all_calls_in_node(root, &node.chunk.as_bytes(), &lang, &node.path);
 
         let definitions = self.extract_definitions(root, &node.chunk.as_bytes());
         let imports = self.extract_dependencies(root, &node.chunk.as_bytes());
         let kind = root.kind();
         let parent_node = root.kind().to_string();
-        // let root_path = RepoRoot::<GitProject>::new(&node.path).path;
-        // let project_root = root_path.to_str().unwrap().to_string();
         let filtered_hashmap = filter_fields_out(&node.metadata, &vec!["original_content"]);
         let mut filtered_metadata = Metadata::default();
         filtered_metadata.extend(filtered_hashmap);
@@ -393,7 +421,9 @@ impl Transformer for ExtractMetadataChunkTransformer {
         if let Some(references) = references_option {
             node.metadata.insert("called_by", json!(references));
         }
-        node.metadata.insert("calls", json!(calls));
+        if let Some(calls) = calls_options {
+            node.metadata.insert("calls", json!(calls));
+        }
         node.metadata.insert("definitions", json!(definitions));
         node.metadata.insert("kind", json!(kind));
         node.metadata.insert("imports", json!(imports));

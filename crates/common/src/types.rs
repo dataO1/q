@@ -218,7 +218,7 @@ pub enum StatusEvent {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, Display)]
 pub enum Language {
     Rust,
     Python,

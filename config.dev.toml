@@ -4,7 +4,7 @@ workspace_paths = ["./crates/indexing"]
 personal_paths = ["./test-notes"]
 system_paths = []
 watch_enabled = true
-batch_size= 32
+batch_size= 4
 enable_qa_metadata = false  # ← Enable this for better retrieval (slower)
 
 [embedding]
