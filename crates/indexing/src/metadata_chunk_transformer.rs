@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs, path::Path};
 
-use ai_agent_common::{Definition, DefinitionBuilder, Language, LanguageIter};
+use ai_agent_common::{Definition, DefinitionBuilder, Language, LanguageIter, StructureContextFragment, StructureContextFragmentBuilder};
 use strum::IntoEnumIterator;
 use anyhow::{anyhow, Result, Context};
 use async_trait::async_trait;
@@ -32,127 +32,6 @@ use tree_sitter_yarn;
 
 use crate::metadata_transformer::ExtractMetadataTransformer;
 
-fn get_definition_kinds(language: &str) -> Vec<&'static str> {
-    match language.to_lowercase().as_str() {
-        "rust" => vec![
-            "function_item",
-            "impl_item",
-            "struct_item",
-            "enum_item",
-            "trait_item",
-            "type_item",
-            "mod_item",
-            "const_item",
-            "static_item",
-        ],
-        "python" => vec![
-            "function_definition",
-            "class_definition",
-            "decorated_definition",
-        ],
-        "javascript" | "js" => vec![
-            "function_declaration",
-            "function",
-            "method_definition",
-            "class_declaration",
-            "generator_function_declaration",
-            "arrow_function",
-        ],
-        "typescript" | "ts" => vec![
-            "function_declaration",
-            "function",
-            "method_definition",
-            "class_declaration",
-            "interface_declaration",
-            "type_alias_declaration",
-            "enum_declaration",
-            "method_signature",
-        ],
-        "java" => vec![
-            "method_declaration",
-            "class_declaration",
-            "interface_declaration",
-            "enum_declaration",
-            "constructor_declaration",
-            "annotation_type_declaration",
-        ],
-        "c" => vec![
-            "function_definition",
-            "declaration",
-            "struct_specifier",
-            "union_specifier",
-            "enum_specifier",
-            "typedef_declaration",
-        ],
-        "cpp" | "c++" => vec![
-            "function_definition",
-            "class_specifier",
-            "struct_specifier",
-            "namespace_definition",
-            "template_declaration",
-            "enum_specifier",
-            "constructor",
-            "destructor",
-        ],
-        "go" => vec![
-            "function_declaration",
-            "method_declaration",
-            "type_declaration",
-            "type_spec",
-            "interface_type",
-        ],
-        "haskell" | "hs" => vec![
-            "function",
-            "type_declaration",
-            "data_declaration",
-            "newtype_declaration",
-            "class_declaration",
-            "instance_declaration",
-            "type_synonym",
-        ],
-        "lua" => vec![
-            "function_declaration",
-            "function_definition",
-            "local_function",
-            "function_statement",
-        ],
-        "ruby" | "rb" => vec![
-            "method",
-            "singleton_method",
-            "class",
-            "module",
-            "alias",
-        ],
-        "bash" | "sh" => vec![
-            "function_definition",
-            "command",
-        ],
-        // Markup/config languages typically don't have "definitions" in the traditional sense
-        "html" => vec![
-            "element", // HTML elements could be considered definitions
-        ],
-        "yaml" | "yml" => vec![
-            "block_mapping_pair", // YAML key-value pairs
-        ],
-        "json" => vec![
-            "pair", // JSON key-value pairs
-        ],
-        "xml" => vec![
-            "element",
-            "STag", // XML start tags
-        ],
-        "markdown" | "md" => vec![
-            "atx_heading",
-            "setext_heading",
-            "fenced_code_block",
-        ],
-        "asciidoc" | "adoc" => vec![
-            "heading",
-            "section",
-        ],
-        _ => vec![], // Unknown or unsupported language
-    }
-}
 
 #[derive(Clone)]
 pub struct ExtractMetadataChunkTransformer{
@@ -163,6 +42,48 @@ impl WithIndexingDefaults for ExtractMetadataChunkTransformer {}
 impl ExtractMetadataChunkTransformer {
     pub fn new() -> Self {
         Self {}
+    }
+
+
+    pub fn get_query_for_language(&self,language: &str) -> &'static str {
+        match language.to_lowercase().as_str() {
+            "rust" => r#"
+                (function_item name: (identifier) @function.name)
+                (impl_item) @impl
+                (mod_item name: (identifier) @mod.name)
+                (struct_item name: (type_identifier) @struct.name)
+                (trait_item name: (identifier) @trait.name)
+                (enum_item name: (identifier) @enum.name)
+            "#,
+
+            "python" => r#"
+                (function_definition name: (identifier) @function.name)
+                (class_definition name: (identifier) @class.name)
+            "#,
+
+            "javascript" | "typescript" => r#"
+                (function_declaration name: (identifier) @function.name)
+                (function_expression name: (identifier) @function.name)
+                (class_declaration name: (identifier) @class.name)
+                (method_definition name: (property_identifier) @method.name)
+                (interface_declaration name: (identifier) @interface.name)
+            "#,
+
+            "java" => r#"
+                (method_declaration name: (identifier) @method.name)
+                (class_declaration name: (identifier) @class.name)
+                (interface_declaration name: (identifier) @interface.name)
+            "#,
+
+            "go" => r#"
+                (function_declaration name: (identifier) @function.name)
+                (method_declaration name: (identifier) @method.name)
+                (type_declaration name: (type_identifier) @type.name)
+                (interface_type name: (identifier) @interface.name)
+            "#,
+
+            _ => "",
+        }
     }
 
     fn parse_tstree(&self, contents: Option<&Value>, path: &Path) -> Result<Tree>{
@@ -220,229 +141,6 @@ impl ExtractMetadataChunkTransformer {
         }
     }
 
-
-    fn extract_definitions(
-        &self,
-        ts_node: TsNode,
-        source: &[u8],
-        language: &str,
-    ) -> Vec<Definition> {
-        let def_kinds = get_definition_kinds(language);
-
-        let mut defs = Vec::new();
-        let mut cursor = ts_node.walk();
-        let mut to_visit = vec![ts_node];
-
-        while let Some(node) = to_visit.pop() {
-            if def_kinds.contains(&node.kind()) {
-                let name_fields = ["name", "identifier", "id", "value"];
-                for field in name_fields {
-                    if let Some(name_node) = node.child_by_field_name(field) {
-                        if let Ok(text) = name_node.utf8_text(source) {
-                            if let Ok(def) = DefinitionBuilder::default()
-                                .name(text.to_string())
-                                .kind(node.kind().to_string())
-                                .line(node.start_position().row)
-                                .byte_range((node.start_byte(), node.end_byte()))
-                                .build(){
-
-                                    defs.push(def);
-                                };
-                            break;
-                        }
-                    }
-                }
-            }
-            for child in node.children(&mut cursor) {
-                to_visit.push(child);
-            }
-        }
-        defs
-    }
-
-
-    /// Finds all nodes in `root_node` that reference the given `subnode`
-    /// (e.g., all calls to the function represented by `subnode`).
-    ///
-    /// # Parameters
-    /// - `root_node`: The root node representing the entire parsed document tree.
-    /// - `source`: The source code as bytes slice used for parsing (needed for extracting text).
-    /// - `subnode`: The node representing the subnode to find references to (e.g. function definition).
-    ///
-    /// # Returns
-    /// A vector of nodes representing the call sites or references to the subnode.
-    fn find_callers(&self, root_node: TsNode, source: &[u8], subnode: TsNode) -> Option<Vec<String>> {
-        // Extract the identifying text of the subnode, e.g. the function name
-        let name_node_option = subnode.child_by_field_name("name");
-        match name_node_option {
-            Some(name_node) =>{
-                let function_name = name_node.utf8_text(source).expect("Failed to extract name text");
-
-                let language = root_node.language();
-
-                // Query for call expressions where the called function's identifier matches the subnode's name
-                let query_str = format!(
-                    r#"
-                    ; Rust: Function, Struct, Enum, Trait references
-                    (
-                      (call_expression function: (identifier) @ref_func) (#eq? @ref_func "{}")
-                    )
-                    (
-                      (struct_expression (identifier) @ref_struct) (#eq? @ref_struct "{}")
-                    )
-                    (
-                      (type_identifier) @ref_type (#eq? @ref_type "{}")
-                    )
-                    (
-                      (trait_reference) @ref_trait (#eq? @ref_trait "{}")
-                    )
-
-                    ; Python: Function call, Class instantiation
-                    (
-                      (call function: (identifier) @ref_func) (#eq? @ref_func "{}")
-                    )
-                    (
-                      (class_definition name: (identifier) @ref_class) (#eq? @ref_class "{}")
-                    )
-
-                    ; JavaScript: Function call, Class reference
-                    (
-                      (call_expression function: (identifier) @ref_func) (#eq? @ref_func "{}")
-                    )
-                    (
-                      (class_declaration name: (identifier) @ref_class) (#eq? @ref_class "{}")
-                    )
-
-                    ; Java: Method call, Class reference, Interface reference
-                    (
-                      (method_invocation name: (identifier) @ref_func) (#eq? @ref_func "{}")
-                    )
-                    (
-                      (class_declaration name: (identifier) @ref_class) (#eq? @ref_class "{}")
-                    )
-                    (
-                      (interface_declaration name: (identifier) @ref_interface) (#eq? @ref_interface "{}")
-                    )
-
-                    ; C: Function call, Struct reference
-                    (
-                      (call_expression function: (identifier) @ref_func) (#eq? @ref_func "{}")
-                    )
-                    (
-                      (struct_specifier name: (type_identifier) @ref_struct) (#eq? @ref_struct "{}")
-                    )
-
-                    ; Go: Function call, Struct, Interface references
-                    (
-                      (call_expression function: (identifier) @ref_func) (#eq? @ref_func "{}")
-                    )
-                    (
-                      (type_spec name: (type_identifier) @ref_struct) (#eq? @ref_struct "{}")
-                    )
-                    (
-                      (interface_type) @ref_interface
-                    )
-                    "#,
-                    function_name,
-                    function_name,
-                    function_name,
-                    function_name,
-                    function_name,
-                    function_name,
-                    function_name,
-                    function_name,
-                    function_name,
-                    function_name,
-                    function_name,
-                    function_name,
-                    function_name,
-                    function_name,
-                    function_name,
-                );
-
-                let query = Query::new(&language, &query_str)
-                    .expect("Failed to compile tree-sitter query");
-                let mut cursor = QueryCursor::new();
-                let mut references = Vec::new();
-                let mut matches = cursor.matches(&query, root_node, source);
-
-                while let Some(mat) = matches.next() {
-                    for cap in mat.captures {
-                            match query.capture_names()[cap.index as usize] {
-                                "ref_func" | "ref_struct" | "ref_class" | "ref_interface" | "ref_trait" => {
-                                    references.push(cap.node.to_string());
-                                }
-                                _ => {}
-                            }
-                        }
-                }
-
-                Some(references)
-            },
-            None => None
-        }
-    }
-
-    // Language-specific query mapping
-    fn get_call_query_for_language(&self, language: &String) -> Option<&'static str> {
-        let languages: Vec<String> = Language::iter().map(|l| l.to_string())
-            .filter(|l| l !="Markdown")
-            .collect();
-        if languages.contains(language) {
-                Some("(call_expression)")
-            }
-            else {
-                None
-        }
-    }
-
-    fn find_all_calls_in_node(
-        &self,
-        parent_node: TsNode,
-        source: &[u8],
-        language_name: &String,
-        path: &Path,
-    ) -> Option<Vec<String>> {
-        // Check if the language supports call expressions
-        let query_str = match self.get_call_query_for_language(language_name) {
-            Some(q) => q,
-            None => {
-                // Return empty vector for languages without call expressions
-                return Some(Vec::new());
-            }
-        };
-
-        let language = {
-            let ext : &str = path.extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
-
-            ExtractMetadataTransformer::get_language_from_extension(ext)
-        };
-        match language{
-            Some(lang) => {
-                match Query::new(&lang, query_str){
-                    Ok(q) =>{
-                        let mut cursor = QueryCursor::new();
-                        let mut calls = Vec::new();
-                        let mut matches = cursor.matches(&q, parent_node, source);
-
-                        while let Some(mat) = matches.next() {
-                            for cap in mat.captures {
-                                calls.push(cap.node.to_string());
-                            }
-                        }
-
-                        Some(calls)
-                    },
-                    Err(_) => None
-                }
-            },
-            None => None
-        }
-
-    }
-
     fn parse_string_to_node(&self, source_code: &str, path: &Path) -> Result<Tree> {
 
         let language = {
@@ -456,15 +154,82 @@ impl ExtractMetadataChunkTransformer {
         parser.set_language(&language).expect("Error loading grammar");
         parser.parse(source_code, None).context("Failed to parse AST")
     }
+
+
+    fn filter_fields_out(&self, metadata: &Metadata, fields: &[&str]) -> HashMap<String, Value> {
+        metadata
+            .iter()
+            .filter(|(key, _)| !fields.contains(&key.as_str()))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
+    fn print_node_tree(&self, node: TsNode, source: &[u8], indent: usize) {
+        let indent_str = "  ".repeat(indent);
+
+        // Get the node's source text
+        let text = node.utf8_text(source).unwrap_or("<invalid utf8>");
+
+        // Print current node info
+        println!(
+            "{}[{}] kind: '{}', is_named: {}, text: '{}'",
+            indent_str,
+            node.id(),
+            node.kind(),
+            node.is_named(),
+            text.lines().next().unwrap_or("").chars().take(50).collect::<String>()
+        );
+
+        // Print field names for children
+        let mut cursor = node.walk();
+        let field_names: Vec<_> = (0..node.child_count())
+            .filter_map(|i| node.field_name_for_child(i as u32))
+            .collect();
+
+        if !field_names.is_empty() {
+            println!("{}  fields: {:?}", indent_str, field_names);
+        }
+
+        // Recursively print children
+        for child in node.children(&mut cursor) {
+            self.print_node_tree(child, source, indent + 1);
+        }
+    }
+
+    pub fn extract_named_definitions(
+        &self,
+        root_node: TsNode,
+        language: &tree_sitter::Language,
+        source_code: &[u8],
+        query_source: &str,
+    ) -> anyhow::Result<Vec<StructureContextFragment>> {
+
+        let query = Query::new(language, query_source)?;
+        let mut query_cursor = QueryCursor::new();
+
+        let mut results = Vec::new();
+        let mut matches_iter = query_cursor.matches(&query, root_node, source_code);
+        while let Some(m) = matches_iter.next() {
+            for capture in m.captures {
+                let node = capture.node;
+                let capture_name = &query.capture_names()[capture.index as usize];
+
+                // Get node text (e.g. function/class name)
+                let node_text = node.utf8_text(source_code).unwrap_or("");
+                    let kind= node.parent().map_or(node.kind().to_string(), |p| p.kind().to_string());
+                    let name= Some(node_text.to_string());
+                    let line_start= node.start_position().row + 1;
+                    let line_end= node.end_position().row + 1;
+                    let structure = StructureContextFragmentBuilder::default().kind(kind).name(name).line_start(line_start).line_end(line_end).build()?;
+
+                results.push( structure);
+            }
+        }
+
+        Ok(results)
+    }
 }
 
-fn filter_fields_out(metadata: &Metadata, fields: &[&str]) -> HashMap<String, Value> {
-    metadata
-        .iter()
-        .filter(|(key, _)| !fields.contains(&key.as_str()))
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect()
-}
 
 
 #[async_trait]
@@ -474,39 +239,42 @@ impl Transformer for ExtractMetadataChunkTransformer {
 
 
     async fn transform_node(&self, mut node: TextNode) -> anyhow::Result<TextNode> {
+        // parse trees and nodes
         let original_content = node.metadata.get("original_content");
-        let language = node.metadata.get("language");
-        let lang_value =  language.context("Failed to retrieve langauge from previous chunk")?;
-        let lang = serde_json::to_string(&lang_value)?;
+        let lang = node.metadata.get("language");
+        let lang_value =  lang.context("Failed to retrieve langauge from previous chunk")?;
+        let language = serde_json::to_string(&lang_value)?;
+
+        let ts_lang = {
+            let ext : &str = node.path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+
+            ExtractMetadataTransformer::get_language_from_extension(ext)
+        }.unwrap();
         let tree = self.parse_tstree(original_content, &node.path)?;
         let root_node = tree.root_node();
-
-    // Walk children to find the exact expression kind
-
-        let subtree = self.parse_string_to_node(&node.chunk, &node.path)?;
+        let chunk = &node.chunk;
+        let bytes = node.chunk.as_bytes();
+        let subtree = self.parse_string_to_node(chunk, &node.path)?;
         let subroot_node = subtree.root_node();
 
-        let called_by_option = self.find_callers(root_node, &node.chunk.as_bytes(), subroot_node);
-        let calls_options = self.find_all_calls_in_node(root_node, &node.chunk.as_bytes(), &lang, &node.path);
+        // compute the relevant informatoin
 
-        let definitions = self.extract_definitions(root_node, &node.chunk.as_bytes(), &lang);
         let kind = subroot_node.kind();
-        let parent_node = root_node.kind();
-        let filtered_hashmap = filter_fields_out(&node.metadata, &vec!["original_content"]);
+        let structures = self.extract_named_definitions(subroot_node,&ts_lang,bytes,self.get_query_for_language(&language))?;
+
+        // filter out original_content of the super tree
+        let filtered_hashmap = self.filter_fields_out(&node.metadata, &vec!["original_content"]);
         let mut filtered_metadata = Metadata::default();
         filtered_metadata.extend(filtered_hashmap);
 
-        // metadata
+        // set metadata
         node.metadata = filtered_metadata;
-        if let Some(called_by) = called_by_option {
-            node.metadata.insert("called_by", json!(called_by));
-        }
-        if let Some(calls) = calls_options {
-            node.metadata.insert("calls", json!(calls));
-        }
         node.metadata.insert("kind", json!(kind));
-        node.metadata.insert("definitions", json!(definitions));
-        node.metadata.insert("parent_node", json!(parent_node));
+        node.metadata.insert("structures", json!(structures));
+        node.metadata.insert("line_start", json!(subroot_node.start_position().row + 1));
+        node.metadata.insert("line_end", json!(subroot_node.end_position().row +1));
 
         Ok(node)
     }

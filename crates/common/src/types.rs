@@ -260,33 +260,18 @@ pub struct MetadataContextFragment{
     /// Source identifier or file path for provenance
     pub location: Location,
 
-    pub structure: Option<StructureContextFragment>,
-
-    pub relations: Option<RelationContextFragment>,
+    pub structures: Vec<StructureContextFragment>,
 
     pub annotations: Option<AnnotationsContextFragment>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash, Builder)]
-pub struct RelationContextFragment{
-    /// Source identifier or file path for provenance
-    pub imports: Option<Vec<String>>,
-
-    pub calls: Option<Vec<String>>,
-
-    pub called_by: Option<Vec<String>>,
-
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash, Builder)]
 pub struct StructureContextFragment{
     /// Source identifier or file path for provenance
-    pub kind: String,
-
-    pub language: Option<String>,
-
-    pub definitions: Vec<Definition>
-
+    kind: String,
+    name: Option<String>,
+    line_start: usize,
+    line_end: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash, Builder)]
@@ -306,7 +291,12 @@ pub enum TagContextFragment{
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash)]
 pub enum Location{
-    File{ path: String, line_start: Option<usize>, line_end: Option<usize> },
+    File{
+        path: String,
+        line_start: Option<usize>,
+        line_end: Option<usize>,
+        project_root: Option<String>
+    },
     URI{ uri: String }
 }
 

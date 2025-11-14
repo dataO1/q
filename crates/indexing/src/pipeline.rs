@@ -153,9 +153,7 @@ impl<'a> IndexingPipeline<'a> {
         .then_in_batch(
             transformers::SparseEmbed::new(sparse_embedding_model)
                 .with_batch_size(self.config.batch_size)
-        )
-        .log_all()
-        ;
+        );
         // .log_errors();
         Ok(chunked_pipeline)
     }

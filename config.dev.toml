@@ -1,6 +1,6 @@
 [indexing]
 # workspace_paths = ["./test-workspace"]
-workspace_paths = ["./crates/indexing"]
+workspace_paths = ["./crates/indexing/src/pipeline.rs"]
 personal_paths = ["./test-notes"]
 system_paths = []
 watch_enabled = true

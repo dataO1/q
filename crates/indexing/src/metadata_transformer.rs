@@ -180,7 +180,7 @@ impl Transformer for ExtractMetadataTransformer {
 
         node.metadata.insert("original_content", json!(node.chunk));
         node.metadata.insert("language", json!(language));
-        node.metadata.insert("imports", json!(dependencies));
+        // node.metadata.insert("imports", json!(dependencies));
         node.metadata.insert("project_root", json!(self.project_root));
 
         Ok(node)

@@ -9,7 +9,7 @@ use swiftide::indexing::EmbeddedField;
 use qdrant_client::qdrant::{Condition, Filter, Fusion, PrefetchQueryBuilder, Query, QueryPointsBuilder, ScoredPoint, Value, VectorInput};
 use qdrant_client::Qdrant;
 use swiftide::indexing::EmbeddingModel;
-use ai_agent_common::{AnnotationsContextFragmentBuilder, CollectionTier, ContextFragment, Definition, Location, MetadataContextFragment, MetadataContextFragmentBuilder, ProjectScope, RelationContextFragmentBuilder, StructureContextFragmentBuilder, TagContextFragment};
+use ai_agent_common::{AnnotationsContextFragmentBuilder, CollectionTier, ContextFragment, Definition, Location, MetadataContextFragment, MetadataContextFragmentBuilder, ProjectScope, StructureContextFragment, StructureContextFragmentBuilder, TagContextFragment};
 use qdrant_client::qdrant::{condition::ConditionOneOf, FieldCondition, Match};
 use swiftide::traits::SparseEmbeddingModel;
 use swiftide::{SparseEmbedding, SparseEmbeddings};
@@ -75,26 +75,29 @@ impl<'a> QdrantClient<'a> {
     fn parse_scored_point(&self, point: ScoredPoint, collection: &str)-> Result<ContextFragment>{
         let payload = &point.payload;
         let path = payload.get("path").map(|x| x.to_string()).unwrap();
-        let kind = payload.get("kind").map(|x| x.to_string()).unwrap();
-        let language = payload.get("language").map(|x| x.to_string());
-        let last_updated: Option<DateTime<Utc>> = payload.get("last_updated_at").and_then(|x| x.to_string().parse().ok());
-        let calls:Option<Vec<String>> = payload.get("calls").map(|x|x.as_list().unwrap().iter().map(|y| y.to_string()).collect());
-        let definition_list = payload.get("definitions").map(|x| x.to_string());
-        let definitions:Vec<Definition> = if let Some (def_list) = definition_list{
-            let res: Option<Vec<Definition>> = serde_json::from_str(&def_list)?;
-                res.unwrap_or(vec![])
+        let line_start_value = payload.get("line_start").map(|x| x.to_string());
+        let line_start: Option<usize> = if let Some (line_start) = line_start_value{
+            let res: Option<usize> = serde_json::from_str(&line_start)?;
+                res
+        }else{None};
+        let line_end_value = payload.get("line_end").map(|x| x.to_string());
+        let line_end: Option<usize> = if let Some (line_end) = line_end_value{
+            let res: Option<usize> = serde_json::from_str(&line_end)?;
+                res
+        }else{None};
+        let structures_value = payload.get("structures").map(|x| x.to_string());
+        let structures: Vec<StructureContextFragment> = if let Some (structures) = structures_value{
+            let res: Vec<StructureContextFragment> = serde_json::from_str(&structures)?;
+                res
         }else{vec![]};
-        let imports:Option<Vec<String>> = payload.get("imports").map(|x|x.as_list().unwrap().iter().map(|y| y.to_string()).collect());
-        let called_by:Option<Vec<String>> = payload.get("called_by").map(|x|x.as_list().unwrap().iter().map(|y| y.to_string()).collect());
-        let location = Location::File{path ,  line_start: None, line_end: None };
-        let structure = StructureContextFragmentBuilder::default().kind(kind).language(language).definitions(definitions).build()?;
-        let relations = RelationContextFragmentBuilder::default().calls(calls).imports(imports).called_by(called_by).build()?;
-        let tags = Some(vec![TagContextFragment::KV("collection_origin".to_string(),collection.to_string())]);
+        let project_root = payload.get("project_root").map(|x| x.to_string());
+        let last_updated: Option<DateTime<Utc>> = payload.get("last_updated_at").and_then(|x| x.to_string().parse().ok());
+        let location = Location::File{path ,  line_start, line_end, project_root };
+        let tags = Some(vec![TagContextFragment::KV("origin".to_string(),format!("Qdrant Indexing Collection \"{}\"",collection.to_string()))]);
         let annotations = AnnotationsContextFragmentBuilder::default().last_updated(last_updated).tags(tags).build()?;
         let metadata = MetadataContextFragmentBuilder::default()
             .location(location)
-            .structure(Some(structure))
-            .relations(Some(relations))
+            .structures(structures)
             .annotations(Some(annotations))
             .build()?;
 
