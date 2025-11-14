@@ -161,7 +161,7 @@ impl<'a> MultiSourceRetriever<'a> {
                     // let reranked = Reranker::rerank_and_deduplicate(&query_embedding,&batch);
                     let mut reranked = batch;
 
-                    reranked.sort_by_key(|f| Reverse(f.score));
+                    reranked.sort_by_key(|f| Reverse(f.relevance_score));
                     for fragment in reranked {
                         yield fragment;
                     }

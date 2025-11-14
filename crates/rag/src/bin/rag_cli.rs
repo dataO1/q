@@ -47,10 +47,9 @@ async fn main() -> Result<()> {
         match batch_result {
             Ok(fragment) => {
                 // writeln!(handle, "=== Batch ({} results) ===", batch.len())?;
-                writeln!(handle, "Summary: {}", fragment.summary)?;
-                writeln!(handle, "Content preview: {:.100}", fragment.content)?;
-                writeln!(handle, "Source: {}", fragment.source)?;
-                writeln!(handle, "Score: {:.4}", fragment.score)?;
+                writeln!(handle, "Content preview: {}", fragment.content)?;
+                writeln!(handle, "Score: {:.4}", fragment.relevance_score)?;
+                writeln!(handle, "Metadata: {:?}", fragment.metadata)?;
                 writeln!(handle, "------------")?;
                 handle.flush()?;
             }

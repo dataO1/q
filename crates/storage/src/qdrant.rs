@@ -1,12 +1,15 @@
+use std::collections::HashMap;
+
 use ai_agent_common::llm::EmbeddingClient;
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use qdrant_client::qdrant::r#match::MatchValue;
 use swiftide::integrations::qdrant::{qdrant_client, Qdrant as SwiftideQdrant};
 use swiftide::indexing::EmbeddedField;
-use qdrant_client::qdrant::{Condition, Filter, Fusion, PrefetchQueryBuilder, Query, QueryPointsBuilder, VectorInput};
+use qdrant_client::qdrant::{Condition, Filter, Fusion, PrefetchQueryBuilder, Query, QueryPointsBuilder, ScoredPoint, Value, VectorInput};
 use qdrant_client::Qdrant;
 use swiftide::indexing::EmbeddingModel;
-use ai_agent_common::{CollectionTier, ContextFragment, ProjectScope};
+use ai_agent_common::{AnnotationsContextFragmentBuilder, CollectionTier, ContextFragment, Location, MetadataContextFragment, MetadataContextFragmentBuilder, ProjectScope, RelationContextFragmentBuilder, StructureContextFragmentBuilder, TagContextFragment};
 use qdrant_client::qdrant::{condition::ConditionOneOf, FieldCondition, Match};
 use swiftide::traits::SparseEmbeddingModel;
 use swiftide::{SparseEmbedding, SparseEmbeddings};
@@ -68,6 +71,38 @@ impl<'a> QdrantClient<'a> {
         Ok(all_results)
     }
 
+
+    fn parse_scored_point(&self, point: ScoredPoint, collection: &str)-> Result<ContextFragment>{
+        let payload = &point.payload;
+        let path = payload.get("path").map(|x| x.to_string()).unwrap();
+        let kind = payload.get("kind").map(|x| x.to_string()).unwrap();
+        let language = payload.get("language").map(|x| x.to_string());
+        let last_updated: Option<DateTime<Utc>> = payload.get("last_updated_at").and_then(|x| x.to_string().parse().ok());
+        let calls:Option<Vec<String>> = payload.get("calls").map(|x|x.as_list().unwrap().iter().map(|y| y.to_string()).collect());
+        let imports:Option<Vec<String>> = payload.get("imports").map(|x|x.as_list().unwrap().iter().map(|y| y.to_string()).collect());
+        let called_by:Option<Vec<String>> = payload.get("called_by").map(|x|x.as_list().unwrap().iter().map(|y| y.to_string()).collect());
+        let location = Location::File{path ,  line_start: None, line_end: None };
+        let structure = StructureContextFragmentBuilder::default().kind(kind).language(language).build()?;
+        let relations = RelationContextFragmentBuilder::default().calls(calls).imports(imports).called_by(called_by).build()?;
+        let tags = Some(vec![TagContextFragment::KV("collection_origin".to_string(),collection.to_string())]);
+        let annotations = AnnotationsContextFragmentBuilder::default().last_updated(last_updated).tags(tags).build()?;
+        let metadata = MetadataContextFragmentBuilder::default()
+            .location(location)
+            .structure(Some(structure))
+            .relations(Some(relations))
+            .annotations(Some(annotations))
+            .build()?;
+
+        let fragment = ContextFragment {
+            content: payload.get("content").and_then(|v| v.as_str()).unwrap_or(&"".to_string()).to_string(),
+            metadata,
+            // source: payload.get("source").and_then(|v| v.as_str()).unwrap_or(&"unknown".to_string()).to_string(),
+            relevance_score: ( point.score * 100f32 ) as usize,
+        };
+        Ok(fragment)
+    }
+
+
     /// Query with metadata filtering using raw qdrant-client
     pub async fn hybrid_query_with_filters(
         &self,
@@ -104,21 +139,13 @@ impl<'a> QdrantClient<'a> {
             .query(Query::new_fusion(Fusion::Rrf))
             .with_payload(true)
             .limit(limit.unwrap_or(10));
-        let q = query;
-        let search_result = self.raw_client.query(q).await?;
+        let search_result = self.raw_client.query(query).await?;
 
         let mut results = Vec::new();
 
         for point in search_result.result {
             // Extract payload data to ContextFragment
-            let payload = &point.payload;
-
-            let fragment = ContextFragment {
-                content: payload.get("content").and_then(|v| v.as_str()).unwrap_or(&"".to_string()).to_string(),
-                summary: payload.get("summary").and_then(|v| v.as_str()).unwrap_or(&"".to_string()).to_string(),
-                source: payload.get("source").and_then(|v| v.as_str()).unwrap_or(&"unknown".to_string()).to_string(),
-                score: ( point.score * 100f32 ) as usize,
-            };
+            let fragment = self.parse_scored_point(point, collection)?;
             results.push(fragment);
         }
 

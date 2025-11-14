@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use repo_root::{projects::GitProject, RepoRoot};
 use serde_json::json;
 use swiftide::{indexing::{TextNode, Transformer}, traits::WithIndexingDefaults};
-use tree_sitter::{Language, Node as TsNode, Parser};
+use tree_sitter::{Language, Node as TsNode, Parser, Tree};
 
 use tree_sitter_rust;
 use tree_sitter_python;
@@ -27,18 +27,19 @@ use tree_sitter_yarn;
 
 #[derive(Clone)]
 pub struct ExtractMetadataTransformer{
-    project_root: String
+    project_root: String,
+    tree: Tree,
 }
 
 impl WithIndexingDefaults for ExtractMetadataTransformer {}
 
 impl ExtractMetadataTransformer {
-    pub fn new(project_root: String) -> Self {
-        Self {project_root}
+    pub fn new(project_root: String, tree: Tree) -> Self {
+        Self {project_root, tree}
     }
 
     /// Map file extension to tree-sitter Language
-    fn get_language_from_extension(extension: &str) -> Option<Language> {
+    pub fn get_language_from_extension(extension: &str) -> Option<Language> {
         match extension.to_lowercase().as_str() {
             "rs" => Some(tree_sitter_rust::LANGUAGE.into()),
             "py" => Some(tree_sitter_python::LANGUAGE.into()),
@@ -148,40 +149,14 @@ impl Transformer for ExtractMetadataTransformer {
     type Output = String;
 
     async fn transform_node(&self, mut node: TextNode) -> anyhow::Result<TextNode> {
-        // Detect language from extension
-        let lang = {
-            let ext : &str = node.path.extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
-
-            Self::get_language_from_extension(ext)
-        };
-
-        if lang.is_none() {
-            // No language found - return node unchanged
-            return Err(anyhow!("Failed to extract metadata for unknown language"));
-        }
-
-        let mut parser = Parser::new();
-        parser.set_language(&lang.unwrap()).expect("Failed to set language");
-
-        if let Some(tree) = parser.parse(&node.chunk, None) {
-            let root = tree.root_node();
-
-            let definitions = self.extract_definitions(root, &node.chunk.as_bytes());
-            let dependencies = self.extract_dependencies(root, &node.chunk.as_bytes());
-            let references = self.extract_references(root, &node.chunk.as_bytes());
-            let parent_node = root.kind().to_string();
-            // let root_path = RepoRoot::<GitProject>::new(&node.path).path;
-            // let project_root = root_path.to_str().unwrap().to_string();
+        let root = self.tree.root_node();
+        let language = self.tree.language().name();
+        let dependencies = self.extract_dependencies(root, &node.chunk.as_bytes());
 
 
-            node.metadata.insert("definitions", json!(definitions));
-            node.metadata.insert("dependencies", json!(dependencies));
-            node.metadata.insert("references", json!(references));
-            node.metadata.insert("parent_node", json!(parent_node));
-            node.metadata.insert("project_root", json!(self.project_root));
-        }
+        node.metadata.insert("language", json!(language));
+        node.metadata.insert("dependencies", json!(dependencies));
+        node.metadata.insert("project_root", json!(self.project_root));
 
         Ok(node)
     }

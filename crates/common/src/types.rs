@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use strum_macros::EnumIter;
 use strum_macros::Display;
 use schemars::JsonSchema;
+use derive_builder::Builder;
 
 /// Unique identifier for tasks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -242,28 +243,69 @@ pub enum Language {
 }
 
 /// Represents a retrieved context document or snippet for RAG
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash, Builder)]
 pub struct ContextFragment {
     /// The main textual content of the fragment
     pub content: String,
 
-    /// A short summary or title of the fragment
-    pub summary: String,
-
-    /// Source identifier or file path for provenance
-    pub source: String,
+    /// Metadata for the given fragment
+    pub metadata: MetadataContextFragment,
 
     /// Similarity or relevance score (e.g., from retriever)
-    pub score: usize,
+    pub relevance_score: usize,
 }
 
-impl ContextFragment {
-    pub fn new(content: impl Into<String>, summary: impl Into<String>, source: impl Into<String>, score: usize) -> Self {
-        Self {
-            content: content.into(),
-            summary: summary.into(),
-            source: source.into(),
-            score,
-        }
-    }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash, Builder)]
+pub struct MetadataContextFragment{
+    /// Source identifier or file path for provenance
+    pub location: Location,
+
+    pub structure: Option<StructureContextFragment>,
+
+    pub relations: Option<RelationContextFragment>,
+
+    pub annotations: Option<AnnotationsContextFragment>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash, Builder)]
+pub struct RelationContextFragment{
+    /// Source identifier or file path for provenance
+    pub imports: Option<Vec<String>>,
+
+    pub calls: Option<Vec<String>>,
+
+    pub called_by: Option<Vec<String>>,
+
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash, Builder)]
+pub struct StructureContextFragment{
+    /// Source identifier or file path for provenance
+    pub kind: String,
+
+    pub language: Option<String>,
+
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash, Builder)]
+pub struct AnnotationsContextFragment{
+    /// Source identifier or file path for provenance
+    pub last_updated: Option<DateTime<Utc>>,
+    pub tags: Option<Vec<TagContextFragment>>
+
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash)]
+pub enum TagContextFragment{
+    TAG(String),
+    KV(String, String)
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash)]
+pub enum Location{
+    File{ path: String, line_start: Option<usize>, line_end: Option<usize> },
+    URI{ uri: String }
+}
+
+

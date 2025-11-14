@@ -1,12 +1,12 @@
 use ai_agent_common::{llm::EmbeddingClient, *};
 use ai_agent_storage::QdrantClient;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use repo_root::{projects::GitProject, RepoRoot};
 use serde_json::json;
-use std::path::Path;
-use crate::{chunk_adaptive::ChunkAdaptive, metadata_transformer::ExtractMetadataTransformer};
+use std::{fs, path::Path};
+use crate::{chunk_adaptive::ChunkAdaptive, metadata_chunk_transformer::ExtractMetadataChunkTransformer, metadata_transformer::{ExtractMetadataTransformer}};
 // Add all the tree-sitter language crates you want to support
-use tree_sitter;
+use tree_sitter::{self, Parser, Tree};
 
 // Correct Swiftide 0.32 imports
 use swiftide::indexing::{
@@ -104,12 +104,40 @@ impl<'a> IndexingPipeline<'a> {
         })
     }
 
+    fn getTSTree(&self, path: &Path) -> Result<Tree>{
+
+        let lang = {
+            let ext : &str = path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+
+            ExtractMetadataTransformer::get_language_from_extension(ext)
+        };
+
+        if lang.is_none() {
+            // No language found - return node unchanged
+            return Err(anyhow!("Failed to extract metadata for unknown language"));
+        }
+
+        let mut parser = Parser::new();
+        parser.set_language(&lang.unwrap()).expect("Failed to set language");
+
+        let contents = fs::read_to_string(path)?;
+
+        parser.parse(contents,None).context("Failed to parse AST tree for file")
+    }
+
     fn create_pipeline(&self, path: &Path, extensions: Option<&Vec<&str>>,
 ) -> Result<Pipeline<String>>{
 
 
         let root_path = RepoRoot::<GitProject>::new(&path).path;
         let project_root = root_path.to_str().unwrap().to_string();
+
+        let tree = self.getTSTree(path)?;
+        let metadatatransformer = ExtractMetadataTransformer::new(project_root, tree.clone());
+
+
         // Example custom transformer to add useful metadata
         let dense_embedding_model = self.embedder.embedder_dense.clone();
         tracing::debug!("Initializing FastEmbed sparse...");
@@ -127,7 +155,7 @@ impl<'a> IndexingPipeline<'a> {
             // .then(MetadataTitle::new(prompt_client.clone()))
             // .then(MetadataSummary::new(prompt_client.clone()))
             // .then(MetadataKeywords::new(prompt_client.clone()))
-            .then(ExtractMetadataTransformer::new(project_root));
+            .then(metadatatransformer);
 
         if self.config.enable_qa_metadata{
             let prompt_client = Ollama::builder()
@@ -137,6 +165,8 @@ impl<'a> IndexingPipeline<'a> {
             meta_pipeline = meta_pipeline.then(MetadataQACode::from_client(prompt_client).build()?)
         }
         let chunked_pipeline = meta_pipeline.then_chunk(ChunkAdaptive::default())
+
+        .then(ExtractMetadataChunkTransformer::new(tree))
         // 5. Dense embeddings
         .then_in_batch(
             transformers::Embed::new(dense_embedding_model)

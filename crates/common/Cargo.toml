@@ -20,6 +20,7 @@ swiftide-indexing = "*"
 swiftide-integrations = { version = "*", features = ["ollama", "qdrant"] }
 tracing = "*"
 fastembed = "*"
+derive_builder = "*"
 
 [dev-dependencies]
 tempfile = "3"
