@@ -131,7 +131,7 @@ pub struct DocumentMetadata {
     pub language: Option<String>,
     pub file_type: String,
     pub last_modified: DateTime<Utc>,
-    pub definitions: Vec<String>,
+    pub definitions: Vec<Definition>,
 }
 
 /// Message in conversation history
@@ -285,6 +285,8 @@ pub struct StructureContextFragment{
 
     pub language: Option<String>,
 
+    pub definitions: Vec<Definition>
+
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash, Builder)]
@@ -309,3 +311,10 @@ pub enum Location{
 }
 
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash, Builder)]
+pub struct Definition {
+    name: String,
+    kind: String,
+    line: usize,
+    byte_range: (usize, usize),
+}

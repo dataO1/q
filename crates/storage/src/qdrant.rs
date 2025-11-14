@@ -9,7 +9,7 @@ use swiftide::indexing::EmbeddedField;
 use qdrant_client::qdrant::{Condition, Filter, Fusion, PrefetchQueryBuilder, Query, QueryPointsBuilder, ScoredPoint, Value, VectorInput};
 use qdrant_client::Qdrant;
 use swiftide::indexing::EmbeddingModel;
-use ai_agent_common::{AnnotationsContextFragmentBuilder, CollectionTier, ContextFragment, Location, MetadataContextFragment, MetadataContextFragmentBuilder, ProjectScope, RelationContextFragmentBuilder, StructureContextFragmentBuilder, TagContextFragment};
+use ai_agent_common::{AnnotationsContextFragmentBuilder, CollectionTier, ContextFragment, Definition, Location, MetadataContextFragment, MetadataContextFragmentBuilder, ProjectScope, RelationContextFragmentBuilder, StructureContextFragmentBuilder, TagContextFragment};
 use qdrant_client::qdrant::{condition::ConditionOneOf, FieldCondition, Match};
 use swiftide::traits::SparseEmbeddingModel;
 use swiftide::{SparseEmbedding, SparseEmbeddings};
@@ -79,10 +79,15 @@ impl<'a> QdrantClient<'a> {
         let language = payload.get("language").map(|x| x.to_string());
         let last_updated: Option<DateTime<Utc>> = payload.get("last_updated_at").and_then(|x| x.to_string().parse().ok());
         let calls:Option<Vec<String>> = payload.get("calls").map(|x|x.as_list().unwrap().iter().map(|y| y.to_string()).collect());
+        let definition_list = payload.get("definitions").map(|x| x.to_string());
+        let definitions:Vec<Definition> = if let Some (def_list) = definition_list{
+            let res: Option<Vec<Definition>> = serde_json::from_str(&def_list)?;
+                res.unwrap_or(vec![])
+        }else{vec![]};
         let imports:Option<Vec<String>> = payload.get("imports").map(|x|x.as_list().unwrap().iter().map(|y| y.to_string()).collect());
         let called_by:Option<Vec<String>> = payload.get("called_by").map(|x|x.as_list().unwrap().iter().map(|y| y.to_string()).collect());
         let location = Location::File{path ,  line_start: None, line_end: None };
-        let structure = StructureContextFragmentBuilder::default().kind(kind).language(language).build()?;
+        let structure = StructureContextFragmentBuilder::default().kind(kind).language(language).definitions(definitions).build()?;
         let relations = RelationContextFragmentBuilder::default().calls(calls).imports(imports).called_by(called_by).build()?;
         let tags = Some(vec![TagContextFragment::KV("collection_origin".to_string(),collection.to_string())]);
         let annotations = AnnotationsContextFragmentBuilder::default().last_updated(last_updated).tags(tags).build()?;
