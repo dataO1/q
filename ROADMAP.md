@@ -47,14 +47,56 @@
         + Use cosine similarity with thresholding.
         + Support dynamic weighting based on recency, dependency chain, and conversation signals.
 - Phase 4 - History (Week 4):
-    * Buffer memory (LRU)
-    * PostgreSQL semantic search
-    * Progressive summarizer
+    * Week 1: Crate Setup and Core Orchestrator
+        + Initialize the agent-network crate with the recommended module structure.
+        + Implement configuration loading (config.rs) for agent definitions, HITL modes, retry policies, etc.
+        + Implement basic orchestrator core (orchestrator.rs):
+            - Dynamic graph generation using petgraph based on task decomposition input.
+            - Execute task dependency resolution and topological sorting.
+        + Define core types, traits, error handling (error.rs).
+    * Week 2: Workflow and Graph Execution Engine
+        + Implement workflow module:
+            - DAG builder (workflow/builder.rs) creating execution DAGs with dependencies.
+            - Executor (workflow/executor.rs) supporting wave-based parallel execution of tasks.
+            - Implement failure recovery strategies and retry loop coordination outside DAG.
+        + Implement conflict resolution and file lock management (conflict.rs, filelocks.rs).
+    * Week 3: Agent Abstractions and Core Agents
+        + Define agent base traits/interfaces (agents/base.rs) supporting structured I/O and Rig integration.
+        + Implement core domain agents:
+            - Coding agent (agents/coding.rs).
+            - Planning agent (agents/planning.rs).
+            - Writing agent (agents/writing.rs).
+        + Prepare evaluator agent for quality assessment and optimization loops (agents/evaluator.rs).
+    * Week 4: Tool Integrations and MCP Tools Support
+        + Integrate MCP tools adapter layer:
+            - LSP integration (tools/lsp.rs).
+            - Git operations (tools/git.rs).
+            - Filesystem access and Tree-sitter parsing (tools/filesystem.rs, tools/treesitter.rs).
+        + Implement coordination module (coordination.rs) for orchestrator-agent-tool workflow synchronization.
+        + Integrate smart RAG and history context injections with the workflow.
+    * Week 5: Human-in-the-Loop (HITL) System and Queuing
+        + Implement HITL subsystem:
+            - HITL mode management and assessor logic (hitl/assessor.rs).
+            - HITL task queue and audit logging (hitl/queue.rs, hitl/audit.rs).
+        + Integrate HITL checkpoints into the orchestrator workflow.
+        + Add support for agent escalation to HITL on failure or low confidence.
+    * Week 6: Token Budget Management and Streaming
+        + Implement token budget management (token_budget.rs) around agent LLM calls using tiktoken-rs.
+        + Implement real-time streaming of agent, tool, and orchestrator status updates (status_stream.rs).
+        + Set up channel-based streaming with Tokio mpsc channels for UI and CLI integration.
+    * Week 7: ACP Communication Protocol and API Layer
+        + Implement ACP protocol support (acp.rs) with Axum server for API and WebSocket endpoints.
+        + Add agent discovery and real-time status streaming endpoints.
+        + Connect CLI and UI client interaction layers to the agent-network via ACP.
+    * Week 8: Observability, Tracing, and Tests
+        + Add OpenTelemetry Jaeger tracing integration (tracing.rs) across all major components.
+        + Render petgraph DAGs as dot files for visualization (optional).
+        + Write comprehensive integration and unit tests covering tasks, failure scenarios, HITL, and agent execution.
+        + Document APIs, configurations, and agent coding guidelines within the crate.
 - Phase 5 - Orchestrator (Weeks 5-6):
     * Agent pool
     * Workflow builder (petgraph)
     * Wave executor with locking
-    * Checkpoint system
 - Phase 6 - Polish (Weeks 7-8):
     * MCP tools
     * API server
@@ -413,7 +455,7 @@ Layer 3: Compressed Summaries (PostgreSQL)
 
 # 4. Dynamic Agent-Network with smart orchestration
 ## Overview
-A Rust binary for orchestrating smart dynamically generated agent networks based on rig and petgraph.
+The system is a multi-agent orchestration framework built in Rust that coordinates specialized LLM agents through a DAG-based workflow engine using petgraph for graph execution and Rig for agent/LLM integration. An orchestrator agent dynamically generates execution plans as directed acyclic graphs, where nodes represent agent tasks and edges define dependencies, enabling wave-based parallel execution with automatic topological sorting for optimal performance. The architecture features three-layer RAG (Swiftide indexing, Qdrant/PostgreSQL storage, FastEmbed reranking), real-time event streaming via tokio::mpsc channels for progress monitoring, tool-level Git commits with LLM-generated semantic messages, and hybrid HITL (human-in-the-loop) with orchestrator-defined checkpoints and agent self-escalation for low-confidence decisions. State management is handled through atomic file-level Git commits (no workflow checkpointing), file locking for concurrent agent coordination, and token budgeting with tiktoken-rs to optimize context usage across the entire multi-agent workflow.
 ## Features
 - [ ] Basic functionality
     - [ ] Ollama integration for all agents, with structured in and outputs,
@@ -424,7 +466,9 @@ A Rust binary for orchestrating smart dynamically generated agent networks based
       definitions, prompts, model selection and other important critical
       options, while staying lean)
     - [ ] no circuit-breaking mechanism for now
-- [ ] Dynamic DAC graph generation with dependencies and tools (via petgraph)
+- [ ] Dynamic DAC graph generation with dependencies and tools (via petgraph).
+  For now graphs should be fixed after initial planning, no mid-graph-execution
+  replanning.
     - [ ] Orchestrator node has a list of tools and agents. On query analyses and decomposes it, generates a detailed dynamic petgraph compatible execution plan using rig native patterns, fitting for the task:
         - [ ] computes full graph execution with failure aware parallel waves with toposort:
         ```Example:
@@ -443,7 +487,7 @@ A Rust binary for orchestrating smart dynamically generated agent networks based
             ```
             - [ ] Orchestrator defines HITL checkpoints for high-risk tasks (baked into graph)
             - [ ] Agents can escalate dynamically when confidence is low (runtime decision) (this should be supported by the general architecture, but not yet implemented)
-        - [ ] failure fallback edges (if agent signals failure  the graph should handle this gracefully, ie the orchestrator should be aware of this and the graph template should support it). there should be various ErrorRecoveryStrategy:
+        - [ ] failure fallback edges (if agent signals failure  the graph should handle this gracefully, ie the orchestrator should be aware of this and the graph template should support it). there should be various ErrorRecoveryStrategy per task, decided by the orchestrator on graph generation:
             ```
             pub enum ErrorRecoveryStrategy {
                 /// Retry same agent (transient failures)
@@ -461,20 +505,30 @@ A Rust binary for orchestrating smart dynamically generated agent networks based
                 /// Abort entire workflow
                 Abort,
             }
+            ## Error Recovery
+            - Transient errors (network timeout) → Retry 3x with exponential backoff
+            - Agent failures (model crash) → Switch to backup agent (if available)
+            - User errors (invalid input) → Skip task, log warning
+            - Critical errors (disk full) → Escalate to human, abort workflow
             ```
-        - [ ] evaluator optimizer loops, based on the agents risk level:
-            ```
-            enum QualityStrategy {
-                Always,               // Every task gets evaluator
-                OnlyForCritical,      // Only if task is high-risk
-                AfterNIterations(usize), // After N refinement attempts
-                Never,                // Skip evaluation
-            }
-            ```
+        - [ ] evaluator optimizer loops, based on the agents risk level.
+            - [ ] orchestrator evaluates risk level per agent and bakes in an evaluator
+              agent in the graph depending on the evaluated riks-level and its assigned quality strategy. this evaluator node should read the output, be aware of the context (which agent produced the output, what it should review and how harsh, who will read the review):
+                ```
+                enum QualityStrategy {
+                    Always,               // Every task gets evaluator
+                    OnlyForCritical,      // Only if task is high-risk
+                    AfterNIterations(usize), // After N refinement attempts
+                    Never,                // Skip evaluation
+                }
+                ```
+            - [ ] The petgraph DAG enforces correct execution order without cycles, while retries happen as orchestrator-driven looped executions. This keeps the graph clean and your workflow semantics simple, leveraging orchestration logic for retries without violating DAG acyclicity.
+            - [ ] Orchestrator manages retry loop: Instead of introducing cycles in the graph, the orchestrator detects low-quality evaluation results and triggers re-execution of the original agent node(s) explicitly outside the graph traversal. This might mean re-running node(s) or a wave from scratch.
+            - [ ] State and control are outside the DAG: The orchestrator maintains metadata about retry counts, evaluation scores, and decides when to stop retrying or escalate.
         - [ ] Complexety Analysis and task decomposition (subtask splitting). Should
           be possible with the architecture, but not yet implemented.
-        - [ ] Token budget optimization before and after llm calls according to
-          best practices, using
+        - [ ] Per-agent, per-execution token budget optimization via tiktoken-rs before and after llm calls according to
+          best practices, using:
             - [ ] context pruning
             - [ ] prompt caching
             - [ ] model selection
@@ -483,6 +537,9 @@ A Rust binary for orchestrating smart dynamically generated agent networks based
     - [ ] conflict detection and resolution (multiple agents working on same files)
         - [ ] has reference to a File locks manager component which keeps a list of open files for all tools (so that parallel agents have to wait for a lock for writing the same file)
         - [ ] post-execution verification(optional for now)
+    - [ ] failure detection (example: file lock times out at 30s, agent cant
+      read file it needs, agent fails, graph acts according to its failure
+      recovery plan)
 - [ ] per-agent pre-fetched (on graph execution, not agent execution) combined context:
     - [ ] smartRAG integration
     - [ ] History Manager integration
@@ -620,7 +677,6 @@ crates
 │       └── workflow
 │           ├── analyzer.rs
 │           ├── builder.rs
-│           ├── checkpoint.rs
 │           ├── executor.rs
 │           └── mod.rs
 ├── rag
