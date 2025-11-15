@@ -52,7 +52,7 @@
     * Progressive summarizer
 - Phase 5 - Orchestrator (Weeks 5-6):
     * Agent pool
-    * Workflow builder (GraphFlow)
+    * Workflow builder (petgraph)
     * Wave executor with locking
     * Checkpoint system
 - Phase 6 - Polish (Weeks 7-8):
@@ -81,7 +81,7 @@ Utilize library native patterns wherever possible, minimize custom code. Think b
 ## User Flow
 ```User Query
   → ACP Server (Axum)
-  → GraphFlow Orchestrator
+  → petgrap Orchestrator
       → Complexity Analysis (LLM)
       → Task Decomposition (if complex)
       → Agent Selection (from pool)
@@ -114,7 +114,7 @@ Utilize library native patterns wherever possible, minimize custom code. Think b
     └─────────────────┬────────────────────┘
                       │
     ┌─────────────────▼────────────────────────────────────────┐
-    │  GRAPHFLOW ORCHESTRATOR                                  │
+    │  PETGRAPH  ORCHESTRATOR                                  │
     │  - Dynamic workflow graph construction (runtime DAG)     │
     │  - Task dependency resolution (topological sort)         │
     │  - Wave-based parallel execution (petgraph)              │
@@ -413,34 +413,102 @@ Layer 3: Compressed Summaries (PostgreSQL)
 
 # 4. Dynamic Agent-Network with smart orchestration
 ## Overview
-A Rust binary for orchestrating smart dynamiclly generated agent networks based on rig, GraphFlow.
+A Rust binary for orchestrating smart dynamically generated agent networks based on rig and petgraph.
 ## Features
 - [ ] Basic functionality
-    - [ ] Ollama integration
+    - [ ] Ollama integration for all agents, with structured in and outputs,
+    - [ ] Agents dont need agent-to-agent communication !!
+    - [ ] no need for checkpointing system!
+      tools integration, streaming.
     - [ ] Reading configuration options from config.toml (i.e.: agent
       definitions, prompts, model selection and other important critical
       options, while staying lean)
-- [ ] Dynamic DAC graph generation (petgraph + GraphFlow)
-    - [ ] Complexety Analysis and task decomposition (subtask splitting)
-        - [ ] wave execution
-        - [ ] conflict detection and resolution (multiple agents working on same files)
-            - [ ] Locking (Arch<RwLock<HashMap>>)
-        - [ ] post-execution verification
-    - [ ] HITL (with tokio::sync channels?)
-    - [ ] LangGraph's Checkpointing System for state snapshots, HITL approval, crash
-  recovery, with persistance
-- [ ] per-agent combined context generation
+    - [ ] no circuit-breaking mechanism for now
+- [ ] Dynamic DAC graph generation with dependencies and tools (via petgraph)
+    - [ ] Orchestrator node has a list of tools and agents. On query analyses and decomposes it, generates a detailed dynamic petgraph compatible execution plan using rig native patterns, fitting for the task:
+        - [ ] computes full graph execution with failure aware parallel waves with toposort:
+        ```Example:
+            // Wave 0: [analyze, security_scan] <- parallel
+            // Wave 1: [implement]               <- waits for both
+            // Wave 2: [test]                    <- waits for implement
+        ```
+        - [ ] including HITL stops
+            - [ ] varios HITLmodes based on risk assesment
+            ```
+                pub enum HITLMode {
+                    Blocking,     // Pause workflow until human approves
+                    Async,        // Continue, but flag for post-hoc review
+                    SampleBased,  // Only review X% of tasks
+            }
+            ```
+            - [ ] Orchestrator defines HITL checkpoints for high-risk tasks (baked into graph)
+            - [ ] Agents can escalate dynamically when confidence is low (runtime decision) (this should be supported by the general architecture, but not yet implemented)
+        - [ ] failure fallback edges (if agent signals failure  the graph should handle this gracefully, ie the orchestrator should be aware of this and the graph template should support it). there should be various ErrorRecoveryStrategy:
+            ```
+            pub enum ErrorRecoveryStrategy {
+                /// Retry same agent (transient failures)
+                Retry { max_attempts: usize, backoff: Duration },
+
+                /// Switch to backup agent (agent-specific failures)
+                SwitchAgent { backup: AgentId },
+
+                /// Skip task and continue (non-critical)
+                Skip,
+
+                /// Request human intervention (critical failures)
+                EscalateToHuman,
+
+                /// Abort entire workflow
+                Abort,
+            }
+            ```
+        - [ ] evaluator optimizer loops, based on the agents risk level:
+            ```
+            enum QualityStrategy {
+                Always,               // Every task gets evaluator
+                OnlyForCritical,      // Only if task is high-risk
+                AfterNIterations(usize), // After N refinement attempts
+                Never,                // Skip evaluation
+            }
+            ```
+        - [ ] Complexety Analysis and task decomposition (subtask splitting). Should
+          be possible with the architecture, but not yet implemented.
+        - [ ] Token budget optimization before and after llm calls according to
+          best practices, using
+            - [ ] context pruning
+            - [ ] prompt caching
+            - [ ] model selection
+- [ ] tools wrapper, which orchestrator initializes agents with:
+    - [ ] streaming based
+    - [ ] conflict detection and resolution (multiple agents working on same files)
+        - [ ] has reference to a File locks manager component which keeps a list of open files for all tools (so that parallel agents have to wait for a lock for writing the same file)
+        - [ ] post-execution verification(optional for now)
+- [ ] per-agent pre-fetched (on graph execution, not agent execution) combined context:
     - [ ] smartRAG integration
     - [ ] History Manager integration
 - [ ] Tools integration (via MCP)
     - [ ] Treesitter
     - [ ] Filesystem for writing files, listing files etc.
     - [ ] Tightly integrated with git (respect gitignore)
-        - [ ] git commit on side-effect(i.e file write) with smart message.
+        - [ ] git commit on side-effect(i.e file write) with smart commit
+          message (generated by the agent).
     - [ ] LSP integration
     - [ ] keep open for more tools
+- [ ] Tracing/monitoring
+    - [ ] with open telemetry + jaeger
+    - [ ] petgraph output as rendered dot file (if possible)
 - [ ] ACP integration
-    - [ ] status update streams from agents via orchestrator as a centralised gateway (users never interact with agents directly)
+    - [ ] status update streams from agents via orchestrator as a centralised gateway (users never interact with agents directly):
+        - [ ] Three layer streaming (Layer 1 agents produce events, Layer 2 Tools produce file events, Orchestrator collects and streams)
+            - [ ] Agents emit status updates via channels (tokio::mpsc)
+            - [ ] Orchestrator collects and streams to user
+            - [ ] Both layers participate but orchestrator coordinates
+            - [ ] Each agents output should have its own agent id for channel,
+              such that the UI later can dynamically show parallel execution updates for running agents:
+              ```Example:
+                Coding Agent: Loading files (<cropped file tools output>)
+                Review Agent: Reviewing previous implementation...
+              ```
     - [ ] common interactions as requests/capabilities (query, code-completion)
 
 
