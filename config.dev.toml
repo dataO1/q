@@ -53,3 +53,64 @@ name = "coding"
 model = "qwen2.5-coder:32b"
 system_prompt = "You are a coding assistant..."
 temperature = 0.2
+
+
+[[agents]]
+id = "coding-1"
+agent_type = "coding"
+model = "qwen2.5-coder:32b"
+temperature = 0.7
+max_tokens = 4096
+system_prompt = """You are an expert coding assistant.
+You write clean, idiomatic Rust code following best practices.
+Always consider error handling and type safety."""
+
+[[agents]]
+id = "planning-1"
+agent_type = "planning"
+model = "qwen2.5:14b"
+temperature = 0.8
+max_tokens = 2048
+system_prompt = """You are a planning agent that decomposes complex tasks.
+Break down tasks into logical steps with clear dependencies."""
+
+[[agents]]
+id = "writing-1"
+agent_type = "writing"
+model = "qwen2.5:14b"
+temperature = 0.7
+max_tokens = 2048
+system_prompt = """You are a technical writing assistant.
+Generate clear documentation and commit messages."""
+
+[[agents]]
+id = "evaluator-1"
+agent_type = "evaluator"
+model = "qwen2.5:14b"
+temperature = 0.3
+max_tokens = 1024
+system_prompt = """You are a code reviewer and quality evaluator.
+Assess outputs for correctness, quality, and best practices."""
+
+[hitl]
+enabled = true
+default_mode = "Async"
+sample_rate = 0.1  # Review 10% of tasks
+
+[retry]
+max_attempts = 3
+backoff_ms = 1000
+backoff_multiplier = 2.0
+
+[token_budget]
+max_tokens_per_agent = 8192
+enable_context_pruning = true
+enable_prompt_caching = true
+
+[acp]
+host = "0.0.0.0"
+port = 8080
+
+[tracing]
+enabled = true
+jaeger_endpoint = "http://localhost:14268/api/traces"

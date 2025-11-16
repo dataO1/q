@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 ai-agent-common = { path = "../common" }
-ai-agent-orchestrator = { path = "../orchestrator" }
+ai-agent-network = { path = "../agent-network" }
 tokio = { version = "*", features = ["full"] }
 axum = { version = "*", features = ["ws"] }
 tower = "*"

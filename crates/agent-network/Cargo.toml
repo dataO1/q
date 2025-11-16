@@ -1,0 +1,59 @@
+[package]
+name = "ai-agent-network"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "*", features = ["full"] }
+sqlx = { version = "*", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+uuid = { version = "*", features = ["v4", "serde"] }
+reqwest = { version = "*", features = ["json", "rustls-tls"] }
+
+# Core async runtime
+futures = "*"
+async-trait = "*"
+
+# Graph and workflow
+petgraph = "*"
+
+# LLM integration
+rig-core = "*"
+
+# Serialization
+serde = { version = "*", features = ["derive"] }
+serde_json = "*"
+toml = "*"
+
+# Error handling
+anyhow = "*"
+thiserror = "*"
+
+# Logging and tracing
+tracing = "*"
+tracing-subscriber = { version = "*", features = ["env-filter"] }
+opentelemetry = "*"
+opentelemetry-jaeger = "*"
+
+# Date/time
+chrono = { version = "*", features = ["serde"] }
+
+# Token management
+tiktoken-rs = "*"
+
+# Communication
+axum = { version = "*", features = ["ws"] }
+tower = "*"
+tower-http = { version = "*", features = ["trace"] }
+
+# Shared dependencies
+ai-agent-common = { path = "../common" }
+ai-agent-mcp-tools = { path = "../mcp-tools" }
+ai-agent-rag = { path = "../rag" }
+ai-agent-history = { path = "../history" }
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[[bin]]
+name = "agent-network"
+path = "src/main.rs"

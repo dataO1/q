@@ -1,6 +1,7 @@
 use ai_agent_common::*;
 use rig::completion::CompletionModel;
 use crate::*;
+use anyhow::Result;
 
 pub struct HistoryManager<M:CompletionModel> {
     buffer_memory: buffer_memory::BufferMemory,

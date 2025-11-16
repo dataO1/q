@@ -4,7 +4,7 @@ members = [
     "crates/indexing",
     "crates/rag",
     "crates/history",
-    "crates/orchestrator",
+    "crates/agent-network",
     "crates/mcp-tools",
     "crates/storage",
     "crates/api",

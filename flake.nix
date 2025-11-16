@@ -43,7 +43,7 @@
           };
 
           orchestrator = pkgs.rustPlatform.buildRustPackage {
-            pname = "ai-agent-orchestrator";
+            pname = "ai-agent-agent-network";
             version = "0.1.0";
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;

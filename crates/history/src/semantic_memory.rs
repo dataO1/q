@@ -1,5 +1,6 @@
 use ai_agent_common::*;
 use sqlx::PgPool;
+use anyhow::Result;
 
 pub struct SemanticMemory {
     pool: PgPool,

@@ -1,5 +1,6 @@
 use ai_agent_common::*;
 use async_trait::async_trait;
+use anyhow::Result;
 
 #[async_trait]
 pub trait ContextProvider: Send + Sync {

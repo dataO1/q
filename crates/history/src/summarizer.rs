@@ -1,6 +1,7 @@
 use ai_agent_common::*;
 use rig::agent::Agent;
 use rig::completion::CompletionModel;
+use anyhow::Result;
 
 pub struct ProgressiveSummarizer<M:CompletionModel>{
     agent: Agent<M>,
