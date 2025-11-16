@@ -23,6 +23,7 @@ pub mod status_stream;
 pub mod token_budget;
 pub mod tracing_setup;
 pub mod acp;
+pub mod rag;
 
 // Public re-exports for convenience
 pub use error::{AgentNetworkError};

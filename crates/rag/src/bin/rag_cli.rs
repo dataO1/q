@@ -5,6 +5,7 @@ use ai_agent_rag::SmartMultiSourceRag;
 use anyhow::Result;
 use std::env;
 use std::io::{self, Write};
+use std::sync::Arc;
 
 use ai_agent_common::{ConversationId, Language, ProjectScope, SystemConfig};
 use futures::StreamExt;
@@ -30,14 +31,14 @@ async fn main() -> Result<()> {
     let cwd = env::current_dir()?.to_string_lossy().into_owned();
 
     // Example ProjectScope
-    let project_scope = ContextManager::new()?.detect_project_scope(Some(cwd)).await?;
+    let project_scope = ContextManager::detect_project_scope(cwd).await?;
     let conversation_id = ConversationId::new();
 
     let embedding_client = EmbeddingClient::new(&config.embedding.dense_model, config.embedding.vector_size)?;
-    let rag = SmartMultiSourceRag::new(&config, &embedding_client).await?;
+    let rag = SmartMultiSourceRag::new(&config,Arc::new(embedding_client)).await?;
 
 
-    let mut stream = rag.retrieve_stream(&query, &project_scope, &conversation_id).await?;
+    let mut stream = rag.retrieve_stream(query, project_scope, conversation_id).await?;
 
     // Stream results in batches and print summaries incrementally
     let stdout = io::stdout();

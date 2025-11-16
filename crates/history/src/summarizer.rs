@@ -1,15 +1,18 @@
 use ai_agent_common::*;
-use rig::agent::Agent;
-use rig::completion::CompletionModel;
+use rig::{agent::Agent, http_client::HttpClientExt};
 use anyhow::Result;
+use rig::providers::ollama::{CompletionModel};
 
-pub struct ProgressiveSummarizer<M:CompletionModel>{
-    agent: Agent<M>,
+pub type OllamaModel = rig::providers::openai::CompletionModel;
+
+pub struct ProgressiveSummarizer{
+    agent: Agent<OllamaModel>,
     summarization_interval: usize,
 }
 
-impl<M:CompletionModel> ProgressiveSummarizer<M> {
+impl ProgressiveSummarizer {
     pub fn new(model: &str, interval: usize) -> Result<Self> {
+
         todo!("Initialize summarization agent")
     }
 

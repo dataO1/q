@@ -11,20 +11,10 @@ use std::path::PathBuf;
 pub struct ContextManager {}
 
 impl ContextManager {
-    /// Async constructor
-    pub fn new() -> Result<Self> {
-        Ok(Self {})
-    }
 
     /// Detects project scope including git root and language distribution asynchronously.
     #[async_recursion]
-    pub async fn detect_project_scope(&self, start_path_string: Option<String>) -> Result<ProjectScope> {
-        // Start path or cwd fallback
-        let path_string = match start_path_string.clone() {
-            Some(p) => p,
-            None => current_dir().context("Failed to get current directory")?.to_str().unwrap().to_string(),
-        };
-
+    pub async fn detect_project_scope(path_string: String) -> Result<ProjectScope> {
         let path = PathBuf::from(path_string.clone());
 
         // Detect git root asynchronously via common::git helpers
@@ -43,15 +33,5 @@ impl ContextManager {
             language_distribution,
             current_file: current_file
         })
-    }
-
-    /// Calculates token budget for retrieval given conversation history size
-    pub fn calculate_token_budget(&self, history_size: usize) -> usize {
-        const MAX_TOKENS: usize = 4000;
-        if history_size >= MAX_TOKENS {
-            0
-        } else {
-            MAX_TOKENS - history_size
-        }
     }
 }

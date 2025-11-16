@@ -13,3 +13,4 @@ serde = "*"
 async-trait = "*"
 rig-core = "*"
 anyhow = "*"
+reqwest = { version = "*", features = ["json", "rustls-tls"] }

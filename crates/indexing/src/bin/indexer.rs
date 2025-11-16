@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ai_agent_common::{config::SystemConfig, llm::EmbeddingClient};
 use ai_agent_indexing::pipeline::IndexingCoordinator;
 use ai_agent_indexing::watcher::FileWatcher;
@@ -46,10 +48,10 @@ async fn main() -> Result<()> {
     let config = SystemConfig::load_config(&cli.config)?;
     debug!("Loaded config: {:#?}", config);  // ← Add debug
 
-    let embedding_client = EmbeddingClient::new(&config.embedding.dense_model, config.embedding.vector_size)?;
+    let embedding_client = Arc::new(EmbeddingClient::new(&config.embedding.dense_model, config.embedding.vector_size)?);
     // Verify services
     info!("🔍 Verifying services...");
-    if let Err(e) = verify_services(&config, &embedding_client).await {
+    if let Err(e) = verify_services(&config, embedding_client.clone()).await {
         error!("Service verification failed: {:?}", e);
         error!("Backtrace: {:?}", std::backtrace::Backtrace::force_capture());
         return Err(e);
@@ -57,7 +59,7 @@ async fn main() -> Result<()> {
 
     // Initialize coordinator with debug
     debug!("Creating IndexingCoordinator...");
-    let coordinator = IndexingCoordinator::new(config.clone(), &embedding_client)
+    let coordinator = IndexingCoordinator::new(config.clone(), embedding_client)
         .map_err(|e| {
             error!("Failed to create coordinator: {:?}", e);
             error!("Backtrace: {:?}", std::backtrace::Backtrace::force_capture());
@@ -120,7 +122,7 @@ async fn main() -> Result<()> {
 }
 
 /// Verify required services are running
-async fn verify_services(config: &SystemConfig, embedder: &EmbeddingClient) -> Result<()> {
+async fn verify_services(config: &SystemConfig, embedder: Arc<EmbeddingClient>) -> Result<()> {
     info!("🔍 Verifying services...");
     // Check Qdrant
     let client = QdrantClient::new(&config.storage.qdrant_url, embedder)?;

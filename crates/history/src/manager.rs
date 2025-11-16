@@ -1,16 +1,15 @@
 use ai_agent_common::*;
-use rig::completion::CompletionModel;
 use crate::*;
 use anyhow::Result;
 
-pub struct HistoryManager<M:CompletionModel> {
+pub struct HistoryManager {
     buffer_memory: buffer_memory::BufferMemory,
     semantic_memory: semantic_memory::SemanticMemory,
-    summarizer: summarizer::ProgressiveSummarizer<M>,
+    summarizer: summarizer::ProgressiveSummarizer,
     metadata_tracker: metadata::MetadataTracker,
 }
 
-impl<M:CompletionModel> HistoryManager<M> {
+impl HistoryManager {
     pub async fn new(postgres_url: &str, config: &RagConfig) -> Result<Self> {
         todo!("Initialize history manager")
     }
@@ -18,8 +17,8 @@ impl<M:CompletionModel> HistoryManager<M> {
     pub async fn add_exchange(
         &mut self,
         conversation_id: &ConversationId,
-        user_query: &str,
-        agent_response: &str,
+        user_query: String,
+        agent_response: String
     ) -> Result<()> {
         todo!("Store new exchange in all layers")
     }
@@ -27,7 +26,7 @@ impl<M:CompletionModel> HistoryManager<M> {
     pub async fn get_relevant_context(
         &self,
         conversation_id: &ConversationId,
-        query: &str,
+        query: String,
     ) -> Result<HistoryContext> {
         todo!("Retrieve: short-term + semantic search + summaries")
     }

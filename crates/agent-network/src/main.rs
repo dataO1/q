@@ -11,6 +11,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use tracing::{error, info};
+use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
 #[command(name = "agent-network")]
@@ -42,13 +43,33 @@ enum Commands {
         #[arg(long)]
         port: Option<u16>,
     },
-    /// Execute a single query and exit
+    /// Execute a single query via ACP endpoint (client mode)
     Execute {
         /// The query to execute
         query: String,
+
+        /// Current working directory / project path for context
+        #[arg(long, default_value = ".")]
+        cwd: String,
+
+        /// ACP server URL
+        #[arg(long, default_value = "http://localhost:8080")]
+        server_url: String,
     },
     /// Validate configuration
     ValidateConfig,
+}
+
+#[derive(Debug, Serialize)]
+struct ExecuteRequest {
+    query: String,
+    cwd: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExecuteResponse {
+    result: String,
+    success: bool,
 }
 
 #[tokio::main]
@@ -65,11 +86,11 @@ async fn main() -> Result<()> {
     let config = SystemConfig::load_config(&cli.config).map_err(|e| {
         error!("Failed to load configuration: {}", e);
         e
-    })?.agent_network;
+    })?;
 
     info!("Configuration loaded successfully");
-    info!("Available agents: {}", config.agents.len());
-    for agent in &config.agents {
+    info!("Available agents: {}", config.agent_network.agents.len());
+    for agent in &config.agent_network.agents {
         info!("  - {} ({}): {}", agent.id, agent.agent_type, agent.model);
     }
 
@@ -77,20 +98,20 @@ async fn main() -> Result<()> {
     match cli.command {
         Some(Commands::ValidateConfig) => {
             println!("✓ Configuration is valid");
-            println!("  Agents: {}", config.agents.len());
-            println!("  Available types: {:?}", config.available_agent_types());
+            println!("  Agents: {}", config.agent_network.agents.len());
+            println!("  Available types: {:?}", config.agent_network.available_agent_types());
             Ok(())
         }
-        Some(Commands::Execute { query }) => {
-            execute_query(config, &query).await
+        Some(Commands::Execute { query, cwd, server_url }) => {
+            execute_via_acp(&query, &cwd, &server_url).await
         }
         Some(Commands::Server { host, port }) => {
             let mut config = config;
             if let Some(h) = host {
-                config.acp.host = h;
+                config.agent_network.acp.host = h;
             }
             if let Some(p) = port {
-                config.acp.port = p;
+                config.agent_network.acp.port = p;
             }
             start_server(config).await
         }
@@ -101,31 +122,47 @@ async fn main() -> Result<()> {
     }
 }
 
-/// Execute a single query and output results
-async fn execute_query(config: AgentNetworkConfig, query: &str) -> Result<()> {
-    info!("Executing query: {}", query);
+/// Execute query via ACP HTTP endpoint (client mode)
+async fn execute_via_acp(query: &str, cwd: &str, server_url: &str) -> Result<()> {
+    info!("Executing query via ACP server: {}", server_url);
 
-    let orchestrator = Orchestrator::new(config).await?;
+    let client = reqwest::Client::new();
 
-    match orchestrator.execute_query(query).await {
-        Ok(result) => {
-            println!("{}", result);
-            Ok(())
-        }
-        Err(e) => {
-            error!("Query execution failed: {}", e);
-            Err(e.into())
-        }
+    let request = ExecuteRequest {
+        query: query.to_string(),
+        cwd: cwd.to_string(),
+    };
+
+    let response = client
+        .post(format!("{}/execute", server_url))
+        .json(&request)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        error!("Server returned error status: {}", response.status());
+        return Err(anyhow::anyhow!("Server error: {}", response.status()));
+    }
+
+    let execute_response: ExecuteResponse = response.json().await?;
+
+    if execute_response.success {
+        println!("{}", execute_response.result);
+        Ok(())
+    } else {
+        error!("Query execution failed: {}", execute_response.result);
+        Err(anyhow::anyhow!("Query failed: {}", execute_response.result))
     }
 }
 
 /// Start the ACP server
-async fn start_server(config: AgentNetworkConfig) -> Result<()> {
-    info!("Starting ACP server on {}", config.acp);
+async fn start_server(config: SystemConfig) -> Result<()> {
+    info!("Starting ACP server on {}:{}", config.agent_network.acp.host, config.agent_network.acp.port);
 
     let orchestrator = Orchestrator::new(config).await?;
+    let orchestrator = std::sync::Arc::new(tokio::sync::RwLock::new(orchestrator));
 
-    // Start ACP server
+    // Start ACP server from acp module
     ai_agent_network::acp::start_server(orchestrator).await?;
 
     Ok(())

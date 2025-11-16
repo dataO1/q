@@ -3,7 +3,7 @@ use ai_agent_storage::QdrantClient;
 use anyhow::{Context, Result, anyhow};
 use repo_root::{projects::GitProject, RepoRoot};
 use serde_json::json;
-use std::{fs, path::Path};
+use std::{fs, path::Path, sync::Arc};
 use crate::{chunk_adaptive::ChunkAdaptive, metadata_chunk_transformer::ExtractMetadataChunkTransformer, metadata_transformer::{ExtractMetadataTransformer}};
 // Add all the tree-sitter language crates you want to support
 use tree_sitter::{self, Parser, Tree};
@@ -20,17 +20,17 @@ use swiftide::integrations::{
 use tracing::{info, warn};
 
 /// Indexing pipeline using Swiftide
-pub struct IndexingPipeline<'a> {
-    qdrant_client: QdrantClient<'a>,
+pub struct IndexingPipeline {
+    qdrant_client: Arc<QdrantClient>,
     redis_cache: Redis,
     config: IndexingConfig,
-    embedder: &'a EmbeddingClient,
+    embedder: Arc<EmbeddingClient>,
 }
 
-impl<'a> IndexingPipeline<'a> {
+impl IndexingPipeline {
     /// Create a new indexing pipeline from configuration
     /// Create a new indexing pipeline with hybrid search support
-    pub fn new(config: &SystemConfig, embedder: &'a EmbeddingClient) -> Result<Self> {
+    pub fn new(config: &SystemConfig, embedder: Arc<EmbeddingClient>) -> Result<Self> {
         tracing::debug!("Creating IndexingPipeline");
 
 
@@ -43,8 +43,8 @@ impl<'a> IndexingPipeline<'a> {
         ).context("Failed to create Redis cache")?;
 
         tracing::debug!("Initializing Qdrant client...");
-        let qdrant_client = QdrantClient::<'a>::new(&config.storage.qdrant_url.to_string(),embedder)
-            .context("Failed to create Qdrant client")?;
+        let qdrant_client = Arc::new(QdrantClient::new(&config.storage.qdrant_url.to_string(),embedder.clone())
+            .context("Failed to create Qdrant client")?);
 
         // Initialize Redis for caching indexed nodes
 
@@ -52,7 +52,7 @@ impl<'a> IndexingPipeline<'a> {
             redis_cache,
             qdrant_client,
             config: config.indexing.clone(),
-            embedder
+            embedder: embedder
         })
     }
 
@@ -189,13 +189,13 @@ impl<'a> IndexingPipeline<'a> {
 }
 
 /// Indexing coordinator that watches files and manages the pipeline
-pub struct IndexingCoordinator<'a> {
-    pipeline: IndexingPipeline<'a>,
+pub struct IndexingCoordinator {
+    pipeline: IndexingPipeline,
     config: SystemConfig,
 }
 
-impl<'a> IndexingCoordinator<'a> {
-    pub fn new(config: SystemConfig, embedder: &'a EmbeddingClient) -> Result<Self> {
+impl IndexingCoordinator {
+    pub fn new(config: SystemConfig, embedder: Arc<EmbeddingClient>) -> Result<Self> {
         tracing::debug!("Creating IndexingCoordinator");
         tracing::debug!("Qdrant URL: {}", config.storage.qdrant_url);
 

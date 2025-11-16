@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use ai_agent_common::llm::EmbeddingClient;
 use anyhow::{Context, Result};
@@ -16,15 +17,15 @@ use swiftide::{SparseEmbedding, SparseEmbeddings};
 
 /// Hybrid Qdrant client combining Swiftide for indexing and raw qdrant-client for filtered queries
 #[derive(Clone)]
-pub struct QdrantClient<'a> {
+pub struct QdrantClient {
     url: String,
     raw_client: Qdrant,
-    embedder: &'a EmbeddingClient,
+    embedder: Arc<EmbeddingClient>,
 }
 
-impl<'a> QdrantClient<'a> {
+impl QdrantClient {
     /// Create new Qdrant client
-    pub fn new(url: &str, embedder: &'a EmbeddingClient) -> anyhow::Result<Self> {
+    pub fn new(url: &str, embedder: Arc<EmbeddingClient>) -> anyhow::Result<Self> {
         let raw_client = Qdrant::from_url(url)
             .build()
             .context("Failed to connect to Qdrant")?;

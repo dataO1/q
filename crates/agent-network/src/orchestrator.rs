@@ -8,7 +8,7 @@
 //! - Handles error recovery and HITL integration
 
 use crate::error::{AgentNetworkError, AgentNetworkResult};
-use crate::hitl::{ConsoleApprovalHandler, DefaultApprovalQueue};
+use crate::hitl::{AuditLogger, ConsoleApprovalHandler, DefaultApprovalQueue};
 use crate::workflow::{
     DependencyType, TaskNode, TaskResult, WorkflowBuilder, WorkflowExecutor, WorkflowGraph,
 };
@@ -17,7 +17,10 @@ use crate::status_stream::StatusStream;
 use crate::sharedcontext::SharedContext;
 use crate::coordination::CoordinationManager;
 use crate::filelocks::FileLockManager;
-use ai_agent_common::{AgentNetworkConfig, ErrorRecoveryStrategy};
+use ai_agent_common::llm::EmbeddingClient;
+use ai_agent_common::{AgentNetworkConfig, ConversationId, ErrorRecoveryStrategy, ProjectScope, SystemConfig};
+use ai_agent_history::HistoryManager;
+use ai_agent_rag::SmartMultiSourceRag;
 use petgraph::algo::toposort;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
@@ -47,7 +50,11 @@ pub struct Orchestrator {
     /// File lock manager
     file_locks: Arc<FileLockManager>,
     approval_queue: Arc<DefaultApprovalQueue>,
-    audit_logger: Arc<crate::hitl::AuditLogger>,
+    audit_logger: Arc<AuditLogger>,
+
+    rag: Arc<SmartMultiSourceRag>,
+    history_manager: Arc<RwLock<HistoryManager>>,
+    embedding_client: Arc<EmbeddingClient>,
 }
 
 /// Represents a decomposed task for a single agent
@@ -84,10 +91,10 @@ pub enum Complexity {
 
 impl Orchestrator {
     /// Create a new Orchestrator
-    pub async fn new(config: AgentNetworkConfig) -> Result<Self> {
-        info!("Initializing Orchestrator with {} agents", config.agents.len());
+    pub async fn new(config: SystemConfig) -> Result<Self> {
+        info!("Initializing Orchestrator with {} agents", config.agent_network.agents.len());
 
-        let agent_pool = Arc::new(AgentPool::new(&config.agents).await?);
+        let agent_pool = Arc::new(AgentPool::new(&config.agent_network.agents).await?);
         let status_stream = Arc::new(StatusStream::new());
         let shared_context = Arc::new(RwLock::new(SharedContext::new()));
         let coordination = Arc::new(CoordinationManager::new());
@@ -95,8 +102,8 @@ impl Orchestrator {
 
         info!("Orchestrator initialized successfully");
 
-        let hitl_mode = config.hitl.mode;
-        let risk_threshold = config.hitl.risk_threshold;
+        let hitl_mode = config.agent_network.hitl.mode;
+        let risk_threshold = config.agent_network.hitl.risk_threshold;
         let approval_queue = Arc::new(DefaultApprovalQueue::new(hitl_mode, risk_threshold));
         let audit_logger = Arc::new(crate::hitl::AuditLogger);
 
@@ -106,22 +113,35 @@ impl Orchestrator {
         tokio::spawn(async move {
             queue_clone.run_approver(handler).await;
         });
+        let embedding_client = Arc::new(EmbeddingClient::new(&config.embedding.dense_model, config.embedding.vector_size)?);
+
+        let rag = SmartMultiSourceRag::new(&config,embedding_client.clone()).await?;
+    // Initialize HistoryManager (if Postgres configured)
+        let history_manager = Arc::new(RwLock::new(HistoryManager::new(&config.storage.postgres_url, &config.rag).await?));
+
 
         Ok(Self {
-            config,
+            config:config.agent_network,
             agent_pool,
             status_stream,
             shared_context,
             coordination,
             file_locks,
             approval_queue,
-            audit_logger
+            audit_logger,
+            history_manager,
+            rag,
+            embedding_client
         })
     }
 
     /// Execute a user query end-to-end
     #[instrument(skip(self), fields(query_id = %Uuid::new_v4()))]
-    pub async fn execute_query(&self, query: &str) -> Result<String> {
+    pub async fn execute_query(&self,
+        query: &str,
+        project_scope: ProjectScope,
+        conversation_id: ConversationId,
+        ) -> Result<String> {
         info!("Processing query: {}", query);
 
         // Step 1: Analyze the query
@@ -137,7 +157,7 @@ impl Orchestrator {
         debug!("Built workflow with {} nodes", workflow.node_count());
 
         // Step 4: Execute workflow
-        let results = self.execute_workflow(workflow).await?;
+        let results = self.execute_workflow(workflow, project_scope, conversation_id).await?;
         info!("Workflow execution completed with {} results", results.len());
 
         // Step 5: Synthesize results
@@ -347,32 +367,32 @@ impl Orchestrator {
 
     /// Execute workflow graph
     #[instrument(skip(self, graph))]
-    async fn execute_workflow(&self, graph: WorkflowGraph) -> Result<Vec<TaskResult>> {
-        info!("Executing workflow with {} tasks", graph.node_count());
+    pub async fn execute_workflow(&self,
+        graph: WorkflowGraph,
+        project_scope: ProjectScope,
+        conversation_id: ConversationId,
+        ) -> Result<Vec<TaskResult>> {
+        info!("Starting workflow execution");
 
-        // Validate DAG (no cycles)
-        if toposort(&graph, None).is_err() {
-            return Err(AgentNetworkError::dag_construction(
-                "Workflow contains cycles",
-            ))?;
-        }
-
-        // Create executor
         let executor = WorkflowExecutor::new(
-            Arc::clone(&self.agent_pool),
-            Arc::clone(&self.status_stream),
-            Arc::clone(&self.coordination),
-            Arc::clone(&self.file_locks),
+            self.agent_pool.clone(),
+            self.status_stream.clone(),
+            self.coordination.clone(),
+            self.file_locks.clone(),
+        )
+        .with_hitl(
+            self.approval_queue.clone(),
+            self.audit_logger.clone(),
+        )
+        // ADD:
+        .with_context_provider(
+            Some(self.rag.clone()),
+            Some(self.history_manager.clone()),
         );
 
-        // Execute workflow
-        let results = executor.execute_with_hitl(
-            graph,
-            Arc::clone(&self.approval_queue),
-            Arc::clone(&self.audit_logger),
-        ).await?;
+        let results = executor.execute_with_hitl(graph, self.approval_queue.clone(), self.audit_logger.clone(),project_scope, conversation_id,).await?;
 
-        info!("Workflow execution completed with {} results", results.len());
+        info!("Workflow execution completed");
         Ok(results)
     }
 

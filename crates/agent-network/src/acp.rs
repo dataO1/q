@@ -3,6 +3,8 @@
 use crate::{
     error::AgentNetworkResult, orchestrator::Orchestrator
 };
+use ai_agent_common::{ConversationId, ProjectScope};
+use ai_agent_rag::context_manager::ContextManager;
 use axum::{
     extract::State,
     response::Json,
@@ -20,6 +22,7 @@ pub struct AcpServer {
 #[derive(Debug, Deserialize)]
 pub struct ExecuteRequest {
     pub query: String,
+    pub cwd: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -33,8 +36,7 @@ pub struct HealthResponse {
     pub status: String,
 }
 
-pub async fn start_server(orchestrator: Orchestrator) -> AgentNetworkResult<()> {
-    let orchestrator = Arc::new(RwLock::new(orchestrator));
+pub async fn start_server(orchestrator: Arc<RwLock<Orchestrator>>) -> AgentNetworkResult<()> {
 
     let app = Router::new()
         .route("/health", get(health_check))
@@ -68,16 +70,22 @@ async fn execute_query(
     Json(request): Json<ExecuteRequest>,
 ) -> Json<ExecuteResponse> {
     let orchestrator = orchestrator.read().await;
-
-    match orchestrator.execute_query(&request.query).await {
-        Ok(result) => Json(ExecuteResponse {
-            result,
-            success: true,
-        }),
-        Err(e) => Json(ExecuteResponse {
-            result: format!("Error: {}", e),
-            success: false,
-        }),
+    if let Ok(project_scope) = ContextManager::detect_project_scope(request.cwd).await{
+        match orchestrator.execute_query(&request.query, project_scope,ConversationId::new()).await {
+            Ok(result) => Json(ExecuteResponse {
+                result,
+                success: true,
+            }),
+            Err(e) => Json(ExecuteResponse {
+                result: format!("Error: {}", e),
+                success: false,
+            }),
+        }
+    }else{
+            Json(ExecuteResponse {
+                result: format!("Error: Failed to detect project scope"),
+                success: false,
+            })
     }
 }
 

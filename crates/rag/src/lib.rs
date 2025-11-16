@@ -20,21 +20,21 @@ use crate::retriever::MultiSourceRetriever;
 use crate::query_enhancer::QueryEnhancer;
 
 /// Main RAG pipeline struct
-pub struct SmartMultiSourceRag<'a> {
+pub struct SmartMultiSourceRag {
     query_enhancer: QueryEnhancer,
     source_router: source_router::SourceRouter,
-    retriever: MultiSourceRetriever<'a>,
+    retriever: Arc<MultiSourceRetriever>,
 }
 
-impl<'a> SmartMultiSourceRag<'a> {
+impl SmartMultiSourceRag {
     /// Initialize RAG cores
-    pub async fn new(config: &SystemConfig, embedder: &'a EmbeddingClient) -> anyhow::Result<Self> {
-        let qdrant_client = QdrantClient::<'a>::new(&config.storage.qdrant_url,embedder)?;
-        Ok(Self {
+    pub async fn new(config: &SystemConfig, embedder: Arc<EmbeddingClient>) -> anyhow::Result<Arc<Self>> {
+        let qdrant_client = Arc::new(QdrantClient::new(&config.storage.qdrant_url,embedder.clone())?);
+        Ok(Arc::new(Self {
             query_enhancer: QueryEnhancer::new(&config.storage.redis_url.as_ref().unwrap()).await?,
             source_router: source_router::SourceRouter::new(&config)?,
-            retriever: MultiSourceRetriever::<'a>::new(&qdrant_client, &embedder).await?,
-        })
+            retriever: Arc::new(MultiSourceRetriever::new(qdrant_client, embedder).await?),
+        }))
     }
 
     async fn enhance_queries(
@@ -60,23 +60,23 @@ impl<'a> SmartMultiSourceRag<'a> {
 
     /// Runs the multi-stage priority batched streaming retrieval pipeline
     pub async fn retrieve_stream(
-        &'a self,
-        raw_query: &'a str,
-        project_scope: &'a ProjectScope,
-        conversation_id: &'a ConversationId,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<ContextFragment>> + Send + 'a>>> {
+        self:Arc<Self>,
+        raw_query: String,
+        project_scope: ProjectScope,
+        conversation_id: ConversationId,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ContextFragment>> + Send + 'static>>> {
 
-        let rag = Arc::new(self);
+        let rag = Arc::clone(&self);
 
         // Step 1: Route query to sources
-        let source_queries = rag.source_router.route_query(&raw_query, project_scope)
+        let source_queries = rag.source_router.route_query(&raw_query, &project_scope)
             .await.context("Source routing failed")?;
 
         // Enhance per tier (parallel, context-aware)
-        let enhanced_queries = self.enhance_queries(&source_queries, project_scope,conversation_id).await.context("Enhancing queries failed!")?;
+        let enhanced_queries = rag.enhance_queries(&source_queries, &project_scope,&conversation_id).await.context("Enhancing queries failed!")?;
 
         // Step 3: Prepare priority-ordered streams from MultiSourceRetriever
-        let prioritized_streams = rag.retriever.retrieve_stream(raw_query,enhanced_queries, project_scope);
+        let prioritized_streams = rag.retriever.clone().retrieve_stream(raw_query,enhanced_queries, project_scope);
         Ok(prioritized_streams)
     }
 }

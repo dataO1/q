@@ -11,6 +11,8 @@ use crate::agents::{AgentPool, AgentContext};
 use crate::status_stream::StatusStream;
 use crate::coordination::CoordinationManager;
 use crate::filelocks::FileLockManager;
+use ai_agent_common::{ConversationId, ProjectScope};
+use ai_agent_rag::context_providers::ContextProvider;
 use petgraph::algo::toposort;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
@@ -38,8 +40,9 @@ pub struct WorkflowExecutor {
 
     /// Execution configuration
     config: ExecutorConfig,
-    approval_queue: Option<Arc<crate::hitl::DefaultApprovalQueue>>,
-    audit_logger: Option<Arc<crate::hitl::AuditLogger>>,
+    approval_queue: Option<Arc<DefaultApprovalQueue>>,
+    audit_logger: Option<Arc<AuditLogger>>,
+    context_provider: Option<Arc<crate::rag::ContextProvider>>,
 }
 
 /// Executor configuration
@@ -112,6 +115,23 @@ impl WorkflowExecutor {
         Self::with_config(agent_pool, status_stream, coordination, file_locks, ExecutorConfig::default())
     }
 
+
+    pub fn with_context_provider<'a>(
+        mut self,
+        rag: Option<Arc<ai_agent_rag::SmartMultiSourceRag>>,
+        history_manager: Option<Arc<tokio::sync::RwLock<ai_agent_history::manager::HistoryManager>>>,
+    ) -> Self {
+        if let (Some(rag), Some(history)) = (rag, history_manager) {
+            let provider = crate::rag::ContextProvider::new(
+                rag,
+                history,
+                8192, // Token budget
+            );
+            self.context_provider = Some(Arc::new(provider));
+        }
+        self
+    }
+
     /// Create executor with custom configuration
     pub fn with_config(
         agent_pool: Arc<AgentPool>,
@@ -128,6 +148,7 @@ impl WorkflowExecutor {
             config,
             approval_queue: None,  // ADD
             audit_logger: None,    // ADD
+            context_provider: None
         }
     }
 
@@ -147,6 +168,9 @@ impl WorkflowExecutor {
             graph: WorkflowGraph,
             approval_queue: Arc<DefaultApprovalQueue>,
             audit_logger: Arc<AuditLogger>,
+            project_scope: ProjectScope,
+            conversation_id: ConversationId,
+
         ) -> AgentNetworkResult<Vec<TaskResult>> {
         let start_time = Instant::now();
         info!("Starting workflow execution: {} tasks", graph.node_count());
@@ -176,6 +200,8 @@ impl WorkflowExecutor {
                 &all_results,
                 Arc::clone(&approval_queue),
                 Arc::clone(&audit_logger),
+                project_scope.clone(),
+                conversation_id.clone(),
             ).await?;
 
             for result in wave_results {
@@ -212,6 +238,8 @@ impl WorkflowExecutor {
         previous_results: &HashMap<String, TaskResult>,
         approval_queue: Arc<DefaultApprovalQueue>,
         audit_logger: Arc<AuditLogger>,
+        project_scope: ProjectScope,
+        conversation_id: ConversationId,
     ) -> AgentNetworkResult<Vec<TaskResult>> {
         debug!("Executing wave {}: {} parallel tasks", wave.wave_index, wave.task_indices.len());
 
@@ -229,6 +257,10 @@ impl WorkflowExecutor {
             let wave_index = wave.wave_index;
             let approval_queue = self.approval_queue.clone().unwrap();
             let audit_logger = self.audit_logger.clone().unwrap();
+            let context_provider = self.context_provider.clone();
+
+            let project_scope = project_scope.clone();
+            let conversation_id = conversation_id.clone();
 
             let handle = tokio::spawn(async move {
                 execute_task_with_retry(
@@ -239,9 +271,12 @@ impl WorkflowExecutor {
                     file_locks,
                     approval_queue,  // ADD
                     audit_logger,    // ADD
+                    context_provider,
                     timeout,
                     max_retries,
                     wave_index,
+                    project_scope,
+                    conversation_id
                 )
                 .await
             });
@@ -340,6 +375,82 @@ impl WorkflowExecutor {
     pub fn config(&self) -> &ExecutorConfig {
         &self.config
     }
+
+
+}
+
+
+/// Execute a single task
+async fn execute_single_task(
+    task: TaskNode,
+    agent_pool: Arc<AgentPool>,
+    context_provider: Option<Arc<crate::rag::ContextProvider>>,
+    file_locks: Arc<FileLockManager>,
+    project_scope: ProjectScope,
+    conversation_id: ConversationId,
+) -> AgentNetworkResult<TaskResult> {
+    // Get agent
+    let agent = agent_pool
+        .get_agent(&task.agent_id)
+        .ok_or_else(|| AgentNetworkError::Agent(format!("Agent not found: {}", task.agent_id)))?;
+
+    // Create agent context
+    let context = AgentContext {
+        task_id: task.task_id.clone(),
+        description: task.description.clone(),
+        rag_context: None,
+        history_context: None,
+        tool_results: vec![],
+        metadata: HashMap::default(),
+        conversation_history: vec![],
+    };
+
+    let mut agent_context = crate::agents::AgentContext::new(
+        task.task_id.clone(),
+        task.description.clone(),
+    );
+
+    // Retrieve and inject context if provider available
+    if let Some(provider) = context_provider.as_ref() {
+        // Use task.description as refined query for RAG/History
+        match provider.retrieve_context(task.description.clone(), project_scope, conversation_id.clone()).await {
+            Ok(context) => {
+                if !context.is_empty() {
+                    agent_context = agent_context.with_rag_context(context);
+                    debug!("Injected RAG+History context into agent");
+                }
+            }
+            Err(e) => {
+                warn!("Failed to retrieve context: {}", e);
+                // Continue without context
+            }
+        }
+    }
+
+    // Execute agent
+    match agent.execute(agent_context).await {
+        Ok(result) => {
+            // Store exchange in history if provider available
+            if let Some(provider) = context_provider.as_ref() {
+                if let Err(e) = provider.store_exchange(
+                    task.description,
+                    result.output.clone(),
+                    conversation_id
+                ).await {
+                    warn!("Failed to store exchange in history: {}", e);
+                }
+            }
+            Ok(TaskResult {
+                task_id: task.task_id.clone(),
+                success: true,
+                output: Some(result.output),
+                error: None,
+            })
+        }
+        Err(e) => {
+            Err(e)
+        }
+    }
 }
 
 /// Execute a single task with retry logic
@@ -351,9 +462,12 @@ async fn execute_task_with_retry(
     file_locks: Arc<FileLockManager>,
     approval_queue: Arc<DefaultApprovalQueue>,  // ADD THIS PARAMETER
     audit_logger: Arc<AuditLogger>,
+    context_provider: Option<Arc<crate::rag::ContextProvider>>,
     timeout: Duration,
     max_retries: usize,
     wave_index: usize,
+    project_scope: ProjectScope,
+    conversation_id: ConversationId,
 ) -> AgentNetworkResult<TaskResult> {
     let task_id = task.task_id.clone();
     let agent_id = task.agent_id.clone();
@@ -376,7 +490,10 @@ async fn execute_task_with_retry(
         let result = tokio::time::timeout(timeout, execute_single_task(
             task.clone(),
             Arc::clone(&agent_pool),
+            context_provider.clone(),
             Arc::clone(&file_locks),
+            project_scope.clone(),
+            conversation_id.clone(),
         ))
         .await;
 
@@ -486,45 +603,9 @@ async fn execute_task_with_retry(
         output: None,
         error: Some(error_msg),
     })
+
 }
 
-/// Execute a single task
-async fn execute_single_task(
-    task: TaskNode,
-    agent_pool: Arc<AgentPool>,
-    file_locks: Arc<FileLockManager>,
-) -> AgentNetworkResult<TaskResult> {
-    // Get agent
-    let agent = agent_pool
-        .get_agent(&task.agent_id)
-        .ok_or_else(|| AgentNetworkError::Agent(format!("Agent not found: {}", task.agent_id)))?;
-
-    // Create agent context
-    let context = AgentContext {
-        task_id: task.task_id.clone(),
-        description: task.description.clone(),
-        rag_context: None,
-        history_context: None,
-        tool_results: vec![],
-        metadata: HashMap::default(),
-        conversation_history: vec![],
-    };
-
-    // Execute agent
-    match agent.execute(context).await {
-        Ok(result) => {
-            Ok(TaskResult {
-                task_id: task.task_id.clone(),
-                success: true,
-                output: Some(result.output),
-                error: None,
-            })
-        }
-        Err(e) => {
-            Err(e)
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

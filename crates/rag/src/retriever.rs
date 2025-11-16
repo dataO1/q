@@ -15,32 +15,35 @@ use ai_agent_common::{llm::EmbeddingClient, CollectionTier, ContextFragment, Pro
 pub type Priority = u8;
 
 #[async_trait]
-pub trait RetrieverSource: Send + Sync {
+pub trait RetrieverSource: Send + Sync + 'static {
     fn priority(&self) -> Priority;
 
     async fn retrieve(
         &self,
         queries: Vec<(CollectionTier, String)>,
-        project_scope: &ProjectScope,
+        project_scope: ProjectScope,
     ) -> Result<Vec<ContextFragment>>;
 
 
-    fn retrieve_stream<'a>(
-        &'a self,
+    fn retrieve_stream(
+        self: Arc<Self>,
         queries: HashMap<CollectionTier, Vec<String>>,
-        project_scope: &'a ProjectScope,
-    ) -> RetrieverSourcePrioStream<'a>
+        project_scope: ProjectScope,
+    ) -> RetrieverSourcePrioStream
     {
+
         // Map each (tier, queries) to an async future that retrieves vectors & converts to Vec<Result<ContextFragment>>
         let fetch_futures = queries.into_iter().map(|(tier, q_list)| {
+            let tier = tier.clone();
+            let q_list = q_list.clone();
             let project_scope = project_scope.clone();
-            let s_self = self;
+            let s_self = Arc::clone(&self); // Arc clone, 'static safe
             async move {
                 // Retrieve results: Vec<(ContextFragment, SparseEmbedding)>
                 let results = s_self
                     .retrieve(
-                        q_list.into_iter().map(|q| (tier.clone(), q)).collect(),
-                        &project_scope,
+                        q_list.into_iter().map(|q| (tier, q)).collect(),
+                        project_scope.clone(),
                     )
                     .await?;
 
@@ -68,20 +71,20 @@ pub trait RetrieverSource: Send + Sync {
     }
 }
 
-pub struct QdrantRetriever<'a> {
-    client: Arc<QdrantClient<'a>>,
+pub struct QdrantRetriever {
+    client: Arc<QdrantClient>,
 }
 
-impl<'a> QdrantRetriever<'a> {
-    pub fn new(client: QdrantClient<'a>) -> Self {
+impl QdrantRetriever {
+    pub fn new(client: Arc<QdrantClient>) -> Self {
         Self {
-            client: Arc::new(client),
+            client: client,
         }
     }
 }
 
 #[async_trait]
-impl<'a> RetrieverSource for QdrantRetriever<'a> {
+impl RetrieverSource for QdrantRetriever {
     fn priority(&self) -> Priority {
         1
     }
@@ -89,22 +92,22 @@ impl<'a> RetrieverSource for QdrantRetriever<'a> {
     async fn retrieve(
         &self,
         queries: Vec<(CollectionTier, String)>,
-        project_scope: &ProjectScope,
+        project_scope: ProjectScope,
     ) -> Result<Vec<ContextFragment>> {
-        self.client.query_collections(queries, project_scope,None).await
+        self.client.query_collections(queries, &project_scope,None).await
     }
 }
 
-pub struct MultiSourceRetriever<'a> {
-    sources: Vec<Arc<dyn RetrieverSource + Send + Sync + 'a>>,
+pub struct MultiSourceRetriever {
+    sources: Vec<Arc<dyn RetrieverSource + Send + Sync + >>,
     embedder: Arc<EmbeddingClient>,
 }
 
-impl<'a> MultiSourceRetriever<'a> {
-    pub async fn new(qdrant_client: &QdrantClient<'a>, embedder: &EmbeddingClient) -> Result<Self> {
+impl MultiSourceRetriever {
+    pub async fn new(qdrant_client: Arc<QdrantClient>, embedder: Arc<EmbeddingClient>) -> Result<Self> {
         Ok(Self {
-            sources: vec![Arc::new(QdrantRetriever::<'a>::new(qdrant_client.clone()))],
-            embedder: Arc::new(embedder.clone()),
+            sources: vec![Arc::new(QdrantRetriever::new(qdrant_client.clone()))],
+            embedder: embedder.clone(),
         })
     }
 
@@ -119,11 +122,14 @@ impl<'a> MultiSourceRetriever<'a> {
 
     /// Retrieve all sources, then rerank and deduplicate combined results before streaming out in batches
     pub fn retrieve_stream(
-        &'a self,
-        raw_query: &'a str,
+        self:Arc<Self>,
+        raw_query: String,
         queries: HashMap<CollectionTier, Vec<String>>,
-        project_scope: &'a ProjectScope,
-    ) -> Pin<Box<dyn Stream<Item = Result<ContextFragment>> + Send + 'a>> {
+        project_scope: ProjectScope,
+    ) -> Pin<Box<dyn Stream<Item = Result<ContextFragment>> + Send>> {
+        let sources = self.sources.clone();
+        let queries = queries.clone();
+        let project_scope = project_scope.clone();
 
         let stream = Box::pin(try_stream! {
             // Collect all results from all sources
@@ -132,8 +138,8 @@ impl<'a> MultiSourceRetriever<'a> {
             // let all_streams:  Vec<RetrieverSourcePrioStream> = sources.into_iter().map(|source|{
             //     source.retrieve_stream(queries.clone(), &project_scope.clone())
             // }).collect();
-            for source in self.sources.iter() {
-                let partial_results = source.retrieve_stream(queries.clone(), &project_scope);
+            for source in sources.iter() {
+                let partial_results = source.clone().retrieve_stream(queries.clone(), project_scope.clone());
                 all_streams.push(partial_results);
             }
             // let query_embeddings = self.embedder.embedder_sparse.embed(vec![raw_query.to_string()]).await?;
@@ -172,7 +178,7 @@ impl<'a> MultiSourceRetriever<'a> {
     }
 }
 
-struct RetrieverSourcePrioStream<'a> {
-    stream: Pin<Box<dyn Stream<Item = Result<ContextFragment>> + Send + 'a>>,
+pub struct RetrieverSourcePrioStream {
+    stream: Pin<Box<dyn Stream<Item = Result<ContextFragment>> + Send>>,
     priority: u8,
 }
