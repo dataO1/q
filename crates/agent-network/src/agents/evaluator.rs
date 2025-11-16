@@ -3,9 +3,9 @@
 
 use crate::{
     agents::{Agent, AgentType, AgentContext, AgentResult},
-    error::{Result, QualityStrategy},
 };
 use async_trait::async_trait;
+use ai_agent_common::{types::Result, QualityStrategy};
 
 pub struct EvaluatorAgent {
     id: String,

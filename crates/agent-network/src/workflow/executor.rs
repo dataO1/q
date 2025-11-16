@@ -1,15 +1,16 @@
 //! Workflow execution engine with wave-based parallel execution
 
 use crate::{
-    error::Result,
     workflow::{WorkflowGraph, TaskResult},
     agents::AgentPool,
     status_stream::StatusStream,
 };
+use ai_agent_common::AgentNetworkError;
 use petgraph::algo::toposort;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::sync::Arc;
+use anyhow::Result;
 
 pub struct WorkflowExecutor {
     agent_pool: Arc<AgentPool>,
@@ -34,7 +35,7 @@ impl WorkflowExecutor {
         // TODO: Week 2 - Handle failures and retries
 
         let sorted = toposort(&graph, None)
-            .map_err(|_| crate::error::AgentNetworkError::Workflow(
+            .map_err(|_| AgentNetworkError::Workflow(
                 "Workflow contains cycles".to_string()
             ))?;
 

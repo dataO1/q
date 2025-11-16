@@ -1,4 +1,3 @@
-use anyhow::Error;
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf};
 use std::fmt::{self};
@@ -8,12 +7,10 @@ use strum_macros::EnumIter;
 use strum_macros::Display;
 use schemars::JsonSchema;
 use derive_builder::Builder;
-use std::path::Path;
-use thiserror::Error;
+use crate::error::AgentNetworkError;
 
-pub type Result<T> = std::result::Result<T, AgentNetworkError>;
+pub type Result<T> = anyhow::Result<T, AgentNetworkError>;
 
-use crate::error;
 
 /// Unique identifier for tasks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -316,36 +313,6 @@ pub struct Definition {
     byte_range: (usize, usize),
 }
 
-
-
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct AgentNetworkConfig {
-    pub agents: Vec<AgentConfig>,
-    pub hitl: HitlConfig,
-    pub retry: RetryConfig,
-    pub token_budget: TokenBudgetConfig,
-    pub acp: AcpConfig,
-    pub tracing: TracingConfig,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct AgentConfig {
-    pub id: String,
-    pub agent_type: String,
-    pub model: String,
-    pub temperature: f32,
-    pub max_tokens: usize,
-    pub system_prompt: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct HitlConfig {
-    pub enabled: bool,
-    pub default_mode: HitlMode,
-    pub sample_rate: Option<f32>,
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum HitlMode {
     Blocking,
@@ -353,71 +320,8 @@ pub enum HitlMode {
     SampleBased,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct RetryConfig {
-    pub max_attempts: usize,
-    pub backoff_ms: u64,
-    pub backoff_multiplier: f32,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct TokenBudgetConfig {
-    pub max_tokens_per_agent: usize,
-    pub enable_context_pruning: bool,
-    pub enable_prompt_caching: bool,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct AcpConfig {
-    pub host: String,
-    pub port: u16,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct TracingConfig {
-    pub enabled: bool,
-    pub jaeger_endpoint: Option<String>,
-}
-
-
-#[derive(Debug, Error)]
-pub enum AgentNetworkError {
-    #[error("Configuration error: {0}")]
-    Config(String),
-
-    #[error("Workflow error: {0}")]
-    Workflow(String),
-
-    #[error("Agent error: {0}")]
-    Agent(String),
-
-    #[error("Tool error: {0}")]
-    Tool(String),
-
-    #[error("HITL error: {0}")]
-    Hitl(String),
-
-    #[error("File lock error: {0}")]
-    FileLock(String),
-
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("Serialization error: {0}")]
-    Serialization(#[from] serde_json::Error),
-
-    #[error("Task join error: {0}")]
-    Join(#[from] tokio::task::JoinError),
-
-    #[error("Channel send error")]
-    ChannelSend,
-
-    #[error("Other error: {0}")]
-    Other(#[from] anyhow::Error),
-}
-
 /// Error recovery strategy for tasks
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ErrorRecoveryStrategy {
     /// Retry same agent with exponential backoff
     Retry {

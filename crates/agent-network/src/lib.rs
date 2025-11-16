@@ -23,8 +23,6 @@ pub mod tracing_setup;
 pub mod acp;
 
 // Re-exports
-pub use config::AgentNetworkConfig;
-pub use error::{AgentNetworkError, Result};
 pub use orchestrator::Orchestrator;
 pub use workflow::{WorkflowBuilder, WorkflowExecutor};
 pub use agents::{Agent, AgentType};

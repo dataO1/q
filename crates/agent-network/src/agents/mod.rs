@@ -10,8 +10,6 @@ pub mod pool;
 pub use base::{Agent, AgentType, AgentContext};
 pub use pool::AgentPool;
 
-use crate::error::Result;
-
 /// Agent execution result
 #[derive(Debug, Clone)]
 pub struct AgentResult {

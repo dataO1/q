@@ -45,11 +45,13 @@ axum = { version = "*", features = ["ws"] }
 tower = "*"
 tower-http = { version = "*", features = ["trace"] }
 
+
 # Shared dependencies
 ai-agent-common = { path = "../common" }
 ai-agent-mcp-tools = { path = "../mcp-tools" }
 ai-agent-rag = { path = "../rag" }
 ai-agent-history = { path = "../history" }
+env_logger = "*"
 
 [dev-dependencies]
 tokio-test = "0.4"

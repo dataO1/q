@@ -4,13 +4,13 @@ pub mod builder;
 pub mod executor;
 pub mod analyzer;
 
+use ai_agent_common::ErrorRecoveryStrategy;
 pub use builder::WorkflowBuilder;
 pub use executor::WorkflowExecutor;
 pub use analyzer::WorkflowAnalyzer;
 
 use petgraph::graph::{DiGraph, NodeIndex};
 use serde::{Deserialize, Serialize};
-use crate::error::ErrorRecoveryStrategy;
 
 /// Workflow graph type
 pub type WorkflowGraph = DiGraph<TaskNode, DependencyEdge>;

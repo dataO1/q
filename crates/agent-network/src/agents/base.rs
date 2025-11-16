@@ -1,8 +1,8 @@
 //! Base agent trait and common types
 
-use crate::error::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use ai_agent_common::types::Result;
 
 #[async_trait]
 pub trait Agent: Send + Sync {

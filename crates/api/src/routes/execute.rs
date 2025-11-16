@@ -1,4 +1,3 @@
-use ai_agent_orchestrator::OrchestratorSystem;
 use axum::{Json, extract::State};
 
 #[derive(serde::Deserialize)]
@@ -22,5 +21,5 @@ pub async fn execute_task(
 
 #[derive(Clone)]
 pub struct AppState {
-    pub orchestrator: std::sync::Arc<OrchestratorSystem>,
+    // pub orchestrator: std::sync::Arc<OrchestratorSystem>,
 }

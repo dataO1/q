@@ -1,12 +1,13 @@
 //! File lock manager for concurrent access control
 
-use crate::error::{AgentNetworkError, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use ai_agent_common::AgentNetworkError;
 use tokio::sync::RwLock;
 use tokio::time::timeout;
+use ai_agent_common::types::Result;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LockType {

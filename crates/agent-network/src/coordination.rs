@@ -4,7 +4,6 @@ use crate::error::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use anyhow::Result;
 
 pub struct CoordinationManager {
     task_states: Arc<RwLock<HashMap<String, TaskState>>>,

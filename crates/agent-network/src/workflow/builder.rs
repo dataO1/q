@@ -1,11 +1,12 @@
 //! Workflow graph builder using petgraph
 
 use crate::{
-    error::Result,
     workflow::{WorkflowGraph, TaskNode, DependencyEdge, DependencyType},
 };
+use ai_agent_common::AgentNetworkError;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
+use anyhow::Result;
 
 pub struct WorkflowBuilder {
     graph: WorkflowGraph,
@@ -36,11 +37,11 @@ impl WorkflowBuilder {
         dependency_type: DependencyType,
     ) -> Result<()> {
         let from_idx = self.task_indices.get(from_task_id)
-            .ok_or_else(|| crate::error::AgentNetworkError::Workflow(
+            .ok_or_else(|| AgentNetworkError::Workflow(
                 format!("Task not found: {}", from_task_id)
             ))?;
         let to_idx = self.task_indices.get(to_task_id)
-            .ok_or_else(|| crate::error::AgentNetworkError::Workflow(
+            .ok_or_else(|| AgentNetworkError::Workflow(
                 format!("Task not found: {}", to_task_id)
             ))?;
 

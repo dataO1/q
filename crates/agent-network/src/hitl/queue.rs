@@ -6,7 +6,6 @@ use crate::{
 };
 use std::collections::VecDeque;
 use tokio::sync::RwLock;
-use anyhow::Result;
 
 pub struct HitlQueue {
     queue: RwLock<VecDeque<HitlRequest>>,

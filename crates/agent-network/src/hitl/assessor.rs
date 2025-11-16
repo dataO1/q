@@ -1,8 +1,9 @@
 //! HITL risk assessor
 
+use ai_agent_common::HitlMode;
+
 use crate::{
     hitl::{HitlRequest, RiskLevel},
-    config::HitlMode,
     error::Result,
 };
 

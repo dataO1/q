@@ -2,10 +2,9 @@
 
 use crate::{
     agents::{Agent, AgentType, AgentContext, AgentResult},
-    error::Result,
 };
 use async_trait::async_trait;
-use anyhow::Result;
+use ai_agent_common::error::NetworkResult;
 
 pub struct PlanningAgent {
     id: String,
@@ -20,7 +19,7 @@ impl PlanningAgent {
 
 #[async_trait]
 impl Agent for PlanningAgent {
-    async fn execute(&self, context: AgentContext) -> Result<AgentResult> {
+    async fn execute(&self, context: AgentContext) -> NetworkResult<AgentResult> {
         tracing::info!("PlanningAgent executing task: {}", context.task_id);
 
         // TODO: Week 3 - Implement planning agent logic

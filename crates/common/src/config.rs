@@ -2,13 +2,15 @@ use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 use anyhow::{Context, Result};
 
+use crate::HitlMode;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemConfig {
     pub indexing: IndexingConfig,
     pub rag: RagConfig,
-    pub orchestrator: OrchestratorConfig,
     pub storage: StorageConfig,
     pub embedding: EmbeddingConfig,
+    pub agent_network: AgentNetworkConfig,
 }
 
 
@@ -132,19 +134,6 @@ pub struct RerankingWeights {
     pub dependency_boost: f32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OrchestratorConfig {
-    pub agents: Vec<AgentConfig>,
-    pub checkpoint_interval: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentConfig {
-    pub name: String,
-    pub model: String,
-    pub system_prompt: String,
-    pub temperature: f32,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
@@ -153,9 +142,129 @@ pub struct StorageConfig {
     pub redis_url: Option<String>,
 }
 
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AgentNetworkConfig {
+    pub agents: Vec<AgentConfig>,
+    pub hitl: HitlConfig,
+    pub retry: RetryConfig,
+    pub token_budget: TokenBudgetConfig,
+    pub acp: AcpConfig,
+    pub tracing: TracingConfig,
+}
+
+impl Default for AgentNetworkConfig {
+    fn default() -> Self {
+        Self {
+            agents: vec![],
+            hitl: HitlConfig::default(),
+            retry: RetryConfig::default(),
+            token_budget: TokenBudgetConfig::default(),
+            acp: AcpConfig::default(),
+            tracing: TracingConfig::default(),
+        }
+    }
+}
+
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AgentConfig {
+    pub id: String,
+    pub agent_type: String,
+    pub model: String,
+    pub temperature: f32,
+    pub max_tokens: usize,
+    pub system_prompt: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct HitlConfig {
+    pub enabled: bool,
+    pub default_mode: HitlMode,
+    pub sample_rate: Option<f32>,
+}
+
+
+impl Default for HitlConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            default_mode: HitlMode::Blocking,
+            sample_rate: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RetryConfig {
+    pub max_attempts: usize,
+    pub backoff_ms: u64,
+    pub backoff_multiplier: f32,
+}
+
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_attempts: 1,
+            backoff_ms: 9999999,
+            backoff_multiplier: 1f32,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TokenBudgetConfig {
+    pub max_tokens_per_agent: usize,
+    pub enable_context_pruning: bool,
+    pub enable_prompt_caching: bool,
+}
+
+
+impl Default for TokenBudgetConfig {
+    fn default() -> Self {
+        Self {
+            max_tokens_per_agent: 4096,
+            enable_context_pruning: true,
+            enable_prompt_caching: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AcpConfig {
+    pub host: String,
+    pub port: u16,
+}
+
+impl Default for AcpConfig {
+    fn default() -> Self {
+        Self {
+            host : "0.0.0.0".to_string(),
+            port : 8080
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TracingConfig {
+    pub enabled: bool,
+    pub jaeger_endpoint: Option<String>,
+}
+
+impl Default for TracingConfig {
+    fn default() -> Self {
+        Self {
+            enabled : true,
+            jaeger_endpoint : Some("http://localhost:14268/api/traces".to_string())
+        }
+    }
+}
+
+
 impl SystemConfig {
-    pub fn new(indexing: IndexingConfig, rag: RagConfig, orchestrator: OrchestratorConfig, storage: StorageConfig, embedding: EmbeddingConfig) -> Self {
-        Self { indexing, rag, orchestrator, storage, embedding}
+    pub fn new(indexing: IndexingConfig, rag: RagConfig,agent_network: AgentNetworkConfig,  storage: StorageConfig, embedding: EmbeddingConfig) -> Self {
+        Self { indexing, rag,agent_network, storage, embedding}
     }
 
     /// Load configuration from TOML file
@@ -189,16 +298,16 @@ impl SystemConfig {
         }
 
         // Validate agent configs
-        if self.orchestrator.agents.is_empty() {
+        if self.agent_network.agents.is_empty() {
             anyhow::bail!("At least one agent must be configured");
         }
 
-        for agent in &self.orchestrator.agents {
+        for agent in &self.agent_network.agents {
             if agent.temperature < 0.0 || agent.temperature > 2.0 {
                 anyhow::bail!(
                     "Invalid temperature {} for agent {}. Must be between 0.0 and 2.0",
                     agent.temperature,
-                    agent.name
+                    agent.id
                 );
             }
         }
@@ -216,7 +325,7 @@ impl SystemConfig {
 
     /// Get agent config by name
     pub fn get_agent_config(&self, name: &str) -> Option<&AgentConfig> {
-        self.orchestrator.agents.iter().find(|a| a.name == name)
+        self.agent_network.agents.iter().find(|a| a.id == name)
     }
 }
 
@@ -242,10 +351,7 @@ impl Default for SystemConfig {
                 classification_model: "phi3:mini".to_string(),
                 max_results: 5,
             },
-            orchestrator: OrchestratorConfig {
-                agents: vec![],
-                checkpoint_interval: "after_wave".to_string(),
-            },
+            agent_network: AgentNetworkConfig::default() ,
             storage: StorageConfig {
                 qdrant_url: "http://localhost:6333".to_string(),
                 postgres_url: "postgresql://localhost/ai_agent".to_string(),
@@ -255,3 +361,5 @@ impl Default for SystemConfig {
         }
     }
 }
+
+

@@ -2,9 +2,9 @@
 
 use crate::{
     agents::{Agent, AgentType, AgentContext, AgentResult},
-    error::Result,
 };
 use async_trait::async_trait;
+use ai_agent_common::types::Result;
 
 pub struct CodingAgent {
     id: String,

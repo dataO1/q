@@ -1,8 +1,6 @@
 //! Core orchestrator logic
 
 use crate::{
-    config::AgentNetworkConfig,
-    error::Result,
     workflow::{WorkflowBuilder, WorkflowExecutor},
     agents::AgentPool,
     status_stream::StatusStream,
@@ -10,7 +8,8 @@ use crate::{
 };
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use anyhow::Result;
+use ai_agent_common::{types::*, AgentNetworkConfig};
+use ai_agent_common::types::Result;
 
 pub struct Orchestrator {
     config: AgentNetworkConfig,

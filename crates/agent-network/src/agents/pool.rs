@@ -1,20 +1,20 @@
 //! Agent pool management
 
-use crate::{
-    agents::{Agent, AgentType, CodingAgent, PlanningAgent, WritingAgent, EvaluatorAgent},
-    config::AgentConfig,
-    error::{Result, QualityStrategy},
-};
+use crate::agents::evaluator::EvaluatorAgent;
+use crate::agents::planning::PlanningAgent;
+use crate::agents::writing::WritingAgent;
+use crate::agents::{coding::CodingAgent, Agent, AgentType};
 use std::collections::HashMap;
 use std::sync::Arc;
-use anyhow::Result;
+use ai_agent_common::{AgentConfig, AgentNetworkError, QualityStrategy};
+use ai_agent_common::types::Result;
 
 pub struct AgentPool {
     agents: HashMap<String, Arc<dyn Agent>>,
 }
 
 impl AgentPool {
-    pub async fn new(configs: &[AgentConfig]) -> Result<Self> {
+    pub async fn new(configs: &Vec<AgentConfig>) -> Result<Self> {
         let mut agents: HashMap<String, Arc<dyn Agent>> = HashMap::new();
 
         for config in configs {
@@ -36,7 +36,7 @@ impl AgentPool {
                     config.model.clone(),
                     QualityStrategy::Always,
                 )),
-                _ => return Err(crate::error::AgentNetworkError::Config(
+                _ => return Err(AgentNetworkError::Config(
                     format!("Unknown agent type: {}", config.agent_type)
                 )),
             };

@@ -2,10 +2,9 @@
 
 use crate::{
     agents::{Agent, AgentType, AgentContext, AgentResult},
-    error::Result,
 };
 use async_trait::async_trait;
-use anyhow::Result;
+use ai_agent_common::types::Result;
 
 pub struct WritingAgent {
     id: String,
