@@ -4,7 +4,7 @@
 //! to organize tasks into waves, ensuring proper dependency satisfaction
 //! while maximizing parallelism through concurrent task spawning.
 
-use crate::error::{AgentNetworkError, AgentNetworkResult, AgentResult};
+use crate::error::{AgentNetworkError, AgentNetworkResult};
 use crate::workflow::{TaskNode, TaskResult, WorkflowGraph, DependencyType};
 use crate::agents::{AgentPool, AgentContext};
 use crate::status_stream::StatusStream;
@@ -431,6 +431,8 @@ async fn execute_single_task(
         rag_context: None,
         history_context: None,
         tool_results: vec![],
+        metadata: HashMap::default(),
+        conversation_history: vec![],
     };
 
     // Execute agent

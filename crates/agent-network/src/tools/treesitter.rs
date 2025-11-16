@@ -4,7 +4,7 @@ use crate::{
     tools::{Tool, ToolInput, ToolOutput},
 };
 
-use crate::error::AgentResult;
+use crate::error::AgentNetworkResult;
 use async_trait::async_trait;
 
 pub struct TreesitterTool {
@@ -27,7 +27,7 @@ impl Default for TreesitterTool {
 
 #[async_trait]
 impl Tool for TreesitterTool {
-    async fn execute(&self, input: ToolInput) -> AgentResult<ToolOutput> {
+    async fn execute(&self, input: ToolInput) -> AgentNetworkResult<ToolOutput> {
         tracing::debug!("Tree-sitter tool executing: {} {:?}", input.command, input.args);
 
         // TODO: Week 4 - Implement Tree-sitter tool integration

@@ -38,6 +38,8 @@ conversation_boost = 1.2
 recency_boost = 1.1
 dependency_boost = 0.8
 
+[agent_network]
+
 [[agent_network.agents]]
 id = "coding-1"
 agent_type = "coding"

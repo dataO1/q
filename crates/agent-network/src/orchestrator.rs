@@ -7,7 +7,7 @@
 //! - Manages agent execution
 //! - Handles error recovery and HITL integration
 
-use crate::error::{AgentNetworkError, AgentResult};
+use crate::error::{AgentNetworkError, AgentNetworkResult};
 use crate::workflow::{
     DependencyType, TaskNode, TaskResult, WorkflowBuilder, WorkflowExecutor, WorkflowGraph,
 };

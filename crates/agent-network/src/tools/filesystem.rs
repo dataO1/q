@@ -3,7 +3,7 @@
 use crate::{
     tools::{Tool, ToolInput, ToolOutput},
 };
-use crate::error::AgentResult;
+use crate::error::AgentNetworkResult;
 use async_trait::async_trait;
 
 pub struct FilesystemTool {
@@ -26,7 +26,7 @@ impl Default for FilesystemTool {
 
 #[async_trait]
 impl Tool for FilesystemTool {
-    async fn execute(&self, input: ToolInput) -> AgentResult<ToolOutput> {
+    async fn execute(&self, input: ToolInput) -> AgentNetworkResult<ToolOutput> {
         tracing::debug!("Filesystem tool executing: {} {:?}", input.command, input.args);
 
         // TODO: Week 4 - Implement filesystem tool integration

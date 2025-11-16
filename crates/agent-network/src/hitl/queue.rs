@@ -4,7 +4,7 @@ use crate::{
     hitl::{HitlRequest, HitlResponse},
 };
 use std::collections::VecDeque;
-use crate::error::AgentResult;
+use crate::error::AgentNetworkResult;
 use tokio::sync::RwLock;
 
 pub struct HitlQueue {
@@ -19,7 +19,7 @@ impl HitlQueue {
     }
 
     /// Add request to queue
-    pub async fn enqueue(&self, request: HitlRequest) -> AgentResult<()> {
+    pub async fn enqueue(&self, request: HitlRequest) -> AgentNetworkResult<()> {
         let mut queue = self.queue.write().await;
         queue.push_back(request);
         tracing::info!("HITL request enqueued: queue length {}", queue.len());

@@ -5,7 +5,7 @@ use ai_agent_common::HitlMode;
 use crate::{
     hitl::{HitlRequest, RiskLevel},
 };
-use crate::error::AgentResult;
+use crate::error::AgentNetworkResult;
 
 pub struct HitlAssessor {
     mode: HitlMode,
@@ -17,7 +17,7 @@ impl HitlAssessor {
     }
 
     /// Assess risk level for a task
-    pub async fn assess_risk(&self, task_description: &str) -> AgentResult<RiskLevel> {
+    pub async fn assess_risk(&self, task_description: &str) -> AgentNetworkResult<RiskLevel> {
         // TODO: Week 5 - Implement risk assessment logic
         // - Analyze task description
         // - Determine risk level

@@ -28,7 +28,7 @@ pub mod acp;
 pub use error::{AgentNetworkError};
 pub use orchestrator::Orchestrator;
 pub use workflow::{WorkflowBuilder, WorkflowExecutor, WorkflowGraph, TaskNode, TaskResult};
-pub use agents::{Agent, AgentType, AgentResponse};
+pub use agents::{Agent, AgentType, AgentResult};
 pub use status_stream::{StatusEvent, StatusEventType};
 
 // Version constant

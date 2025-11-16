@@ -3,7 +3,7 @@
 use crate::{
     tools::{Tool, ToolInput, ToolOutput},
 };
-use crate::error::AgentResult;
+use crate::error::AgentNetworkResult;
 use async_trait::async_trait;
 
 pub struct GitTool {
@@ -26,7 +26,7 @@ impl Default for GitTool {
 
 #[async_trait]
 impl Tool for GitTool {
-    async fn execute(&self, input: ToolInput) -> AgentResult<ToolOutput> {
+    async fn execute(&self, input: ToolInput) -> AgentNetworkResult<ToolOutput> {
         tracing::debug!("Git tool executing: {} {:?}", input.command, input.args);
 
         // TODO: Week 4 - Implement Git tool integration

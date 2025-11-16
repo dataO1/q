@@ -1,7 +1,7 @@
 //! ACP (Agent Communication Protocol) server
 
 use crate::{
-    error::AgentResult, orchestrator::Orchestrator
+    error::AgentNetworkResult, orchestrator::Orchestrator
 };
 use axum::{
     extract::State,
@@ -33,7 +33,7 @@ pub struct HealthResponse {
     pub status: String,
 }
 
-pub async fn start_server(orchestrator: Orchestrator) -> AgentResult<()> {
+pub async fn start_server(orchestrator: Orchestrator) -> AgentNetworkResult<()> {
     let orchestrator = Arc::new(RwLock::new(orchestrator));
 
     let app = Router::new()

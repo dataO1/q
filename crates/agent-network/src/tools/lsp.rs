@@ -3,7 +3,7 @@
 use crate::{
     tools::{Tool, ToolInput, ToolOutput},
 };
-use crate::error::AgentResult;
+use crate::error::AgentNetworkResult;
 use async_trait::async_trait;
 
 pub struct LspTool {
@@ -26,7 +26,7 @@ impl Default for LspTool {
 
 #[async_trait]
 impl Tool for LspTool {
-    async fn execute(&self, input: ToolInput) -> AgentResult<ToolOutput> {
+    async fn execute(&self, input: ToolInput) -> AgentNetworkResult<ToolOutput> {
         tracing::debug!("LSP tool executing: {} {:?}", input.command, input.args);
 
         // TODO: Week 4 - Implement LSP tool integration

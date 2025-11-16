@@ -19,7 +19,7 @@ use tracing::{error, info};
 #[command(about = "Dynamic multi-agent orchestration framework")]
 struct Cli {
     /// Path to configuration file
-    #[arg(short, long, default_value = "config.toml")]
+    #[arg(short, long, default_value = "config.dev.toml")]
     config: String,
 
     /// Log level (trace, debug, info, warn, error)

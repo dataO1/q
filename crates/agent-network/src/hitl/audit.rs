@@ -3,7 +3,7 @@
 use crate::{
     hitl::{HitlRequest, HitlResponse},
 };
-use crate::error::AgentResult;
+use crate::error::AgentNetworkResult;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +26,7 @@ impl HitlAudit {
     }
 
     /// Log HITL request
-    pub async fn log_request(&mut self, request: HitlRequest) -> AgentResult<()> {
+    pub async fn log_request(&mut self, request: HitlRequest) -> AgentNetworkResult<()> {
         let entry = AuditEntry {
             timestamp: Utc::now(),
             request,
@@ -37,7 +37,7 @@ impl HitlAudit {
     }
 
     /// Log HITL response
-    pub async fn log_response(&mut self, request_id: &str, response: HitlResponse) -> AgentResult<()> {
+    pub async fn log_response(&mut self, request_id: &str, response: HitlResponse) -> AgentNetworkResult<()> {
         // TODO: Week 5 - Update corresponding request with response
         if let Some(entry) = self.entries.iter_mut().find(|e| e.request.request_id == request_id) {
             entry.response = Some(response);
