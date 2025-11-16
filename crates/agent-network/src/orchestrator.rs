@@ -8,6 +8,7 @@
 //! - Handles error recovery and HITL integration
 
 use crate::error::{AgentNetworkError, AgentNetworkResult};
+use crate::hitl::{ConsoleApprovalHandler, DefaultApprovalQueue};
 use crate::workflow::{
     DependencyType, TaskNode, TaskResult, WorkflowBuilder, WorkflowExecutor, WorkflowGraph,
 };
@@ -45,6 +46,8 @@ pub struct Orchestrator {
 
     /// File lock manager
     file_locks: Arc<FileLockManager>,
+    approval_queue: Arc<DefaultApprovalQueue>,
+    audit_logger: Arc<crate::hitl::AuditLogger>,
 }
 
 /// Represents a decomposed task for a single agent
@@ -92,6 +95,18 @@ impl Orchestrator {
 
         info!("Orchestrator initialized successfully");
 
+        let hitl_mode = config.hitl.mode;
+        let risk_threshold = config.hitl.risk_threshold;
+        let approval_queue = Arc::new(DefaultApprovalQueue::new(hitl_mode, risk_threshold));
+        let audit_logger = Arc::new(crate::hitl::AuditLogger);
+
+        // Spawn approval handler background task
+        let queue_clone = Arc::clone(&approval_queue);
+        let handler = Arc::new(ConsoleApprovalHandler);
+        tokio::spawn(async move {
+            queue_clone.run_approver(handler).await;
+        });
+
         Ok(Self {
             config,
             agent_pool,
@@ -99,6 +114,8 @@ impl Orchestrator {
             shared_context,
             coordination,
             file_locks,
+            approval_queue,
+            audit_logger
         })
     }
 
@@ -349,7 +366,11 @@ impl Orchestrator {
         );
 
         // Execute workflow
-        let results = executor.execute(graph).await?;
+        let results = executor.execute_with_hitl(
+            graph,
+            Arc::clone(&self.approval_queue),
+            Arc::clone(&self.audit_logger),
+        ).await?;
 
         info!("Workflow execution completed with {} results", results.len());
         Ok(results)

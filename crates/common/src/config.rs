@@ -324,6 +324,33 @@ impl AgentConfig {
     }
 }
 
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize, Serialize)]
+pub enum RiskLevel {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+impl Default for RiskLevel {
+    fn default() -> Self{
+        RiskLevel::High
+    }
+}
+
+impl RiskLevel {
+    pub fn from_confidence(conf: f32) -> Self {
+        match conf {
+            c if c >= 0.9 => RiskLevel::Low,
+            c if c >= 0.75 => RiskLevel::Medium,
+            c if c >= 0.60 => RiskLevel::High,
+            _ => RiskLevel::Critical,
+        }
+    }
+}
+
+
 /// HITL (Human-in-the-Loop) configuration
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct HitlConfig {
@@ -333,7 +360,10 @@ pub struct HitlConfig {
 
     /// Default HITL mode
     #[serde(default)]
-    pub default_mode: HitlMode,
+    pub mode: HitlMode,
+
+    #[serde(default = "default_risk_threshold")]
+    pub risk_threshold: RiskLevel,  // "low", "medium", "high", "critical"
 
     /// Sample rate for sample-based HITL (0.0 - 1.0)
     #[serde(default = "default_sample_rate")]
@@ -687,3 +717,6 @@ fn default_min_quality_score() -> f32 {
 }
 
 
+fn default_risk_threshold() -> RiskLevel {
+    RiskLevel::High
+}

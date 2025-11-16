@@ -5,6 +5,7 @@
 //! while maximizing parallelism through concurrent task spawning.
 
 use crate::error::{AgentNetworkError, AgentNetworkResult};
+use crate::hitl::{ApprovalRequest, AuditEvent, AuditLogger, DefaultApprovalQueue, RiskAssessment};
 use crate::workflow::{TaskNode, TaskResult, WorkflowGraph, DependencyType};
 use crate::agents::{AgentPool, AgentContext};
 use crate::status_stream::StatusStream;
@@ -37,6 +38,8 @@ pub struct WorkflowExecutor {
 
     /// Execution configuration
     config: ExecutorConfig,
+    approval_queue: Option<Arc<crate::hitl::DefaultApprovalQueue>>,
+    audit_logger: Option<Arc<crate::hitl::AuditLogger>>,
 }
 
 /// Executor configuration
@@ -123,12 +126,28 @@ impl WorkflowExecutor {
             coordination,
             file_locks,
             config,
+            approval_queue: None,  // ADD
+            audit_logger: None,    // ADD
         }
+    }
+
+    pub fn with_hitl(
+        mut self,
+        approval_queue: Arc<crate::hitl::DefaultApprovalQueue>,
+        audit_logger: Arc<crate::hitl::AuditLogger>,
+    ) -> Self {
+        self.approval_queue = Some(approval_queue);
+        self.audit_logger = Some(audit_logger);
+        self
     }
 
     /// Execute workflow with wave-based parallel execution
     #[instrument(skip(self, graph), fields(task_count = %graph.node_count()))]
-    pub async fn execute(&self, graph: WorkflowGraph) -> AgentNetworkResult<Vec<TaskResult>> {
+    pub async fn execute_with_hitl(&self,
+            graph: WorkflowGraph,
+            approval_queue: Arc<DefaultApprovalQueue>,
+            audit_logger: Arc<AuditLogger>,
+        ) -> AgentNetworkResult<Vec<TaskResult>> {
         let start_time = Instant::now();
         info!("Starting workflow execution: {} tasks", graph.node_count());
 
@@ -151,9 +170,13 @@ impl WorkflowExecutor {
         let mut all_results: HashMap<String, TaskResult> = HashMap::new();
 
         for (wave_idx, wave) in waves.iter().enumerate() {
-            info!("Executing wave {} with {} tasks", wave_idx, wave.task_indices.len());
-
-            let wave_results = self.execute_wave(&graph, wave, &all_results).await?;
+            let wave_results = self.execute_wave_with_hitl(
+                &graph,
+                wave,
+                &all_results,
+                Arc::clone(&approval_queue),
+                Arc::clone(&audit_logger),
+            ).await?;
 
             for result in wave_results {
                 all_results.insert(result.task_id.clone(), result);
@@ -182,11 +205,13 @@ impl WorkflowExecutor {
 
     /// Execute a single wave of tasks in parallel
     #[instrument(skip(self, graph, previous_results))]
-    async fn execute_wave(
+    async fn execute_wave_with_hitl(
         &self,
         graph: &WorkflowGraph,
         wave: &ExecutionWave,
         previous_results: &HashMap<String, TaskResult>,
+        approval_queue: Arc<DefaultApprovalQueue>,
+        audit_logger: Arc<AuditLogger>,
     ) -> AgentNetworkResult<Vec<TaskResult>> {
         debug!("Executing wave {}: {} parallel tasks", wave.wave_index, wave.task_indices.len());
 
@@ -202,6 +227,8 @@ impl WorkflowExecutor {
             let timeout = self.config.task_timeout;
             let max_retries = self.config.max_retries;
             let wave_index = wave.wave_index;
+            let approval_queue = self.approval_queue.clone().unwrap();
+            let audit_logger = self.audit_logger.clone().unwrap();
 
             let handle = tokio::spawn(async move {
                 execute_task_with_retry(
@@ -210,6 +237,8 @@ impl WorkflowExecutor {
                     status_stream,
                     coordination,
                     file_locks,
+                    approval_queue,  // ADD
+                    audit_logger,    // ADD
                     timeout,
                     max_retries,
                     wave_index,
@@ -320,6 +349,8 @@ async fn execute_task_with_retry(
     status_stream: Arc<StatusStream>,
     coordination: Arc<CoordinationManager>,
     file_locks: Arc<FileLockManager>,
+    approval_queue: Arc<DefaultApprovalQueue>,  // ADD THIS PARAMETER
+    audit_logger: Arc<AuditLogger>,
     timeout: Duration,
     max_retries: usize,
     wave_index: usize,
@@ -355,6 +386,50 @@ async fn execute_task_with_retry(
                 coordination
                     .update_task_status(&task_id, crate::coordination::TaskStatus::Completed)
                     .await?;
+
+                // ADD HITL CHECK HERE:
+                if let (queue, logger) = (approval_queue.as_ref(), audit_logger.as_ref()) {
+                    if task_result.success {
+                        // Get agent for type information
+                        if let Some(agent) = agent_pool.get_agent(&task.agent_id) {
+
+                            let agent_result = crate::agents::AgentResult::new(
+                                task.agent_id.clone(),
+                                task_result.output.clone().unwrap_or_default(),
+                            )
+                            .with_confidence(0.8); // Should come from actual agent result
+
+                            let assessment = RiskAssessment::new(
+                                &agent_result,
+                                agent.agent_type(),
+                                Some(format!("Task {} completed", task.task_id)),
+                            );
+
+                            if assessment.needs_hitl(queue.risk_threshold.clone()) {
+                                let req_id = Uuid::new_v4().to_string();
+
+                                queue.enqueue(ApprovalRequest {
+                                    request_id: req_id.clone(),
+                                    assessment: assessment.clone(),
+                                    decision: None,
+                                }).await;
+
+                                let audit_event = AuditEvent {
+                                    event_id: req_id.clone(),
+                                    timestamp: chrono::Utc::now(),
+                                    agent_id: task.agent_id.clone(),
+                                    task_id: task.task_id.clone(),
+                                    action: "TASK_COMPLETED_HITL".to_string(),
+                                    risk_level: format!("{:?}", assessment.risk_level),
+                                    decision: "Pending".to_string(),
+                                    metadata: std::collections::HashMap::new(),
+                                };
+                                crate::hitl::AuditLogger::log(audit_event);
+                            }
+                        }
+                    }
+                }
+
                 status_stream.emit_task_completed(
                     task_id.clone(),
                     agent_id.clone(),

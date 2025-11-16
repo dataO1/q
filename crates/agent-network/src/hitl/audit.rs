@@ -1,58 +1,34 @@
-//! HITL audit log
+//! Structured Audit Logger
 
-use crate::{
-    hitl::{HitlRequest, HitlResponse},
-};
-use crate::error::AgentNetworkResult;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use tracing::{info, warn, error};
+use serde::{Serialize, Deserialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuditEntry {
-    pub timestamp: DateTime<Utc>,
-    pub request: HitlRequest,
-    pub response: Option<HitlResponse>,
+pub struct AuditEvent {
+    pub event_id: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub agent_id: String,
+    pub task_id: String,
+    pub action: String,
+    pub risk_level: String,
+    pub decision: String,
+    pub metadata: HashMap<String, String>,
 }
 
-pub struct HitlAudit {
-    entries: Vec<AuditEntry>,
-}
+#[derive(Debug, Clone)]
+pub struct AuditLogger;
 
-impl HitlAudit {
-    pub fn new() -> Self {
-        Self {
-            entries: Vec::new(),
-        }
+impl AuditLogger {
+    pub fn log(event: AuditEvent) {
+        info!(target: "audit", "Audit Event: {:?}", event);
     }
 
-    /// Log HITL request
-    pub async fn log_request(&mut self, request: HitlRequest) -> AgentNetworkResult<()> {
-        let entry = AuditEntry {
-            timestamp: Utc::now(),
-            request,
-            response: None,
-        };
-        self.entries.push(entry);
-        Ok(())
+    pub fn warn(event: AuditEvent) {
+        warn!(target: "audit", "Audit Event: {:?}", event);
     }
 
-    /// Log HITL response
-    pub async fn log_response(&mut self, request_id: &str, response: HitlResponse) -> AgentNetworkResult<()> {
-        // TODO: Week 5 - Update corresponding request with response
-        if let Some(entry) = self.entries.iter_mut().find(|e| e.request.request_id == request_id) {
-            entry.response = Some(response);
-        }
-        Ok(())
-    }
-
-    /// Get all audit entries
-    pub fn get_entries(&self) -> &[AuditEntry] {
-        &self.entries
-    }
-}
-
-impl Default for HitlAudit {
-    fn default() -> Self {
-        Self::new()
+    pub fn error(event: AuditEvent) {
+        error!(target: "audit", "Audit Event: {:?}", event);
     }
 }

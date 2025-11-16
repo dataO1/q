@@ -59,9 +59,34 @@ impl Agent for EvaluatorAgent {
         info!("Evaluator executing task: {}", context.task_id);
 
         let output = "Quality assessment: Output meets standards.\nScore: 0.85".to_string();
+        let mut result = AgentResult::new(self.id.clone(), output)
+            .with_confidence(0.9);
 
-        Ok(AgentResult::new(self.id.clone(), output)
-            .with_confidence(0.9))
+        // Check if this task requires HITL based on quality strategy
+        match self.quality_strategy {
+            QualityStrategy::Always => {
+                result = result.requiring_hitl();
+            }
+            QualityStrategy::OnlyForCritical => {
+                // Check if task is critical based on context
+                if context.metadata.get("critical").map(|s| s.as_str()) == Some("true") {
+                    result = result.requiring_hitl();
+                }
+            }
+            QualityStrategy::AfterNIterations(n) => {
+                // Check iteration count from metadata
+                if let Some(iter_str) = context.metadata.get("iteration") {
+                    if let Ok(iter) = iter_str.parse::<usize>() {
+                        if iter >= n {
+                            result = result.requiring_hitl();
+                        }
+                    }
+                }
+            }
+            QualityStrategy::Never => {}
+        }
+
+        Ok(result)
     }
 
     fn id(&self) -> &str {
