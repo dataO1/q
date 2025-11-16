@@ -3,15 +3,15 @@ use crate::*;
 use anyhow::Result;
 
 pub struct HistoryManager {
-    buffer_memory: buffer_memory::BufferMemory,
-    semantic_memory: semantic_memory::SemanticMemory,
-    summarizer: summarizer::ProgressiveSummarizer,
-    metadata_tracker: metadata::MetadataTracker,
+    // buffer_memory: buffer_memory::BufferMemory,
+    // semantic_memory: semantic_memory::SemanticMemory,
+    // summarizer: summarizer::ProgressiveSummarizer,
+    // metadata_tracker: metadata::MetadataTracker,
 }
 
 impl HistoryManager {
     pub async fn new(postgres_url: &str, config: &RagConfig) -> Result<Self> {
-        todo!("Initialize history manager")
+        return Ok(Self{})
     }
 
     pub async fn add_exchange(
@@ -20,7 +20,7 @@ impl HistoryManager {
         user_query: String,
         agent_response: String
     ) -> Result<()> {
-        todo!("Store new exchange in all layers")
+        Ok(())
     }
 
     pub async fn get_relevant_context(
@@ -28,7 +28,7 @@ impl HistoryManager {
         conversation_id: &ConversationId,
         query: String,
     ) -> Result<HistoryContext> {
-        todo!("Retrieve: short-term + semantic search + summaries")
+        Ok(HistoryContext::default())
     }
 }
 
@@ -39,4 +39,16 @@ pub struct HistoryContext {
     pub summary: Option<String>,
     pub mentioned_files: Vec<std::path::PathBuf>,
     pub topics: Vec<String>,
+}
+
+impl Default for HistoryContext{
+    fn default() -> Self{
+        Self{
+            short_term: vec![],
+            relevant_past: vec![],
+            summary : None,
+            mentioned_files: vec![],
+            topics: vec![]
+        }
+    }
 }

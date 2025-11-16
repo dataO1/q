@@ -3,7 +3,7 @@
 use crate::{
     error::AgentNetworkResult, orchestrator::Orchestrator
 };
-use ai_agent_common::{ConversationId, ProjectScope};
+use ai_agent_common::{ConversationId, ProjectScope, SystemConfig};
 use ai_agent_rag::context_manager::ContextManager;
 use axum::{
     extract::State,
@@ -36,7 +36,11 @@ pub struct HealthResponse {
     pub status: String,
 }
 
-pub async fn start_server(orchestrator: Arc<RwLock<Orchestrator>>) -> AgentNetworkResult<()> {
+pub async fn start_server(config: SystemConfig) -> AgentNetworkResult<()> {
+
+    let orchestrator = Orchestrator::new(config.clone()).await?;
+    let orchestrator = std::sync::Arc::new(tokio::sync::RwLock::new(orchestrator));
+
 
     let app = Router::new()
         .route("/health", get(health_check))
@@ -49,8 +53,9 @@ pub async fn start_server(orchestrator: Arc<RwLock<Orchestrator>>) -> AgentNetwo
     // - Implement all API endpoints
     // - Add authentication/authorization
     // - Handle HITL approval queue
+    let uri = format!("{}:{}", config.agent_network.acp.host,  config.agent_network.acp.port);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
+    let listener = tokio::net::TcpListener::bind(uri).await?;
     let addr = listener.local_addr()?;
     tracing::info!("ACP server listening on http://{}", addr);
 

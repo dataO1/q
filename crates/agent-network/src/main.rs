@@ -159,11 +159,8 @@ async fn execute_via_acp(query: &str, cwd: &str, server_url: &str) -> Result<()>
 async fn start_server(config: SystemConfig) -> Result<()> {
     info!("Starting ACP server on {}:{}", config.agent_network.acp.host, config.agent_network.acp.port);
 
-    let orchestrator = Orchestrator::new(config).await?;
-    let orchestrator = std::sync::Arc::new(tokio::sync::RwLock::new(orchestrator));
-
     // Start ACP server from acp module
-    ai_agent_network::acp::start_server(orchestrator).await?;
+    ai_agent_network::acp::start_server(config).await?;
 
     Ok(())
 }
