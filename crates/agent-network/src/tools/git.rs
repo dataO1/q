@@ -3,7 +3,7 @@
 use crate::{
     tools::{Tool, ToolInput, ToolOutput},
 };
-use ai_agent_common::AgentResult;
+use crate::error::AgentResult;
 use async_trait::async_trait;
 
 pub struct GitTool {

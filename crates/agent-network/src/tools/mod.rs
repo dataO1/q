@@ -5,7 +5,7 @@ pub mod git;
 pub mod filesystem;
 pub mod treesitter;
 
-use ai_agent_common::AgentResult;
+use crate::error::AgentResult;
 use async_trait::async_trait;
 
 #[async_trait]

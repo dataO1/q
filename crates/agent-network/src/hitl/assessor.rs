@@ -5,7 +5,7 @@ use ai_agent_common::HitlMode;
 use crate::{
     hitl::{HitlRequest, RiskLevel},
 };
-use ai_agent_common::AgentResult;
+use crate::error::AgentResult;
 
 pub struct HitlAssessor {
     mode: HitlMode,

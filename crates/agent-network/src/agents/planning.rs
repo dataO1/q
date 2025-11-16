@@ -3,7 +3,7 @@
 use crate::{
     agents::{Agent, AgentType, AgentContext, AgentResponse},
 };
-use ai_agent_common::AgentNetworkResult;
+use crate::error::{AgentNetworkError, AgentNetworkResult};
 use async_trait::async_trait;
 
 pub struct PlanningAgent {

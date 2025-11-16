@@ -5,5 +5,4 @@ pub mod config;
 pub mod llm;
 
 pub use types::*;
-pub use error::*;
 pub use config::*;

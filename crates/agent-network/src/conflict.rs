@@ -2,8 +2,9 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use ai_agent_common::AgentResult;
 use tokio::sync::RwLock;
+
+use crate::error::AgentResult;
 
 pub struct ConflictResolver {
     active_operations: RwLock<HashMap<String, Vec<String>>>,

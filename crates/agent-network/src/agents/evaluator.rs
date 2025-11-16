@@ -2,10 +2,10 @@
 //! Evaluator agent for quality assessment
 
 use crate::{
-    agents::{Agent, AgentType, AgentContext, AgentResponse},
+    agents::{Agent, AgentContext, AgentResponse, AgentType}, error::AgentNetworkResult,
 };
 use async_trait::async_trait;
-use ai_agent_common::{NetworkAgentResult, QualityStrategy};
+use ai_agent_common::{QualityStrategy};
 
 pub struct EvaluatorAgent {
     id: String,
@@ -23,7 +23,7 @@ impl EvaluatorAgent {
     }
 
     /// Evaluate output quality
-    pub async fn evaluate_output(&self, output: &str, criteria: &str) -> NetworkAgentResult<EvaluationResult> {
+    pub async fn evaluate_output(&self, output: &str, criteria: &str) -> AgentNetworkResult<EvaluationResult> {
         // TODO: Week 3 - Implement evaluation logic
         Ok(EvaluationResult {
             passed: true,
@@ -35,7 +35,7 @@ impl EvaluatorAgent {
 
 #[async_trait]
 impl Agent for EvaluatorAgent {
-    async fn execute(&self, context: AgentContext) -> NetworkAgentResult<AgentResponse> {
+    async fn execute(&self, context: AgentContext) -> AgentNetworkResult<AgentResponse> {
         tracing::info!("EvaluatorAgent executing task: {}", context.task_id);
 
         // TODO: Week 3 - Implement evaluator logic

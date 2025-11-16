@@ -4,10 +4,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use ai_agent_common::AgentNetworkError;
 use tokio::sync::RwLock;
 use tokio::time::timeout;
-use ai_agent_common::types::Result;
+use crate::error::{self, AgentNetworkError, AgentNetworkResult};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LockType {
@@ -36,7 +35,7 @@ impl FileLockManager {
     }
 
     /// Acquire read lock on file
-    pub async fn acquire_read_lock(&self, path: PathBuf, agent_id: String) -> Result<()> {
+    pub async fn acquire_read_lock(&self, path: PathBuf, agent_id: String) -> AgentNetworkResult<()> {
         let result = timeout(
             self.timeout_duration,
             self.try_acquire_read_lock(path.clone(), agent_id.clone())
@@ -52,7 +51,7 @@ impl FileLockManager {
     }
 
     /// Acquire write lock on file
-    pub async fn acquire_write_lock(&self, path: PathBuf, agent_id: String) -> Result<()> {
+    pub async fn acquire_write_lock(&self, path: PathBuf, agent_id: String) -> AgentNetworkResult<()> {
         let result = timeout(
             self.timeout_duration,
             self.try_acquire_write_lock(path.clone(), agent_id.clone())
@@ -68,7 +67,7 @@ impl FileLockManager {
     }
 
     /// Release lock on file
-    pub async fn release_lock(&self, path: &PathBuf, agent_id: &str) -> Result<()> {
+    pub async fn release_lock(&self, path: &PathBuf, agent_id: &str) -> AgentNetworkResult<()> {
         let mut locks = self.locks.write().await;
 
         if let Some(lock) = locks.get_mut(path) {
@@ -85,7 +84,7 @@ impl FileLockManager {
         Ok(())
     }
 
-    async fn try_acquire_read_lock(&self, path: PathBuf, agent_id: String) -> Result<()> {
+    async fn try_acquire_read_lock(&self, path: PathBuf, agent_id: String) -> AgentNetworkResult<()> {
         loop {
             let mut locks = self.locks.write().await;
 
@@ -108,7 +107,7 @@ impl FileLockManager {
         }
     }
 
-    async fn try_acquire_write_lock(&self, path: PathBuf, agent_id: String) -> Result<()> {
+    async fn try_acquire_write_lock(&self, path: PathBuf, agent_id: String) -> AgentNetworkResult<()> {
         loop {
             let mut locks = self.locks.write().await;
 

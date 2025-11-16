@@ -6,15 +6,15 @@ use crate::agents::writing::WritingAgent;
 use crate::agents::{coding::CodingAgent, Agent, AgentType};
 use std::collections::HashMap;
 use std::sync::Arc;
-use ai_agent_common::{AgentConfig, AgentNetworkError, QualityStrategy};
-use ai_agent_common::types::Result;
+use ai_agent_common::{AgentConfig, QualityStrategy};
+use crate::error::{AgentNetworkError, AgentNetworkResult};
 
 pub struct AgentPool {
     agents: HashMap<String, Arc<dyn Agent>>,
 }
 
 impl AgentPool {
-    pub async fn new(configs: &Vec<AgentConfig>) -> Result<Self> {
+    pub async fn new(configs: &Vec<AgentConfig>) -> AgentNetworkResult<Self> {
         let mut agents: HashMap<String, Arc<dyn Agent>> = HashMap::new();
 
         for config in configs {

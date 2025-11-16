@@ -7,10 +7,8 @@ use strum_macros::EnumIter;
 use strum_macros::Display;
 use schemars::JsonSchema;
 use derive_builder::Builder;
-use crate::error::AgentNetworkError;
 
-pub type NetworkAgentResult<T> = anyhow::Result<T, AgentNetworkError>;
-
+// pub type NetworkAgentResult<T> = anyhow::Result<T, AgentNetworkError>;
 
 /// Unique identifier for tasks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

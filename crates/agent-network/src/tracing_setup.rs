@@ -1,7 +1,8 @@
 //! OpenTelemetry and Jaeger tracing setup
 
-use ai_agent_common::AgentResult;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+use crate::error::AgentResult;
 
 pub fn init_tracing() -> AgentResult<()> {
     tracing_subscriber::registry()

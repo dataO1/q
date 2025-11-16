@@ -1,9 +1,8 @@
 //! Workflow graph builder using petgraph
 
 use crate::{
-    workflow::{WorkflowGraph, TaskNode, DependencyEdge, DependencyType},
+    error::AgentNetworkError, workflow::{DependencyEdge, DependencyType, TaskNode, WorkflowGraph}
 };
-use ai_agent_common::AgentNetworkError;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use anyhow::Result;

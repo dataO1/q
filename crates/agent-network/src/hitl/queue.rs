@@ -4,7 +4,7 @@ use crate::{
     hitl::{HitlRequest, HitlResponse},
 };
 use std::collections::VecDeque;
-use ai_agent_common::AgentResult;
+use crate::error::AgentResult;
 use tokio::sync::RwLock;
 
 pub struct HitlQueue {

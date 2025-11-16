@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use std::{fs, path::PathBuf};
-use anyhow::{Context};
+use anyhow::{Context, anyhow};
 
-use crate::{AgentNetworkError, ErrorRecoveryStrategy, HitlMode, NetworkAgentResult, QualityStrategy};
+use crate::{ErrorRecoveryStrategy, HitlMode,QualityStrategy};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemConfig {
@@ -157,21 +157,17 @@ pub struct AgentNetworkConfig {
 
 impl AgentNetworkConfig {
     /// Validate configuration
-    fn validate(&self) -> crate::types::NetworkAgentResult<()> {
+    fn validate(&self) -> anyhow::Result<()> {
         // Validate agents
         if self.agents.is_empty() {
-            return Err(AgentNetworkError::ConfigValidation {
-                details: "At least one agent must be configured".to_string(),
-            });
+            return Err(anyhow!("At least one agent must be configured".to_string()));
         }
 
         let mut agent_ids = std::collections::HashSet::new();
         for agent in &self.agents {
             // Check for duplicate IDs
             if !agent_ids.insert(&agent.id) {
-                return Err(AgentNetworkError::ConfigValidation {
-                    details: format!("Duplicate agent ID: {}", agent.id),
-                });
+                return Err(anyhow!("Duplicate agent ID: {}", agent.id));
             }
 
             // Validate agent fields
@@ -185,30 +181,22 @@ impl AgentNetworkConfig {
 
         // Validate token budget
         if self.token_budget.max_tokens_per_agent == 0 {
-            return Err(AgentNetworkError::ConfigValidation {
-                details: "max_tokens_per_agent must be greater than 0".to_string(),
-            });
+            return Err(anyhow!("max_tokens_per_agent must be greater than 0".to_string()));
         }
 
         // Validate pruning threshold
         if !(0.0..=1.0).contains(&self.token_budget.pruning_threshold) {
-            return Err(AgentNetworkError::ConfigValidation {
-                details: "pruning_threshold must be between 0.0 and 1.0".to_string(),
-            });
+            return Err(anyhow!("pruning_threshold must be between 0.0 and 1.0".to_string()));
         }
 
         // Validate HITL settings
         if !(0.0..=1.0).contains(&self.hitl.sample_rate) {
-            return Err(AgentNetworkError::ConfigValidation {
-                details: "sample_rate must be between 0.0 and 1.0".to_string(),
-            });
+            return Err(anyhow!("sample_rate must be between 0.0 and 1.0".to_string()));
         }
 
         // Validate quality settings
         if !(0.0..=1.0).contains(&self.quality.min_quality_score) {
-            return Err(AgentNetworkError::ConfigValidation {
-                details: "min_quality_score must be between 0.0 and 1.0".to_string(),
-            });
+            return Err(anyhow!("min_quality_score must be between 0.0 and 1.0".to_string()));
         }
 
         Ok(())
@@ -297,44 +285,29 @@ pub struct AgentConfig {
 
 impl AgentConfig {
     /// Validate agent configuration
-    fn validate(&self) -> NetworkAgentResult<()> {
+    fn validate(&self) -> anyhow::Result<()> {
         if self.id.is_empty() {
-            return Err(AgentNetworkError::ConfigValidation {
-                details: "Agent ID cannot be empty".to_string(),
-            });
+            return Err(anyhow!("Agent ID cannot be empty".to_string()));
         }
 
         if self.agent_type.is_empty() {
-            return Err(AgentNetworkError::ConfigValidation {
-                details: format!("Agent {} type cannot be empty", self.id),
-            });
+            return Err(anyhow!("Agent {} type cannot be empty", self.id));
         }
 
         if self.model.is_empty() {
-            return Err(AgentNetworkError::ConfigValidation {
-                details: format!("Agent {} model cannot be empty", self.id),
-            });
+            return Err(anyhow!("Agent {} model cannot be empty", self.id));
         }
 
         if !(0.0..=2.0).contains(&self.temperature) {
-            return Err(AgentNetworkError::ConfigValidation {
-                details: format!(
-                    "Agent {} temperature must be between 0.0 and 2.0",
-                    self.id
-                ),
-            });
+            return Err(anyhow!( "Agent {} temperature must be between 0.0 and 2.0", self.id));
         }
 
         if self.max_tokens == 0 {
-            return Err(AgentNetworkError::ConfigValidation {
-                details: format!("Agent {} max_tokens must be greater than 0", self.id),
-            });
+            return Err(anyhow!("Agent {} max_tokens must be greater than 0", self.id));
         }
 
         if self.system_prompt.is_empty() {
-            return Err(AgentNetworkError::ConfigValidation {
-                details: format!("Agent {} system_prompt cannot be empty", self.id),
-            });
+            return Err(anyhow!("Agent {} system_prompt cannot be empty", self.id));
         }
 
         Ok(())

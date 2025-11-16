@@ -3,7 +3,7 @@
 use crate::{
     agents::{Agent, AgentType, AgentContext, AgentResponse},
 };
-use ai_agent_common::NetworkAgentResult;
+use crate::error::{AgentNetworkError, AgentNetworkResult};
 use async_trait::async_trait;
 
 pub struct WritingAgent {
@@ -19,7 +19,7 @@ impl WritingAgent {
 
 #[async_trait]
 impl Agent for WritingAgent {
-    async fn execute(&self, context: AgentContext) -> NetworkAgentResult<AgentResponse> {
+    async fn execute(&self, context: AgentContext) -> AgentNetworkResult<AgentResponse> {
         tracing::info!("WritingAgent executing task: {}", context.task_id);
 
         // TODO: Week 3 - Implement writing agent logic

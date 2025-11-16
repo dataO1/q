@@ -1,6 +1,6 @@
 //! Token budget management
 
-use ai_agent_common::AgentResult;
+use crate::error::AgentResult;
 
 pub struct TokenBudgetManager {
     max_tokens_per_agent: usize,

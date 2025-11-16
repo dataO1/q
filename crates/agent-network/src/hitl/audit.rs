@@ -3,7 +3,7 @@
 use crate::{
     hitl::{HitlRequest, HitlResponse},
 };
-use ai_agent_common::AgentResult;
+use crate::error::AgentResult;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 

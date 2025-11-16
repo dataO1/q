@@ -1,15 +1,11 @@
 //! Core orchestrator logic
 
 use crate::{
-    workflow::{WorkflowBuilder, WorkflowExecutor},
-    agents::AgentPool,
-    status_stream::StatusStream,
-    sharedcontext::SharedContext,
+    agents::AgentPool, error::AgentNetworkResult, sharedcontext::SharedContext, status_stream::StatusStream, workflow::{WorkflowBuilder, WorkflowExecutor}
 };
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use ai_agent_common::{types::*, AgentNetworkConfig};
-use ai_agent_common::types::Result;
 
 pub struct Orchestrator {
     config: AgentNetworkConfig,
@@ -19,7 +15,7 @@ pub struct Orchestrator {
 }
 
 impl Orchestrator {
-    pub async fn new(config: AgentNetworkConfig) -> Result<Self> {
+    pub async fn new(config: AgentNetworkConfig) -> AgentNetworkResult<Self> {
         let agent_pool = Arc::new(AgentPool::new(&config.agents).await?);
         let status_stream = Arc::new(StatusStream::new());
         let shared_context = Arc::new(RwLock::new(SharedContext::new()));
@@ -33,7 +29,7 @@ impl Orchestrator {
     }
 
     /// Execute a query by analyzing, decomposing, and orchestrating agents
-    pub async fn execute_query(&self, query: &str) -> Result<String> {
+    pub async fn execute_query(&self, query: &str) -> AgentNetworkResult<String> {
         tracing::info!("Orchestrator received query: {}", query);
 
         // TODO: Week 1 - Implement query analysis and task decomposition

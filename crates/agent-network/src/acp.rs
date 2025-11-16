@@ -1,9 +1,8 @@
 //! ACP (Agent Communication Protocol) server
 
 use crate::{
-    orchestrator::Orchestrator
+    error::AgentResult, orchestrator::Orchestrator
 };
-use ai_agent_common::AgentResult;
 use axum::{
     extract::State,
     response::Json,

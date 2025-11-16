@@ -1,11 +1,8 @@
 //! Workflow execution engine with wave-based parallel execution
 
 use crate::{
-    workflow::{WorkflowGraph, TaskResult},
-    agents::AgentPool,
-    status_stream::StatusStream,
+    agents::AgentPool, error::AgentNetworkError, status_stream::StatusStream, workflow::{TaskResult, WorkflowGraph}
 };
-use ai_agent_common::AgentNetworkError;
 use petgraph::algo::toposort;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
