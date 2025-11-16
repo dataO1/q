@@ -52,6 +52,7 @@ ai-agent-mcp-tools = { path = "../mcp-tools" }
 ai-agent-rag = { path = "../rag" }
 ai-agent-history = { path = "../history" }
 env_logger = "*"
+git2 = "*"
 
 
 clap = { version = "*", features = ["derive", "env"] }
