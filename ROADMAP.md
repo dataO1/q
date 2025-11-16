@@ -47,6 +47,8 @@
         + Use cosine similarity with thresholding.
         + Support dynamic weighting based on recency, dependency chain, and conversation signals.
 - Phase 4 - History (Week 4):
+    * ???
+- Phase 5 - Agent-Network:
     * Week 1: Crate Setup and Core Orchestrator
         + Initialize the agent-network crate with the recommended module structure.
         + Implement configuration loading (config.rs) for agent definitions, HITL modes, retry policies, etc.
@@ -93,10 +95,6 @@
         + Render petgraph DAGs as dot files for visualization (optional).
         + Write comprehensive integration and unit tests covering tasks, failure scenarios, HITL, and agent execution.
         + Document APIs, configurations, and agent coding guidelines within the crate.
-- Phase 5 - Orchestrator (Weeks 5-6):
-    * Agent pool
-    * Workflow builder (petgraph)
-    * Wave executor with locking
 - Phase 6 - Polish (Weeks 7-8):
     * MCP tools
     * API server
