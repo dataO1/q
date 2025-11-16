@@ -171,9 +171,12 @@ mod tests {
 
         let output = "1. First step\n2. Second step\n3. Third step";
         let steps = agent.parse_plan(output);
+
         assert_eq!(steps.len(), 3);
-        assert_eq!(steps.order, 1);
-        assert_eq!(steps.description, "First step");
+        assert_eq!(steps[0].order, 1);
+        assert_eq!(steps[0].description, "First step");
+        assert_eq!(steps[1].order, 2);
+        assert_eq!(steps[1].description, "Second step");
     }
 
     #[test]
@@ -188,7 +191,44 @@ mod tests {
 
         let output = "- First item\n- Second item\n- Third item";
         let steps = agent.parse_plan(output);
+
         assert_eq!(steps.len(), 3);
+        assert_eq!(steps[0].order, 1);
+        assert_eq!(steps[0].description, "First item");
+    }
+
+    #[test]
+    fn test_parse_mixed_format() {
+        let agent = PlanningAgent::new(
+            "test".to_string(),
+            "model".to_string(),
+            "prompt".to_string(),
+            0.8,
+            1024,
+        );
+
+        let output = "Step 1: Analysis\nStep 2: Design\n3. Implementation";
+        let steps = agent.parse_plan(output);
+
+        assert_eq!(steps.len(), 3);
+        assert_eq!(steps[0].description, "Analysis");
+        assert_eq!(steps[2].description, "Implementation");
+    }
+
+    #[test]
+    fn test_parse_empty_input() {
+        let agent = PlanningAgent::new(
+            "test".to_string(),
+            "model".to_string(),
+            "prompt".to_string(),
+            0.8,
+            1024,
+        );
+
+        let output = "";
+        let steps = agent.parse_plan(output);
+
+        assert_eq!(steps.len(), 0);
     }
 
     #[tokio::test]
@@ -212,5 +252,6 @@ mod tests {
         let result = result.unwrap();
         assert_eq!(result.agent_id, "planning-1");
         assert!(!result.output.is_empty());
+        assert!(result.confidence > 0.5);
     }
 }
