@@ -2,14 +2,14 @@
 
 use crate::{
     workflow::WorkflowGraph,
-    error::Result,
+    error::AgentResult,
 };
 
 pub struct WorkflowAnalyzer;
 
 impl WorkflowAnalyzer {
     /// Analyze workflow complexity
-    pub fn analyze_complexity(graph: &WorkflowGraph) -> Result<ComplexityReport> {
+    pub fn analyze_complexity(graph: &WorkflowGraph) -> AgentResult<ComplexityReport> {
         // TODO: Week 2 - Implement complexity analysis
         // - Count nodes and edges
         // - Identify critical path
@@ -24,7 +24,7 @@ impl WorkflowAnalyzer {
     }
 
     /// Validate workflow for cycles and other issues
-    pub fn validate(graph: &WorkflowGraph) -> Result<()> {
+    pub fn validate(graph: &WorkflowGraph) -> AgentResult<()> {
         // TODO: Week 2 - Validate DAG properties
         Ok(())
     }

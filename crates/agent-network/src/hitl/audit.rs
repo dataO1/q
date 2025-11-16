@@ -2,8 +2,8 @@
 
 use crate::{
     hitl::{HitlRequest, HitlResponse},
-    error::Result,
 };
+use ai_agent_common::AgentResult;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +26,7 @@ impl HitlAudit {
     }
 
     /// Log HITL request
-    pub async fn log_request(&mut self, request: HitlRequest) -> Result<()> {
+    pub async fn log_request(&mut self, request: HitlRequest) -> AgentResult<()> {
         let entry = AuditEntry {
             timestamp: Utc::now(),
             request,
@@ -37,7 +37,7 @@ impl HitlAudit {
     }
 
     /// Log HITL response
-    pub async fn log_response(&mut self, request_id: &str, response: HitlResponse) -> Result<()> {
+    pub async fn log_response(&mut self, request_id: &str, response: HitlResponse) -> AgentResult<()> {
         // TODO: Week 5 - Update corresponding request with response
         if let Some(entry) = self.entries.iter_mut().find(|e| e.request.request_id == request_id) {
             entry.response = Some(response);

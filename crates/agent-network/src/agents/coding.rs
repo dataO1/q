@@ -1,10 +1,10 @@
 //! Coding agent implementation
 
 use crate::{
-    agents::{Agent, AgentType, AgentContext, AgentResult},
+    agents::{Agent, AgentType, AgentContext, AgentResponse},
 };
 use async_trait::async_trait;
-use ai_agent_common::types::Result;
+use ai_agent_common::NetworkAgentResult;
 
 pub struct CodingAgent {
     id: String,
@@ -20,7 +20,7 @@ impl CodingAgent {
 
 #[async_trait]
 impl Agent for CodingAgent {
-    async fn execute(&self, context: AgentContext) -> Result<AgentResult> {
+    async fn execute(&self, context: AgentContext) -> NetworkAgentResult<AgentResponse> {
         tracing::info!("CodingAgent executing task: {}", context.task_id);
 
         // TODO: Week 3 - Implement coding agent logic
@@ -29,7 +29,7 @@ impl Agent for CodingAgent {
         // - Generate code
         // - Handle file operations
 
-        Ok(AgentResult {
+        Ok(AgentResponse {
             agent_id: self.id.clone(),
             output: "Coding task completed".to_string(),
             confidence: 0.9,

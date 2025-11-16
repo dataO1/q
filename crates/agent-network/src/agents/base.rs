@@ -1,13 +1,13 @@
 //! Base agent trait and common types
 
+use ai_agent_common::NetworkAgentResult;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use ai_agent_common::types::Result;
 
 #[async_trait]
 pub trait Agent: Send + Sync {
     /// Execute agent task with given context
-    async fn execute(&self, context: AgentContext) -> Result<super::AgentResult>;
+    async fn execute(&self, context: AgentContext) -> NetworkAgentResult<super::AgentResponse>;
 
     /// Get agent ID
     fn id(&self) -> &str;

@@ -1,8 +1,8 @@
 //! Conflict resolution for concurrent agent operations
 
-use crate::error::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
+use ai_agent_common::AgentResult;
 use tokio::sync::RwLock;
 
 pub struct ConflictResolver {
@@ -17,7 +17,7 @@ impl ConflictResolver {
     }
 
     /// Check if operation conflicts with active operations
-    pub async fn check_conflict(&self, resource: &str, agent_id: &str) -> Result<bool> {
+    pub async fn check_conflict(&self, resource: &str, agent_id: &str) -> AgentResult<bool> {
         let operations = self.active_operations.read().await;
 
         if let Some(agents) = operations.get(resource) {
@@ -28,7 +28,7 @@ impl ConflictResolver {
     }
 
     /// Register operation on resource
-    pub async fn register_operation(&self, resource: String, agent_id: String) -> Result<()> {
+    pub async fn register_operation(&self, resource: String, agent_id: String) -> AgentResult<()> {
         let mut operations = self.active_operations.write().await;
         operations
             .entry(resource)
@@ -38,7 +38,7 @@ impl ConflictResolver {
     }
 
     /// Unregister operation on resource
-    pub async fn unregister_operation(&self, resource: &str, agent_id: &str) -> Result<()> {
+    pub async fn unregister_operation(&self, resource: &str, agent_id: &str) -> AgentResult<()> {
         let mut operations = self.active_operations.write().await;
 
         if let Some(agents) = operations.get_mut(resource) {

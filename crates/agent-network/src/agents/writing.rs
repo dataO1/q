@@ -1,10 +1,10 @@
 //! Writing agent implementation
 
 use crate::{
-    agents::{Agent, AgentType, AgentContext, AgentResult},
+    agents::{Agent, AgentType, AgentContext, AgentResponse},
 };
+use ai_agent_common::NetworkAgentResult;
 use async_trait::async_trait;
-use ai_agent_common::types::Result;
 
 pub struct WritingAgent {
     id: String,
@@ -19,7 +19,7 @@ impl WritingAgent {
 
 #[async_trait]
 impl Agent for WritingAgent {
-    async fn execute(&self, context: AgentContext) -> Result<AgentResult> {
+    async fn execute(&self, context: AgentContext) -> NetworkAgentResult<AgentResponse> {
         tracing::info!("WritingAgent executing task: {}", context.task_id);
 
         // TODO: Week 3 - Implement writing agent logic
@@ -27,7 +27,7 @@ impl Agent for WritingAgent {
         // - Write commit messages
         // - Create reports
 
-        Ok(AgentResult {
+        Ok(AgentResponse {
             agent_id: self.id.clone(),
             output: "Writing task completed".to_string(),
             confidence: 0.9,

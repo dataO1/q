@@ -12,7 +12,7 @@ pub use pool::AgentPool;
 
 /// Agent execution result
 #[derive(Debug, Clone)]
-pub struct AgentResult {
+pub struct AgentResponse {
     pub agent_id: String,
     pub output: String,
     pub confidence: f32,

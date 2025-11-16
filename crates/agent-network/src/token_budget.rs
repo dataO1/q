@@ -1,6 +1,6 @@
 //! Token budget management
 
-use crate::error::Result;
+use ai_agent_common::AgentResult;
 
 pub struct TokenBudgetManager {
     max_tokens_per_agent: usize,
@@ -29,7 +29,7 @@ impl TokenBudgetManager {
     }
 
     /// Optimize context to fit within token budget
-    pub fn optimize_context(&self, context: &str) -> Result<String> {
+    pub fn optimize_context(&self, context: &str) -> AgentResult<String> {
         let token_count = self.estimate_tokens(context);
 
         if token_count <= self.max_tokens_per_agent {
@@ -47,7 +47,7 @@ impl TokenBudgetManager {
         }
     }
 
-    fn prune_context(&self, context: &str) -> Result<String> {
+    fn prune_context(&self, context: &str) -> AgentResult<String> {
         // TODO: Week 6 - Implement smart pruning logic
         // For now, simple truncation
         let max_chars = self.max_tokens_per_agent * 4;

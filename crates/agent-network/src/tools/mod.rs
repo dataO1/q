@@ -5,12 +5,12 @@ pub mod git;
 pub mod filesystem;
 pub mod treesitter;
 
-use crate::error::Result;
+use ai_agent_common::AgentResult;
 use async_trait::async_trait;
 
 #[async_trait]
 pub trait Tool: Send + Sync {
-    async fn execute(&self, input: ToolInput) -> Result<ToolOutput>;
+    async fn execute(&self, input: ToolInput) -> AgentResult<ToolOutput>;
     fn name(&self) -> &str;
 }
 

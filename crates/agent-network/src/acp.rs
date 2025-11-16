@@ -1,9 +1,9 @@
 //! ACP (Agent Communication Protocol) server
 
 use crate::{
-    orchestrator::Orchestrator,
-    error::Result,
+    orchestrator::Orchestrator
 };
+use ai_agent_common::AgentResult;
 use axum::{
     extract::State,
     response::Json,
@@ -34,7 +34,7 @@ pub struct HealthResponse {
     pub status: String,
 }
 
-pub async fn start_server(orchestrator: Orchestrator) -> Result<()> {
+pub async fn start_server(orchestrator: Orchestrator) -> AgentResult<()> {
     let orchestrator = Arc::new(RwLock::new(orchestrator));
 
     let app = Router::new()

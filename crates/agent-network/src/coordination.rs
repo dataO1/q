@@ -1,8 +1,8 @@
 //! Coordination logic for agents and tasks
 
-use crate::error::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
+use ai_agent_common::AgentResult;
 use tokio::sync::RwLock;
 
 pub struct CoordinationManager {
@@ -32,7 +32,7 @@ impl CoordinationManager {
     }
 
     /// Register new task
-    pub async fn register_task(&self, task_id: String, agent_id: String) -> Result<()> {
+    pub async fn register_task(&self, task_id: String, agent_id: String) -> AgentResult<()> {
         let mut states = self.task_states.write().await;
         states.insert(task_id.clone(), TaskState {
             task_id,
@@ -43,7 +43,7 @@ impl CoordinationManager {
     }
 
     /// Update task status
-    pub async fn update_task_status(&self, task_id: &str, status: TaskStatus) -> Result<()> {
+    pub async fn update_task_status(&self, task_id: &str, status: TaskStatus) -> AgentResult<()> {
         let mut states = self.task_states.write().await;
 
         if let Some(state) = states.get_mut(task_id) {

@@ -21,6 +21,7 @@ pub mod status_stream;
 pub mod token_budget;
 pub mod tracing_setup;
 pub mod acp;
+pub mod error;
 
 // Re-exports
 pub use orchestrator::Orchestrator;

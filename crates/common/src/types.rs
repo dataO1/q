@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use derive_builder::Builder;
 use crate::error::AgentNetworkError;
 
-pub type Result<T> = anyhow::Result<T, AgentNetworkError>;
+pub type NetworkAgentResult<T> = anyhow::Result<T, AgentNetworkError>;
 
 
 /// Unique identifier for tasks
@@ -313,38 +313,111 @@ pub struct Definition {
     byte_range: (usize, usize),
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+/// HITL approval modes
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "PascalCase")]
 pub enum HitlMode {
+    /// Block workflow until human approves
     Blocking,
+
+    /// Continue but flag for review
     Async,
+
+    /// Sample-based review
     SampleBased,
 }
 
-/// Error recovery strategy for tasks
-#[derive(Debug, Clone, Serialize, Deserialize)]
+
+impl std::fmt::Display for HitlMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Blocking => write!(f, "Blocking"),
+            Self::Async => write!(f, "Async"),
+            Self::SampleBased => write!(f, "SampleBased"),
+        }
+    }
+}
+
+impl Default for HitlMode {
+    fn default() -> Self {
+        Self::Async
+    }
+}
+
+/// Error recovery strategy for task failures
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ErrorRecoveryStrategy {
-    /// Retry same agent with exponential backoff
-    Retry {
-        max_attempts: usize,
-        backoff_ms: u64,
-    },
-    /// Switch to backup agent
-    SwitchAgent {
-        backup_agent_id: String,
-    },
-    /// Skip task and continue
+    /// Retry the same agent with exponential backoff
+    #[serde(rename = "retry")]
+    Retry { max_attempts: usize, backoff_ms: u64 },
+
+    /// Switch to a backup/alternative agent
+    #[serde(rename = "switch_agent")]
+    SwitchAgent { backup_agent_id: String },
+
+    /// Skip this task and continue workflow
+    #[serde(rename = "skip")]
     Skip,
-    /// Request human intervention
+
+    /// Request human intervention before continuing
+    #[serde(rename = "escalate_to_human")]
     EscalateToHuman,
-    /// Abort entire workflow
+
+    /// Abort the entire workflow
+    #[serde(rename = "abort")]
     Abort,
 }
 
-/// Quality evaluation strategy
-#[derive(Debug, Clone)]
+impl fmt::Display for ErrorRecoveryStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Retry {
+                max_attempts,
+                backoff_ms,
+            } => write!(
+                f,
+                "Retry(max_attempts={}, backoff_ms={})",
+                max_attempts, backoff_ms
+            ),
+            Self::SwitchAgent { backup_agent_id } => {
+                write!(f, "SwitchAgent(backup={})", backup_agent_id)
+            }
+            Self::Skip => write!(f, "Skip"),
+            Self::EscalateToHuman => write!(f, "EscalateToHuman"),
+            Self::Abort => write!(f, "Abort"),
+        }
+    }
+}
+
+/// Quality evaluation strategy for agent outputs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum QualityStrategy {
+    /// Always evaluate every output
+    #[serde(rename = "always")]
     Always,
+
+    /// Only evaluate high-risk/critical tasks
+    #[serde(rename = "only_for_critical")]
     OnlyForCritical,
+
+    /// Evaluate only after N iterations
+    #[serde(rename = "after_n_iterations")]
     AfterNIterations(usize),
+
+    /// Never evaluate
+    #[serde(rename = "never")]
     Never,
+}
+
+impl fmt::Display for QualityStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Always => write!(f, "Always"),
+            Self::OnlyForCritical => write!(f, "OnlyForCritical"),
+            Self::AfterNIterations(n) => write!(f, "AfterNIterations({})", n),
+            Self::Never => write!(f, "Never"),
+        }
+    }
 }
