@@ -4,6 +4,7 @@ use redis::{AsyncCommands, FromRedisValue};
 use tokio::sync::Mutex;
 use std::sync::Arc;
 
+#[derive(Debug)]
 pub struct RedisCache {
     client: redis::Client,
     connection: Arc<Mutex<MultiplexedConnection>>,

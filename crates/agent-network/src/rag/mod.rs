@@ -19,6 +19,7 @@ use crate::error::AgentNetworkResult;
 /// Context provider for agent execution
 ///
 /// Orchestrates RAG and History retrieval based on task-specific queries
+#[derive(Debug)]
 pub struct ContextProvider {
     rag: Arc<SmartMultiSourceRag>,
     history_manager: Arc<RwLock<HistoryManager>>,

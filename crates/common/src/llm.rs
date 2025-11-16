@@ -2,7 +2,7 @@ use anyhow::Context;
 use fastembed::{SparseInitOptions, SparseModel, SparseTextEmbedding};
 use swiftide_integrations::{fastembed::{EmbeddingModelType, FastEmbed, FastEmbedBuilder}, ollama::{config::OllamaConfig, Ollama}, openai::GenericOpenAI};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct EmbeddingClient{
     pub embedder_dense: GenericOpenAI<OllamaConfig>,
     pub vector_size_dense: u64,

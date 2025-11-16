@@ -1,6 +1,18 @@
+---
 version: '3.8'
 
 services:
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC receiver (default)
+      - "4318:4318"     # OTLP HTTP receiver (optional)
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    restart: unless-stopped
+
   postgres-test:
     image: pgvector/pgvector:pg16  # Use pgvector-enabled PostgreSQL image
     environment:

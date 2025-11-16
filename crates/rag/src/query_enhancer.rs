@@ -7,6 +7,7 @@ use tokenizers::processors::template::TemplateProcessing;
 use tokenizers::{Tokenizer, models::wordpiece::WordPiece, normalizers::BertNormalizer};
 use sha2::{Digest, Sha256};
 
+#[derive(Debug)]
 pub struct QueryEnhancer {
     ollama_client: OllamaClient,
     mem_cache: Cache<String, Vec<String>>,
@@ -164,6 +165,7 @@ impl QueryEnhancer {
     }
 }
 
+#[derive(Debug)]
 pub struct OllamaClient {}
 
 impl OllamaClient {

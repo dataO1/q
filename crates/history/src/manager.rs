@@ -2,6 +2,7 @@ use ai_agent_common::*;
 use crate::*;
 use anyhow::Result;
 
+#[derive(Debug)]
 pub struct HistoryManager {
     // buffer_memory: buffer_memory::BufferMemory,
     // semantic_memory: semantic_memory::SemanticMemory,

@@ -15,12 +15,24 @@ use qdrant_client::qdrant::{condition::ConditionOneOf, FieldCondition, Match};
 use swiftide::traits::SparseEmbeddingModel;
 use swiftide::{SparseEmbedding, SparseEmbeddings};
 
-/// Hybrid Qdrant client combining Swiftide for indexing and raw qdrant-client for filtered queries
+
 #[derive(Clone)]
+pub struct QdrantWrapper(pub Qdrant);
+
+/// Hybrid Qdrant client combining Swiftide for indexing and raw qdrant-client for filtered queries
+#[derive(Clone, Debug)]
 pub struct QdrantClient {
     url: String,
-    raw_client: Qdrant,
+    raw_client: QdrantWrapper,
     embedder: Arc<EmbeddingClient>,
+}
+
+
+// Example of manual implementation for the newtype
+impl std::fmt::Debug for QdrantWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Qdrant Config uri: {}", self.0.config.uri)
+    }
 }
 
 impl QdrantClient {
@@ -32,7 +44,7 @@ impl QdrantClient {
 
         Ok(Self {
             url: url.to_string(),
-            raw_client,
+            raw_client: QdrantWrapper(raw_client),
             embedder,
         })
     }
@@ -148,7 +160,7 @@ impl QdrantClient {
             .query(Query::new_fusion(Fusion::Rrf))
             .with_payload(true)
             .limit(limit.unwrap_or(10));
-        let search_result = self.raw_client.query(query).await?;
+        let search_result = self.raw_client.0.query(query).await?;
 
         let mut results = Vec::new();
 
@@ -184,7 +196,7 @@ impl QdrantClient {
     /// Health check
     pub async fn health_check(&self) -> Result<()> {
         self.raw_client
-            .health_check()
+            .0.health_check()
             .await
             .context("Qdrant health check failed")?;
         Ok(())

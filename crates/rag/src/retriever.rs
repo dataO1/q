@@ -15,7 +15,7 @@ use ai_agent_common::{llm::EmbeddingClient, CollectionTier, ContextFragment, Pro
 pub type Priority = u8;
 
 #[async_trait]
-pub trait RetrieverSource: Send + Sync + 'static {
+pub trait RetrieverSource: std::fmt::Debug + Send + Sync + 'static {
     fn priority(&self) -> Priority;
 
     async fn retrieve(
@@ -71,6 +71,7 @@ pub trait RetrieverSource: Send + Sync + 'static {
     }
 }
 
+#[derive(Debug)]
 pub struct QdrantRetriever {
     client: Arc<QdrantClient>,
 }
@@ -98,6 +99,7 @@ impl RetrieverSource for QdrantRetriever {
     }
 }
 
+#[derive(Debug)]
 pub struct MultiSourceRetriever {
     sources: Vec<Arc<dyn RetrieverSource + Send + Sync + >>,
     embedder: Arc<EmbeddingClient>,

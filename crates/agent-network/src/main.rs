@@ -76,7 +76,7 @@ struct ExecuteResponse {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Initialize tracing
+    // Initialize tracing with OpenTelemetry
     let log_level = cli.log_level.as_deref().unwrap_or("info");
     tracing_setup::init_tracing_with_level(log_level)?;
 
@@ -95,7 +95,7 @@ async fn main() -> Result<()> {
     }
 
     // Handle commands
-    match cli.command {
+    let result = match cli.command {
         Some(Commands::ValidateConfig) => {
             println!("✓ Configuration is valid");
             println!("  Agents: {}", config.agent_network.agents.len());
@@ -119,7 +119,9 @@ async fn main() -> Result<()> {
             // Default to server mode
             start_server(config).await
         }
-    }
+    };
+    tracing_setup::shutdown_tracer();
+    result
 }
 
 /// Execute query via ACP HTTP endpoint (client mode)
@@ -158,8 +160,6 @@ async fn execute_via_acp(query: &str, cwd: &str, server_url: &str) -> Result<()>
 /// Start the ACP server
 async fn start_server(config: SystemConfig) -> Result<()> {
     info!("Starting ACP server on {}:{}", config.agent_network.acp.host, config.agent_network.acp.port);
-
-    // Start ACP server from acp module
     ai_agent_network::acp::start_server(config).await?;
 
     Ok(())

@@ -19,6 +19,7 @@ use ai_agent_common::{CollectionTier, ContextFragment, ConversationId, ProjectSc
 use crate::retriever::MultiSourceRetriever;
 use crate::query_enhancer::QueryEnhancer;
 
+#[derive(Debug)]
 /// Main RAG pipeline struct
 pub struct SmartMultiSourceRag {
     query_enhancer: QueryEnhancer,

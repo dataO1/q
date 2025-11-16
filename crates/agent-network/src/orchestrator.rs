@@ -6,7 +6,8 @@
 //! - Generates dynamic DAG workflows
 //! - Manages agent execution
 //! - Handles error recovery and HITL integration
-
+use petgraph::dot::Dot;
+use tracing::{info, debug, error, instrument, span, Level};
 use crate::error::{AgentNetworkError, AgentNetworkResult};
 use crate::hitl::{AuditLogger, ConsoleApprovalHandler, DefaultApprovalQueue};
 use crate::workflow::{
@@ -26,7 +27,6 @@ use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn, error, instrument};
 use uuid::Uuid;
 use anyhow::Result;
 
@@ -90,9 +90,14 @@ pub enum Complexity {
 }
 
 impl Orchestrator {
+    #[instrument(skip(config), fields(agents = config.agent_network.agents.len()))]
     /// Create a new Orchestrator
     pub async fn new(config: SystemConfig) -> Result<Self> {
-        info!("Initializing Orchestrator with {} agents", config.agent_network.agents.len());
+        let span = span!(Level::INFO, "orchestrator.init");
+        let _enter = span.enter();
+
+        info!("Initializing Orchestrator");
+        debug!("Loading {} agents", config.agent_network.agents.len());
 
         let agent_pool = Arc::new(AgentPool::new(&config.agent_network.agents).await?);
         let status_stream = Arc::new(StatusStream::new());
@@ -119,7 +124,7 @@ impl Orchestrator {
     // Initialize HistoryManager (if Postgres configured)
         let history_manager = Arc::new(RwLock::new(HistoryManager::new(&config.storage.postgres_url, &config.rag).await?));
 
-
+        info!("Orchestrator initialized successfully");
         Ok(Self {
             config:config.agent_network,
             agent_pool,
@@ -365,14 +370,19 @@ impl Orchestrator {
         Ok(graph)
     }
 
+    fn export_workflow_graph_dot(graph: &WorkflowGraph) -> () {
+        let dot =format!("{}", Dot::with_config(graph, &[]));
+        std::fs::write("graph.dot", dot).expect("Failed to write DOT file")
+    }
+
     /// Execute workflow graph
-    #[instrument(skip(self, graph))]
+    #[instrument(skip(self, graph), fields(nodes = graph.node_count()))]
     pub async fn execute_workflow(&self,
         graph: WorkflowGraph,
         project_scope: ProjectScope,
         conversation_id: ConversationId,
         ) -> Result<Vec<TaskResult>> {
-        info!("Starting workflow execution");
+        info!("Starting workflow execution with {} nodes", graph.node_count());
 
         let executor = WorkflowExecutor::new(
             self.agent_pool.clone(),
@@ -392,7 +402,7 @@ impl Orchestrator {
 
         let results = executor.execute_with_hitl(graph, self.approval_queue.clone(), self.audit_logger.clone(),project_scope, conversation_id,).await?;
 
-        info!("Workflow execution completed");
+        info!("Workflow execution completed with {} results", results.len());
         Ok(results)
     }
 

@@ -3,7 +3,9 @@
 //! Implements efficient parallel task execution using topological sorting
 //! to organize tasks into waves, ensuring proper dependency satisfaction
 //! while maximizing parallelism through concurrent task spawning.
-
+use tracing::{info, debug, warn, error, instrument, span, Level};
+use opentelemetry::trace::{TraceContextExt, Span as OtelSpan};
+use opentelemetry::{global, KeyValue};
 use crate::error::{AgentNetworkError, AgentNetworkResult};
 use crate::hitl::{ApprovalRequest, AuditEvent, AuditLogger, DefaultApprovalQueue, RiskAssessment};
 use crate::workflow::{TaskNode, TaskResult, WorkflowGraph, DependencyType};
@@ -21,7 +23,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tracing::{debug, info, warn, error, instrument};
 use uuid::Uuid;
 
 /// Wave-based workflow executor for parallel task execution
@@ -230,7 +231,10 @@ impl WorkflowExecutor {
     }
 
     /// Execute a single wave of tasks in parallel
-    #[instrument(skip(self, graph, previous_results))]
+    #[instrument(skip(self, graph, wave, previous_results), fields(
+        wave_index = wave.wave_index,
+        tasks = wave.task_indices.len()
+    ))]
     async fn execute_wave_with_hitl(
         &self,
         graph: &WorkflowGraph,
@@ -242,6 +246,11 @@ impl WorkflowExecutor {
         conversation_id: ConversationId,
     ) -> AgentNetworkResult<Vec<TaskResult>> {
         debug!("Executing wave {}: {} parallel tasks", wave.wave_index, wave.task_indices.len());
+        // Add OTel attributes
+        let cx = opentelemetry::Context::current();
+        let span = cx.span();
+        span.set_attribute(KeyValue::new("wave.index", wave.wave_index as i64));
+        span.set_attribute(KeyValue::new("wave.tasks", wave.task_indices.len() as i64));
 
         let mut handles: Vec<JoinHandle<AgentNetworkResult<TaskResult>>> = vec![];
 
@@ -311,7 +320,7 @@ impl WorkflowExecutor {
                 }
             }
         }
-
+        info!("Wave {} completed", wave.wave_index);
         Ok(wave_results)
     }
 
@@ -453,6 +462,10 @@ async fn execute_single_task(
     }
 }
 
+#[instrument(skip(task, agent_pool, status_stream, coordination, file_locks), fields(
+    task_id = %task.task_id,
+    agent_id = %task.agent_id,
+))]
 /// Execute a single task with retry logic
 async fn execute_task_with_retry(
     task: TaskNode,
@@ -469,6 +482,17 @@ async fn execute_task_with_retry(
     project_scope: ProjectScope,
     conversation_id: ConversationId,
 ) -> AgentNetworkResult<TaskResult> {
+
+    let cx = opentelemetry::Context::current();
+    let span = cx.span();
+    span.add_event(
+        "task.start",
+        vec![
+            KeyValue::new("task.id", task.task_id.clone()),
+            KeyValue::new("agent.id", task.agent_id.clone()),
+        ],
+    );
+
     let task_id = task.task_id.clone();
     let agent_id = task.agent_id.clone();
 
@@ -596,7 +620,7 @@ async fn execute_task_with_retry(
         agent_id.clone(),
         format!("Task failed after {} retries: {}", retries, error_msg),
     );
-
+    span.add_event("task.complete", vec![]);
     Ok(TaskResult {
         task_id,
         success: false,

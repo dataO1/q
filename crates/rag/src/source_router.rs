@@ -5,6 +5,7 @@ use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, Me
 use strum::IntoEnumIterator;
 use tracing::info; // You must bring the trait into scope
 
+#[derive(Debug)]
 /// SourceRouter with hybrid intent detection: keywords + fallback LLM classification
 pub struct SourceRouter {
     ollama: Ollama,
