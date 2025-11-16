@@ -191,6 +191,7 @@ dependencies = [
  "async-trait",
  "axum 0.7.9",
  "chrono",
+ "clap",
  "env_logger",
  "futures",
  "opentelemetry",

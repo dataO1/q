@@ -135,7 +135,7 @@ postgres_url = "postgresql://localhost/test_db"
 fn test_get_agent_config() {
     let mut config = SystemConfig::default();
     config.orchestrator.agents.push(ai_agent_common::config::AgentConfig {
-        name: "test_agent".to_string(),
+        id: "test_agent".to_string(),
         model: "test_model".to_string(),
         system_prompt: "test prompt".to_string(),
         temperature: 0.5,

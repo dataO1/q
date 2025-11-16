@@ -8,8 +8,6 @@ use strum_macros::Display;
 use schemars::JsonSchema;
 use derive_builder::Builder;
 
-// pub type NetworkAgentResult<T> = anyhow::Result<T, AgentNetworkError>;
-
 /// Unique identifier for tasks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TaskId(pub Uuid);
@@ -365,6 +363,39 @@ pub enum ErrorRecoveryStrategy {
     /// Abort the entire workflow
     #[serde(rename = "abort")]
     Abort,
+}
+
+impl ErrorRecoveryStrategy {
+    /// Check if this recovery strategy allows retries
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, Self::Retry { .. })
+    }
+
+    /// Check if this strategy escalates to human
+    pub fn escalates_to_human(&self) -> bool {
+        matches!(self, Self::EscalateToHuman)
+    }
+
+    /// Check if this strategy switches agents
+    pub fn switches_agent(&self) -> bool {
+        matches!(self, Self::SwitchAgent { .. })
+    }
+
+    /// Get the backup agent ID if this is a SwitchAgent strategy
+    pub fn get_backup_agent_id(&self) -> Option<&str> {
+        match self {
+            Self::SwitchAgent { backup_agent_id } => Some(backup_agent_id),
+            _ => None,
+        }
+    }
+
+    /// Get retry parameters if this is a Retry strategy
+    pub fn get_retry_params(&self) -> Option<(usize, u64)> {
+        match self {
+            Self::Retry { max_attempts, backoff_ms } => Some((*max_attempts, *backoff_ms)),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for ErrorRecoveryStrategy {

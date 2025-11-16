@@ -1,6 +1,6 @@
 //! Agent-Network: Dynamic multi-agent orchestration framework
 //!
-//! This crate provides a DAG-based multi-agent orchestration system with:
+//! A DAG-based multi-agent orchestration system providing:
 //! - Dynamic workflow generation using petgraph
 //! - Wave-based parallel execution with dependency resolution
 //! - HITL (Human-in-the-loop) integration
@@ -8,6 +8,8 @@
 //! - Smart RAG and history context injection
 //! - Real-time status streaming
 
+// Module declarations
+pub mod error;
 pub mod orchestrator;
 pub mod workflow;
 pub mod agents;
@@ -21,14 +23,19 @@ pub mod status_stream;
 pub mod token_budget;
 pub mod tracing_setup;
 pub mod acp;
-pub mod error;
 
-// Re-exports
+// Public re-exports for convenience
+pub use error::{AgentNetworkError};
 pub use orchestrator::Orchestrator;
-pub use workflow::{WorkflowBuilder, WorkflowExecutor};
-pub use agents::{Agent, AgentType};
-pub use status_stream::StatusEvent;
+pub use workflow::{WorkflowBuilder, WorkflowExecutor, WorkflowGraph, TaskNode, TaskResult};
+pub use agents::{Agent, AgentType, AgentResponse};
+pub use status_stream::{StatusEvent, StatusEventType};
 
-use ai_agent_common::*;
+// Version constant
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub type OllamaModel = rig::providers::ollama::CompletionModel<reqwest::Client>;
+/// Initialize the agent-network library with defaults
+pub async fn initialize() -> anyhow::Result<()> {
+    tracing::info!("Initializing agent-network v{}", VERSION);
+    Ok(())
+}
