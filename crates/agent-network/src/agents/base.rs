@@ -4,25 +4,107 @@
 //! along with context types for passing information to agents.
 
 use async_trait::async_trait;
+use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, MessageRole}, parameters::{FormatType, JsonStructure}}, Ollama};
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info, instrument};
 use std::collections::HashMap;
+use schemars::JsonSchema;
+use anyhow::{Context, Result};
 
 use crate::{agents::AgentResult, error::AgentNetworkResult};
 
-/// Core Agent trait - all agents must implement this
+/// Marker trait for all structured agent outputs
+pub trait StructuredOutput:
+    Serialize + for<'de> Deserialize<'de> + JsonSchema + Send + Sync
+{
+}
+
+impl<T> StructuredOutput for T where
+    T: Serialize + for<'de> Deserialize<'de> + JsonSchema + Send + Sync
+{
+}
+
+// Keep your original trait for internal use with associated types
+#[async_trait]
+pub trait TypedAgent: Send + Sync {
+    type Output: StructuredOutput;
+
+    fn id(&self) -> &str;
+    fn agent_type(&self) -> AgentType;
+    fn system_prompt(&self) -> &str;
+    fn model(&self) -> &str;
+    fn temperature(&self) -> f32;
+    fn client(&self) -> &Ollama;
+    fn build_prompt(&self, context: &AgentContext) -> String;
+
+    // async fn execute_typed(&self, context: AgentContext) -> Result<Self::Output>{}
+}
+
+// Create a dyn-compatible trait without associated types
 #[async_trait]
 pub trait Agent: Send + Sync {
-    /// Execute agent task with given context
-    async fn execute(&self, context: AgentContext) -> AgentNetworkResult<AgentResult>;
-
-    /// Get agent identifier
     fn id(&self) -> &str;
-
-    /// Get agent type
     fn agent_type(&self) -> AgentType;
+    fn system_prompt(&self) -> &str;
+    fn model(&self) -> &str;
+    fn temperature(&self) -> f32;
+    fn client(&self) -> &Ollama;
+    fn build_prompt(&self, context: &AgentContext) -> String;
 
-    /// Get agent description
-    fn description(&self) -> &str;
+    // Return the JSON schema dynamically
+    fn output_schema(&self) -> JsonStructure;
+
+    // Execute with type-erased result
+    async fn execute(&self, context: AgentContext) -> Result<AgentResult>;
+}
+
+// Blanket implementation: any TypedAgent automatically becomes an Agent
+#[async_trait]
+impl<T: TypedAgent> Agent for T {
+    fn id(&self) -> &str { TypedAgent::id(self) }
+    fn agent_type(&self) -> AgentType { TypedAgent::agent_type(self) }
+    fn system_prompt(&self) -> &str { TypedAgent::system_prompt(self) }
+    fn model(&self) -> &str { TypedAgent::model(self) }
+    fn temperature(&self) -> f32 { TypedAgent::temperature(self) }
+    fn client(&self) -> &Ollama { TypedAgent::client(self) }
+    fn build_prompt(&self, context: &AgentContext) -> String {
+        TypedAgent::build_prompt(self, context)
+    }
+
+    fn output_schema(&self) -> JsonStructure {
+        JsonStructure::new::<T::Output>()
+    }
+
+    #[instrument(skip(self, context), fields(agent_id = %self.id()))]
+    async fn execute(&self, context: AgentContext) -> Result<AgentResult> {
+        let prompt_text = self.build_prompt(&context);
+        let client = self.client();
+
+        let messages = vec![
+            ChatMessage {
+                role: MessageRole::System,
+                content: self.system_prompt().to_string(),
+                tool_calls: vec![],
+                images: None,
+                thinking: None,
+            },
+            ChatMessage {
+                role: MessageRole::User,
+                content: prompt_text,
+                tool_calls: vec![],
+                images: None,
+                thinking: None,
+            },
+        ];
+
+        let json_structure = self.output_schema();
+        let request = ChatMessageRequest::new(self.model().to_string(), messages)
+            .format(FormatType::StructuredJson(Box::new(json_structure)));
+
+        let response = client.send_chat_messages(request).await?;
+        AgentResult::from_response(self.id(),response)
+            .context("Failed to create agent result")
+    }
 }
 
 /// Agent type classification
@@ -216,7 +298,7 @@ mod tests {
 
     #[test]
     fn test_agent_result_builder() {
-        let result = AgentResult::new("agent-1".to_string(), "output".to_string())
+        let result = AgentResult::from_response("agent-1", serde_json::from_str("output").unwrap()).unwrap()
             .with_confidence(0.95)
             .with_tokens(500)
             .requiring_hitl();

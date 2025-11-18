@@ -3,25 +3,30 @@
 //! The coding agent specializes in generating, reviewing, and refactoring code.
 //! It integrates with Rig for LLM calls and supports local Ollama models.
 
-use crate::{ agents::{Agent, AgentContext, AgentResult, AgentType}, error::AgentNetworkResult};
+use crate::{ agents::{base::TypedAgent, Agent, AgentContext, AgentResult, AgentType}, error::AgentNetworkResult};
 use async_trait::async_trait;
+use ollama_rs::Ollama;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, info, instrument};
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CodingOutput {
+    pub code: String,
+    pub language: String,
+    pub explanation: String,
+    pub tests: Option<String>,
+    #[serde(default)]
+    pub dependencies: Vec<String>,
+}
 
 /// Coding agent for code generation and review
 pub struct CodingAgent {
-    /// Unique agent identifier
     id: String,
-
-    /// LLM model name (e.g., "qwen2.5-coder:32b")
     model: String,
-
-    /// System prompt for the agent
+    client: Ollama,
     system_prompt: String,
-
-    /// Temperature for responses (0.0-2.0)
     temperature: f32,
-
-    /// Maximum tokens for output
     max_tokens: usize,
 }
 
@@ -33,11 +38,15 @@ impl CodingAgent {
         system_prompt: String,
         temperature: f32,
         max_tokens: usize,
+        ollama_host: &str,
+        ollama_port: u16,
     ) -> Self {
+        let client = Ollama::new(ollama_host, ollama_port);
         Self {
             id,
-            model,
+            client,
             system_prompt,
+            model,
             temperature: temperature.clamp(0.0, 2.0),
             max_tokens,
         }
@@ -96,123 +105,36 @@ impl CodingAgent {
 }
 
 #[async_trait]
-impl Agent for CodingAgent {
-    #[instrument(skip(self, context), fields(agent_id = %self.id, task_id = %context.task_id))]
-    async fn execute(&self, context: AgentContext) -> AgentNetworkResult<AgentResult> {
-        info!("Coding agent executing task: {}", context.task_id);
+impl TypedAgent for CodingAgent {
+    fn id(&self) -> &str { &self.id }
+    fn agent_type(&self) -> AgentType { AgentType::Coding }
+    fn system_prompt(&self) -> &str { &self.system_prompt }
+    fn model(&self) -> &str { &self.model }
+    fn temperature(&self) -> f32 { self.temperature }
+    fn client(&self) -> &Ollama { &self.client }
+    type Output = CodingOutput;
 
-        let prompt = self.build_prompt(&context);
-        debug!("Prompt length: {} characters", prompt.len());
+    fn build_prompt(&self, context: &AgentContext) -> String {
+        let mut parts = vec![format!("# Coding Task: {}", context.description)];
 
-        // TODO: Week 3 - Integrate with Rig framework
-        // - Connect to local Ollama instance
-        // - Send prompt with system message
-        // - Stream response
-        // - Parse output
+        if let Some(ref rag) = context.rag_context {
+            parts.push(format!("\n## Code Context:\n{}", rag));
+        }
 
-        // Placeholder implementation
-        let output = format!(
-            "```rust\n// Implementation for: {}\nfn solution() {{\n    // TODO: implement\n}}\n```\n\n\
-             Analysis: Task requires code generation.\n\
-             Implementation: Generated placeholder code structure.\n\
-             Explanation: Code is structured to follow Rust best practices.",
-            context.description
-        );
+        if let Some(ref hist) = context.history_context {
+            parts.push(format!("\n## History:\n{}", hist));
+        }
 
-        let confidence = self.estimate_confidence(&output);
+        // if !context.dependency_outputs.is_empty() {
+        //     parts.push("\n## Previous Outputs:".to_string());
+        //     for (id, out) in &context.dependency_outputs {
+        //         parts.push(format!("- {}: {}", id, out));
+        //     }
+        // }
 
-        Ok(AgentResult::new(self.id.clone(), output.clone())
-            .with_confidence(confidence)
-            .with_tokens(estimate_tokens(&prompt, &output)))
-    }
+        parts.push("\n## Instructions:".to_string());
+        parts.push("Generate production-ready code with explanations.".to_string());
 
-    fn id(&self) -> &str {
-        &self.id
-    }
-
-    fn agent_type(&self) -> AgentType {
-        AgentType::Coding
-    }
-
-    fn description(&self) -> &str {
-        "Expert Rust coding agent for implementation and code review"
-    }
-}
-
-/// Estimate tokens for given text
-fn estimate_tokens(prompt: &str, output: &str) -> usize {
-    // Rough estimate: 1 token ≈ 4 characters
-    // Add 10% buffer for tokenization inefficiency
-    ((prompt.len() + output.len()) / 4) + ((prompt.len() + output.len()) / 40)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_coding_agent_creation() {
-        let agent = CodingAgent::new(
-            "coding-1".to_string(),
-            "qwen2.5-coder:32b".to_string(),
-            "You are a Rust expert".to_string(),
-            0.7,
-            4096,
-        );
-
-        assert_eq!(agent.id(), "coding-1");
-        assert_eq!(agent.agent_type(), AgentType::Coding);
-    }
-
-    #[test]
-    fn test_temperature_clamping() {
-        let agent = CodingAgent::new(
-            "test".to_string(),
-            "model".to_string(),
-            "prompt".to_string(),
-            3.0, // Should clamp to 2.0
-            1024,
-        );
-
-        assert_eq!(agent.temperature, 2.0);
-    }
-
-    #[test]
-    fn test_confidence_estimation() {
-        let agent = CodingAgent::new(
-            "test".to_string(),
-            "model".to_string(),
-            "prompt".to_string(),
-            0.7,
-            1024,
-        );
-
-        let output_with_code = "```rust\nfn test() {}\n```\nExplanation: This is a test function.";
-        let confidence = agent.estimate_confidence(output_with_code);
-        assert!(confidence > 0.7);
-
-        let output_minimal = "test";
-        let confidence_low = agent.estimate_confidence(output_minimal);
-        assert!(confidence_low < 0.7);
-    }
-
-    #[tokio::test]
-    async fn test_execute_placeholder() {
-        let agent = CodingAgent::new(
-            "coding-1".to_string(),
-            "model".to_string(),
-            "You are helpful".to_string(),
-            0.7,
-            4096,
-        );
-
-        let context = AgentContext::new("task-1".to_string(), "Write a binary search function".to_string());
-
-        let result = agent.execute(context).await;
-        assert!(result.is_ok());
-
-        let result = result.unwrap();
-        assert_eq!(result.agent_id, "coding-1");
-        assert!(!result.output.is_empty());
+        parts.join("\n")
     }
 }

@@ -1,257 +1,148 @@
-//! Planning agent for task decomposition
+//! Coding agent implementation using Rig LLM framework
 //!
-//! The planning agent breaks down complex queries into executable subtasks
-//! and generates execution strategies.
+//! The coding agent specializes in generating, reviewing, and refactoring code.
+//! It integrates with Rig for LLM calls and supports local Ollama models.
 
-use crate::{agents::{Agent, AgentContext, AgentResult, AgentType}, error::AgentNetworkResult};
+use crate::{ agents::{base::TypedAgent, Agent, AgentContext, AgentResult, AgentType}, error::AgentNetworkResult};
 use async_trait::async_trait;
+use ollama_rs::Ollama;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, instrument};
 
-/// Planning agent for strategic decomposition
+/// Planning task structured output
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PlanningOutput {
+    pub subtasks: Vec<Subtask>,
+    pub reasoning: String,
+    pub complexity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Subtask {
+    pub id: String,
+    pub description: String,
+    pub agent_type: String,
+    #[serde(default)]
+    pub dependencies: Vec<String>,
+    pub priority: u8,
+}
+
+/// Coding agent for code generation and review
 pub struct PlanningAgent {
     id: String,
     model: String,
+    client: Ollama,
     system_prompt: String,
     temperature: f32,
     max_tokens: usize,
 }
 
 impl PlanningAgent {
-    /// Create a new planning agent
+    /// Create a new coding agent
     pub fn new(
         id: String,
         model: String,
         system_prompt: String,
         temperature: f32,
         max_tokens: usize,
+        ollama_host: &str,
+        ollama_port: u16,
     ) -> Self {
+        let client = Ollama::new(ollama_host, ollama_port);
         Self {
             id,
-            model,
+            client,
             system_prompt,
+            model,
             temperature: temperature.clamp(0.0, 2.0),
             max_tokens,
         }
     }
 
-    /// Parse plan output into structured tasks
-    fn parse_plan(&self, output: &str) -> Vec<PlanStep> {
-        let mut steps = vec![];
-        let mut current_step = 1;
+    /// Build the prompt for the LLM
+    fn build_prompt(&self, context: &AgentContext) -> String {
+        let mut prompt = format!("Task ID: {}\n\n", context.task_id);
+        prompt.push_str(&format!("Task: {}\n\n", context.description));
 
-        for line in output.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
+        if !context.tool_results.is_empty() {
+            prompt.push_str("## Available Information\n");
+            for tool_result in &context.tool_results {
+                if tool_result.success {
+                    prompt.push_str(&format!("From {}: {}\n", tool_result.tool_name, tool_result.output));
+                }
             }
-
-            // Match patterns like "1.", "Step 1:", "- ", etc.
-            if trimmed.starts_with(char::is_numeric) && (trimmed.contains('.') || trimmed.contains(':')) {
-                let content = if let Some(idx) = trimmed.find('.') {
-                    &trimmed[idx + 1..]
-                } else if let Some(idx) = trimmed.find(':') {
-                    &trimmed[idx + 1..]
-                } else {
-                    trimmed
-                };
-
-                steps.push(PlanStep {
-                    order: current_step,
-                    description: content.trim().to_string(),
-                    dependencies: vec![],
-                });
-
-                current_step += 1;
-            } else if trimmed.starts_with('-') || trimmed.starts_with('*') {
-                let content = trimmed.trim_start_matches(|c: char| c == '-' || c == '*' || c.is_whitespace());
-                steps.push(PlanStep {
-                    order: current_step,
-                    description: content.to_string(),
-                    dependencies: vec![],
-                });
-
-                current_step += 1;
-            }
+            prompt.push_str("\n");
         }
 
-        steps
-    }
-}
+        if let Some(rag_context) = &context.rag_context {
+            prompt.push_str("## Relevant Code Examples\n");
+            prompt.push_str(rag_context);
+            prompt.push_str("\n\n");
+        }
 
-/// Represents a single planning step
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanStep {
-    pub order: usize,
-    pub description: String,
-    pub dependencies: Vec<usize>,
+        prompt.push_str("Please provide your response in the following format:\n");
+        prompt.push_str("1. Analysis\n");
+        prompt.push_str("2. Implementation\n");
+        prompt.push_str("3. Explanation\n");
+
+        prompt
+    }
+
+    /// Estimate confidence based on prompt characteristics
+    fn estimate_confidence(&self, output: &str) -> f32 {
+        let has_code = output.contains("```") || output.contains("fn ");
+        let is_complete = output.len() > 200;
+        let has_explanation = output.to_lowercase().contains("explanation")
+            || output.to_lowercase().contains("why")
+            || output.to_lowercase().contains("because");
+
+        let mut confidence: f32 = 0.6;
+        if has_code {
+            confidence += 0.2;
+        }
+        if is_complete {
+            confidence += 0.1;
+        }
+        if has_explanation {
+            confidence += 0.1;
+        }
+
+        confidence.min(0.99)
+    }
 }
 
 #[async_trait]
-impl Agent for PlanningAgent {
-    #[instrument(skip(self, context), fields(agent_id = %self.id, task_id = %context.task_id))]
-    async fn execute(&self, context: AgentContext) -> AgentNetworkResult<AgentResult> {
-        info!("Planning agent executing task: {}", context.task_id);
+impl TypedAgent for PlanningAgent {
+    fn id(&self) -> &str { &self.id }
+    fn agent_type(&self) -> AgentType { AgentType::Planning}
+    fn system_prompt(&self) -> &str { &self.system_prompt }
+    fn model(&self) -> &str { &self.model }
+    fn temperature(&self) -> f32 { self.temperature }
+    fn client(&self) -> &Ollama { &self.client }
+    type Output = PlanningOutput;
 
-        let prompt = format!(
-            "Please break down this task into clear, sequential steps:\n\n{}\n\n\
-             Format each step as a numbered list with:\n\
-             1. Clear action\n\
-             2. Expected outcome\n\
-             3. Any dependencies",
-            context.description
-        );
+    fn build_prompt(&self, context: &AgentContext) -> String {
+        let mut parts = vec![format!("# Planning Task: {}", context.description)];
 
-        debug!("Planning prompt: {}", prompt);
+        if let Some(ref rag) = context.rag_context {
+            parts.push(format!("\n## Code Context:\n{}", rag));
+        }
 
-        // TODO: Week 3 - Integrate with Rig framework
-        // - Call LLM with planning prompt
-        // - Parse structured response
-        // - Extract task dependencies
+        if let Some(ref hist) = context.history_context {
+            parts.push(format!("\n## History:\n{}", hist));
+        }
 
-        let output = format!(
-            "Plan for: {}\n\n\
-             1. Analyze requirements\n\
-             2. Design solution\n\
-             3. Implement\n\
-             4. Test\n\
-             5. Review and refactor\n\n\
-             Each step has clear dependencies on the previous step.",
-            context.description
-        );
+        // if !context.dependency_outputs.is_empty() {
+        //     parts.push("\n## Previous Outputs:".to_string());
+        //     for (id, out) in &context.dependency_outputs {
+        //         parts.push(format!("- {}: {}", id, out));
+        //     }
+        // }
 
-        let plan_steps = self.parse_plan(&output);
-        let confidence = if plan_steps.len() >= 3 { 0.85 } else { 0.6 };
+        parts.push("\n## Instructions:".to_string());
+        parts.push("Generate production-ready code with explanations.".to_string());
 
-        Ok(AgentResult::new(self.id.clone(), output)
-            .with_confidence(confidence)
-            .with_reasoning(format!("Generated {} plan steps", plan_steps.len())))
-    }
-
-    fn id(&self) -> &str {
-        &self.id
-    }
-
-    fn agent_type(&self) -> AgentType {
-        AgentType::Planning
-    }
-
-    fn description(&self) -> &str {
-        "Strategic planning agent for task decomposition and analysis"
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_planning_agent_creation() {
-        let agent = PlanningAgent::new(
-            "planning-1".to_string(),
-            "qwen2.5:14b".to_string(),
-            "You are a strategic planner".to_string(),
-            0.8,
-            2048,
-        );
-
-        assert_eq!(agent.id(), "planning-1");
-        assert_eq!(agent.agent_type(), AgentType::Planning);
-    }
-
-    #[test]
-    fn test_parse_numbered_list() {
-        let agent = PlanningAgent::new(
-            "test".to_string(),
-            "model".to_string(),
-            "prompt".to_string(),
-            0.8,
-            1024,
-        );
-
-        let output = "1. First step\n2. Second step\n3. Third step";
-        let steps = agent.parse_plan(output);
-
-        assert_eq!(steps.len(), 3);
-        assert_eq!(steps[0].order, 1);
-        assert_eq!(steps[0].description, "First step");
-        assert_eq!(steps[1].order, 2);
-        assert_eq!(steps[1].description, "Second step");
-    }
-
-    #[test]
-    fn test_parse_bullet_list() {
-        let agent = PlanningAgent::new(
-            "test".to_string(),
-            "model".to_string(),
-            "prompt".to_string(),
-            0.8,
-            1024,
-        );
-
-        let output = "- First item\n- Second item\n- Third item";
-        let steps = agent.parse_plan(output);
-
-        assert_eq!(steps.len(), 3);
-        assert_eq!(steps[0].order, 1);
-        assert_eq!(steps[0].description, "First item");
-    }
-
-    #[test]
-    fn test_parse_mixed_format() {
-        let agent = PlanningAgent::new(
-            "test".to_string(),
-            "model".to_string(),
-            "prompt".to_string(),
-            0.8,
-            1024,
-        );
-
-        let output = "Step 1: Analysis\nStep 2: Design\n3. Implementation";
-        let steps = agent.parse_plan(output);
-
-        assert_eq!(steps.len(), 3);
-        assert_eq!(steps[0].description, "Analysis");
-        assert_eq!(steps[2].description, "Implementation");
-    }
-
-    #[test]
-    fn test_parse_empty_input() {
-        let agent = PlanningAgent::new(
-            "test".to_string(),
-            "model".to_string(),
-            "prompt".to_string(),
-            0.8,
-            1024,
-        );
-
-        let output = "";
-        let steps = agent.parse_plan(output);
-
-        assert_eq!(steps.len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_execute_placeholder() {
-        let agent = PlanningAgent::new(
-            "planning-1".to_string(),
-            "model".to_string(),
-            "You are helpful".to_string(),
-            0.8,
-            2048,
-        );
-
-        let context = AgentContext::new(
-            "task-1".to_string(),
-            "Build a web server".to_string(),
-        );
-
-        let result = agent.execute(context).await;
-        assert!(result.is_ok());
-
-        let result = result.unwrap();
-        assert_eq!(result.agent_id, "planning-1");
-        assert!(!result.output.is_empty());
-        assert!(result.confidence > 0.5);
+        parts.join("\n")
     }
 }

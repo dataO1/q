@@ -1,21 +1,40 @@
-//! Quality evaluation agent for output assessment
+//! Coding agent implementation using Rig LLM framework
+//!
+//! The coding agent specializes in generating, reviewing, and refactoring code.
+//! It integrates with Rig for LLM calls and supports local Ollama models.
 
-use crate::{agents::{Agent, AgentContext, AgentResult, AgentType}, error::AgentNetworkResult};
+use crate::{ agents::{base::TypedAgent, Agent, AgentContext, AgentResult, AgentType}, error::AgentNetworkResult};
 use ai_agent_common::QualityStrategy;
 use async_trait::async_trait;
-use tracing::{info, instrument};
+use ollama_rs::Ollama;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use tracing::{debug, info, instrument};
 
-#[derive(Debug, Clone)]
+/// Evaluator structured output
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct EvaluatorOutput {
+    pub score: f32,
+    #[serde(default)]
+    pub issues: Vec<String>,
+    #[serde(default)]
+    pub suggestions: Vec<String>,
+    pub summary: String,
+}
+
+/// Coding agent for code generation and review
 pub struct EvaluatorAgent {
     id: String,
     model: String,
+    client: Ollama,
     system_prompt: String,
     temperature: f32,
     max_tokens: usize,
-    quality_strategy: QualityStrategy,
+    quality_strategy: QualityStrategy
 }
 
 impl EvaluatorAgent {
+    /// Create a new coding agent
     pub fn new(
         id: String,
         model: String,
@@ -23,106 +42,104 @@ impl EvaluatorAgent {
         temperature: f32,
         max_tokens: usize,
         quality_strategy: QualityStrategy,
+        ollama_host: &str,
+        ollama_port: u16,
     ) -> Self {
+        let client = Ollama::new(ollama_host, ollama_port);
         Self {
             id,
-            model,
+            client,
             system_prompt,
+            quality_strategy,
+            model,
             temperature: temperature.clamp(0.0, 2.0),
             max_tokens,
-            quality_strategy,
         }
     }
 
-    pub async fn evaluate_output(&self, output: &str, criteria: &str) -> AgentNetworkResult<EvaluationResult> {
-        let score = if output.len() > 100 && !output.is_empty() { 0.9 } else { 0.5 };
+    /// Build the prompt for the LLM
+    fn build_prompt(&self, context: &AgentContext) -> String {
+        let mut prompt = format!("Task ID: {}\n\n", context.task_id);
+        prompt.push_str(&format!("Task: {}\n\n", context.description));
 
-        Ok(EvaluationResult {
-            passed: score >= 0.7,
-            score,
-            feedback: None,
-        })
+        if !context.tool_results.is_empty() {
+            prompt.push_str("## Available Information\n");
+            for tool_result in &context.tool_results {
+                if tool_result.success {
+                    prompt.push_str(&format!("From {}: {}\n", tool_result.tool_name, tool_result.output));
+                }
+            }
+            prompt.push_str("\n");
+        }
+
+        if let Some(rag_context) = &context.rag_context {
+            prompt.push_str("## Relevant Code Examples\n");
+            prompt.push_str(rag_context);
+            prompt.push_str("\n\n");
+        }
+
+        prompt.push_str("Please provide your response in the following format:\n");
+        prompt.push_str("1. Analysis\n");
+        prompt.push_str("2. Implementation\n");
+        prompt.push_str("3. Explanation\n");
+
+        prompt
     }
-}
 
-#[derive(Debug, Clone)]
-pub struct EvaluationResult {
-    pub passed: bool,
-    pub score: f32,
-    pub feedback: Option<String>,
+    /// Estimate confidence based on prompt characteristics
+    fn estimate_confidence(&self, output: &str) -> f32 {
+        let has_code = output.contains("```") || output.contains("fn ");
+        let is_complete = output.len() > 200;
+        let has_explanation = output.to_lowercase().contains("explanation")
+            || output.to_lowercase().contains("why")
+            || output.to_lowercase().contains("because");
+
+        let mut confidence: f32 = 0.6;
+        if has_code {
+            confidence += 0.2;
+        }
+        if is_complete {
+            confidence += 0.1;
+        }
+        if has_explanation {
+            confidence += 0.1;
+        }
+
+        confidence.min(0.99)
+    }
 }
 
 #[async_trait]
-impl Agent for EvaluatorAgent {
-    #[instrument(skip(self, context))]
-    async fn execute(&self, context: AgentContext) -> AgentNetworkResult<AgentResult> {
-        info!("Evaluator executing task: {}", context.task_id);
+impl TypedAgent for EvaluatorAgent {
+    fn id(&self) -> &str { &self.id }
+    fn agent_type(&self) -> AgentType { AgentType::Evaluator }
+    fn system_prompt(&self) -> &str { &self.system_prompt }
+    fn model(&self) -> &str { &self.model }
+    fn temperature(&self) -> f32 { self.temperature }
+    fn client(&self) -> &Ollama { &self.client }
+    type Output = EvaluatorOutput;
 
-        let output = "Quality assessment: Output meets standards.\nScore: 0.85".to_string();
-        let mut result = AgentResult::new(self.id.clone(), output)
-            .with_confidence(0.9);
+    fn build_prompt(&self, context: &AgentContext) -> String {
+        let mut parts = vec![format!("# Evaluator Task: {}", context.description)];
 
-        // Check if this task requires HITL based on quality strategy
-        match self.quality_strategy {
-            QualityStrategy::Always => {
-                result = result.requiring_hitl();
-            }
-            QualityStrategy::OnlyForCritical => {
-                // Check if task is critical based on context
-                if context.metadata.get("critical").map(|s| s.as_str()) == Some("true") {
-                    result = result.requiring_hitl();
-                }
-            }
-            QualityStrategy::AfterNIterations(n) => {
-                // Check iteration count from metadata
-                if let Some(iter_str) = context.metadata.get("iteration") {
-                    if let Ok(iter) = iter_str.parse::<usize>() {
-                        if iter >= n {
-                            result = result.requiring_hitl();
-                        }
-                    }
-                }
-            }
-            QualityStrategy::Never => {}
+        if let Some(ref rag) = context.rag_context {
+            parts.push(format!("\n## Code Context:\n{}", rag));
         }
 
-        Ok(result)
-    }
+        if let Some(ref hist) = context.history_context {
+            parts.push(format!("\n## History:\n{}", hist));
+        }
 
-    fn id(&self) -> &str {
-        &self.id
-    }
+        // if !context.dependency_outputs.is_empty() {
+        //     parts.push("\n## Previous Outputs:".to_string());
+        //     for (id, out) in &context.dependency_outputs {
+        //         parts.push(format!("- {}: {}", id, out));
+        //     }
+        // }
 
-    fn agent_type(&self) -> AgentType {
-        AgentType::Evaluator
-    }
+        parts.push("\n## Instructions:".to_string());
+        parts.push("Generate production-ready code with explanations.".to_string());
 
-    fn description(&self) -> &str {
-        "Quality assurance expert for output evaluation"
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_evaluator_agent() {
-        let agent = EvaluatorAgent::new(
-            "evaluator-1".to_string(),
-            "model".to_string(),
-            "prompt".to_string(),
-            0.3,
-            1024,
-            QualityStrategy::Always,
-        );
-
-        let context = AgentContext::new(
-            "task-1".to_string(),
-            "Evaluate code quality".to_string(),
-        );
-
-        let result = agent.execute(context).await;
-        assert!(result.is_ok());
+        parts.join("\n")
     }
 }

@@ -443,7 +443,7 @@ async fn execute_single_task(
             if let Some(provider) = context_provider.as_ref() {
                 if let Err(e) = provider.store_exchange(
                     task.description,
-                    result.output.clone(),
+                    serde_json::to_string(&result.output)?,
                     conversation_id
                 ).await {
                     warn!("Failed to store exchange in history: {}", e);
@@ -452,12 +452,12 @@ async fn execute_single_task(
             Ok(TaskResult {
                 task_id: task.task_id.clone(),
                 success: true,
-                output: Some(result.output),
+                output: Some(serde_json::to_string(&result.output)?),
                 error: None,
             })
         }
         Err(e) => {
-            Err(e)
+            Err(AgentNetworkError::AgentExecutionFailed{agent_id: agent.id().to_string(), reason:e.to_string()})
         }
     }
 }
@@ -534,10 +534,10 @@ async fn execute_task_with_retry(
                         // Get agent for type information
                         if let Some(agent) = agent_pool.get_agent(&task.agent_id) {
 
-                            let agent_result = crate::agents::AgentResult::new(
-                                task.agent_id.clone(),
-                                task_result.output.clone().unwrap_or_default(),
-                            )
+                            let agent_result = crate::agents::AgentResult::from_string(
+                                &task.agent_id.clone(),
+                                task_result.clone().output.unwrap_or_default().as_ref(),
+                            )?
                             .with_confidence(0.8); // Should come from actual agent result
 
                             let assessment = RiskAssessment::new(

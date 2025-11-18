@@ -17,7 +17,7 @@ async-trait = "*"
 petgraph = "*"
 
 # LLM integration
-rig-core = {version = "*", features=["reqwest-rustls"]}
+ollama-rs = "*"
 
 # Serialization
 serde = { version = "*", features = ["derive"] }
@@ -64,6 +64,7 @@ opentelemetry-otlp = { version = "*", features = ["tonic", "trace", "metrics"] }
 opentelemetry-semantic-conventions = "*"
 once_cell = "*"
 derive_more = {version = "*", features = ["display"]}
+schemars = "*"
 
 # opentelemetry-jaeger = "0.17.0"
 

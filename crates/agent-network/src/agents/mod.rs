@@ -12,18 +12,21 @@ pub mod writing;
 pub use base::{Agent, AgentContext,  AgentType, ToolResult, ConversationMessage};
 pub use coding::CodingAgent;
 pub use evaluator::EvaluatorAgent;
-pub use planning::{PlanningAgent, PlanStep};
+use ollama_rs::generation::chat::ChatMessageResponse;
+pub use planning::{PlanningAgent};
 pub use pool::{AgentPool, PoolStatistics};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 pub use writing::WritingAgent;
 
 /// Result from agent execution
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentResult {
     /// Agent that produced this result
     pub agent_id: String,
 
     /// The actual output/response
-    pub output: String,
+    pub output: Value,
 
     /// Confidence score (0.0 - 1.0)
     pub confidence: f32,
@@ -40,15 +43,29 @@ pub struct AgentResult {
 
 impl AgentResult {
     /// Create new agent result
-    pub fn new(agent_id: String, output: String) -> Self {
-        Self {
-            agent_id,
+    pub fn from_response(agent_id: &str, response: ChatMessageResponse) -> anyhow::Result<Self> {
+        let output = serde_json::from_str(&response.message.content)?;
+        Ok(Self {
+            agent_id: agent_id.to_string(),
             output,
             confidence: 0.8,
             requires_hitl: false,
             tokens_used: None,
             reasoning: None,
-        }
+        })
+    }
+
+    /// Create new agent result
+    pub fn from_string(agent_id: &str, input: &str) -> anyhow::Result<Self> {
+        let output: Value = serde_json::from_str(input)?;
+        Ok(Self {
+            agent_id: agent_id.to_string(),
+            output,
+            confidence: 0.8,
+            requires_hitl: false,
+            tokens_used: None,
+            reasoning: None,
+        })
     }
 
     /// Set confidence score

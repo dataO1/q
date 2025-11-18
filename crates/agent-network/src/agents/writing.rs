@@ -2,9 +2,22 @@
 //!
 //! Generates documentation, commit messages, and communication.
 
-use crate::{agents::{Agent, AgentContext, AgentResult, AgentType}, error::AgentNetworkResult};
+use crate::{agents::{base::TypedAgent, Agent, AgentContext, AgentResult, AgentType}, error::AgentNetworkResult};
 use async_trait::async_trait;
+use ollama_rs::Ollama;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use tracing::{info, instrument};
+
+/// Writing task structured output
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct WritingOutput {
+    pub content: String,
+    pub format: String,
+    pub word_count: usize,
+    #[serde(default)]
+    pub topics: Vec<String>,
+}
 
 pub struct WritingAgent {
     id: String,
@@ -12,20 +25,26 @@ pub struct WritingAgent {
     system_prompt: String,
     temperature: f32,
     max_tokens: usize,
+    client: Ollama,
 }
 
 impl WritingAgent {
+    /// Create a new coding agent
     pub fn new(
         id: String,
         model: String,
         system_prompt: String,
         temperature: f32,
         max_tokens: usize,
+        ollama_host: &str,
+        ollama_port: u16,
     ) -> Self {
+        let client = Ollama::new(ollama_host, ollama_port);
         Self {
             id,
-            model,
+            client,
             system_prompt,
+            model,
             temperature: temperature.clamp(0.0, 2.0),
             max_tokens,
         }
@@ -33,57 +52,36 @@ impl WritingAgent {
 }
 
 #[async_trait]
-impl Agent for WritingAgent {
-    #[instrument(skip(self, context))]
-    async fn execute(&self, context: AgentContext) -> AgentNetworkResult<AgentResult> {
-        info!("Writing agent executing task: {}", context.task_id);
+impl TypedAgent for WritingAgent {
+    fn id(&self) -> &str { &self.id }
+    fn agent_type(&self) -> AgentType { AgentType::Writing }
+    fn system_prompt(&self) -> &str { &self.system_prompt }
+    fn model(&self) -> &str { &self.model }
+    fn temperature(&self) -> f32 { self.temperature }
+    fn client(&self) -> &Ollama { &self.client }
+    type Output = WritingOutput;
 
-        let output = format!(
-            "# Documentation: {}\n\n\
-             ## Overview\n{}\n\n\
-             ## Details\nProviding comprehensive documentation.\n\n\
-             ## Usage\nInstructions for usage.",
-            context.task_id,
-            context.description
-        );
+    fn build_prompt(&self, context: &AgentContext) -> String {
+        let mut parts = vec![format!("# Writing Task: {}", context.description)];
 
-        Ok(AgentResult::new(self.id.clone(), output)
-            .with_confidence(0.85))
-    }
+        if let Some(ref rag) = context.rag_context {
+            parts.push(format!("\n## RAG Context:\n{}", rag));
+        }
 
-    fn id(&self) -> &str {
-        &self.id
-    }
+        if let Some(ref hist) = context.history_context {
+            parts.push(format!("\n## History:\n{}", hist));
+        }
 
-    fn agent_type(&self) -> AgentType {
-        AgentType::Writing
-    }
+        // if !context.dependency_outputs.is_empty() {
+        //     parts.push("\n## Previous Outputs:".to_string());
+        //     for (id, out) in &context.dependency_outputs {
+        //         parts.push(format!("- {}: {}", id, out));
+        //     }
+        // }
 
-    fn description(&self) -> &str {
-        "Technical writing expert for documentation and communication"
-    }
-}
+        parts.push("\n## Instructions:".to_string());
+        parts.push("Write me about this:".to_string());
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_writing_agent() {
-        let agent = WritingAgent::new(
-            "writing-1".to_string(),
-            "model".to_string(),
-            "prompt".to_string(),
-            0.7,
-            2048,
-        );
-
-        let context = AgentContext::new(
-            "task-1".to_string(),
-            "Write module documentation".to_string(),
-        );
-
-        let result = agent.execute(context).await;
-        assert!(result.is_ok());
+        parts.join("\n")
     }
 }
