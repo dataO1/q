@@ -8,7 +8,7 @@ pub mod queue;
 
 use std::collections::HashMap;
 
-use ai_agent_common::RiskLevel;
+use ai_agent_common::{AgentType, RiskLevel};
 pub use assessor::*;
 pub use audit::*;
 pub use queue::*;
@@ -16,7 +16,7 @@ pub use queue::*;
 use serde::{Deserialize, Serialize};
 use anyhow::Result;
 
-use crate::{AgentResult, AgentType};
+use crate::AgentResult;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HitlRequest {

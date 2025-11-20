@@ -9,7 +9,7 @@ pub mod planning;
 pub mod pool;
 pub mod writing;
 
-pub use base::{Agent, AgentContext,  AgentType, ToolResult, ConversationMessage};
+pub use base::{Agent, AgentContext, ToolResult, ConversationMessage};
 pub use coding::CodingAgent;
 pub use evaluator::EvaluatorAgent;
 use ollama_rs::generation::chat::ChatMessageResponse;
@@ -17,6 +17,7 @@ pub use planning::{PlanningAgent};
 pub use pool::{AgentPool, PoolStatistics};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use anyhow::{anyhow, Context, Result};
 pub use writing::WritingAgent;
 
 /// Result from agent execution
@@ -66,6 +67,18 @@ impl AgentResult {
             tokens_used: None,
             reasoning: None,
         })
+    }
+
+    /// Extract typed output from the JSON Value
+    ///
+    /// This deserializes the stored JSON output into any type T
+    /// that implements Deserialize
+    pub fn extract<T>(&self) -> Result<T>
+    where
+        T: for<'de> Deserialize<'de>,
+    {
+        serde_json::from_value(self.output.clone())
+            .context("Failed to deserialize agent output into requested type")
     }
 
     /// Set confidence score

@@ -3,7 +3,7 @@ use tracing::{info, warn};
 use std::{fs, path::PathBuf};
 use anyhow::{Context, anyhow};
 
-use crate::{ErrorRecoveryStrategy, HitlMode,QualityStrategy};
+use crate::{AgentType, ErrorRecoveryStrategy, HitlMode, QualityStrategy};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemConfig {
@@ -208,7 +208,7 @@ impl AgentNetworkConfig {
     }
 
     /// Get agents by type
-    pub fn get_agents_by_type(&self, agent_type: &str) -> Vec<&AgentConfig> {
+    pub fn get_agents_by_type(&self, agent_type: AgentType) -> Vec<&AgentConfig> {
         self.agents
             .iter()
             .filter(|a| a.agent_type == agent_type)
@@ -216,9 +216,9 @@ impl AgentNetworkConfig {
     }
 
     /// Get all available agent types
-    pub fn available_agent_types(&self) -> Vec<String> {
+    pub fn available_agent_types(&self) -> Vec<AgentType> {
         let mut types: Vec<_> = self.agents.iter().map(|a| a.agent_type.clone()).collect();
-        types.sort();
+        // types.sort();
         types.dedup();
         types
     }
@@ -246,7 +246,7 @@ pub struct AgentConfig {
     pub id: String,
 
     /// Agent type (coding, planning, writing, evaluator)
-    pub agent_type: String,
+    pub agent_type: AgentType,
 
     /// LLM model identifier (e.g., "qwen2.5-coder:32b")
     pub model: String,
@@ -290,9 +290,9 @@ impl AgentConfig {
             return Err(anyhow!("Agent ID cannot be empty".to_string()));
         }
 
-        if self.agent_type.is_empty() {
-            return Err(anyhow!("Agent {} type cannot be empty", self.id));
-        }
+        // if self.agent_type.is_empty() {
+        //     return Err(anyhow!("Agent {} type cannot be empty", self.id));
+        // }
 
         if self.model.is_empty() {
             return Err(anyhow!("Agent {} model cannot be empty", self.id));

@@ -42,36 +42,36 @@ dependency_boost = 0.8
 
 [[agent_network.agents]]
 id = "coding-1"
-agent_type = "coding"
-model = "qwen2.5-coder:32b"
+agent_type = "Coding"
+model = "qwen2.5-coder:3b"  # Down from 32b → 90% smaller
 temperature = 0.7
 max_tokens = 4096
 system_prompt = """You are an expert coding assistant.
-You write clean, idiomatic Rust code following best practices.
+You write clean, idiomatic code following best practices.
 Always consider error handling and type safety."""
 
 [[agent_network.agents]]
 id = "planning-1"
-agent_type = "planning"
-model = "qwen2.5:14b"
+agent_type = "Planning"
+model = "qwen2.5:1.5b"  # Down from 14b → 89% smaller
 temperature = 0.8
 max_tokens = 2048
 system_prompt = """You are a planning agent that decomposes complex tasks.
 Break down tasks into logical steps with clear dependencies."""
 
-[[agent_network.agents]]
-id = "writing-1"
-agent_type = "writing"
-model = "qwen2.5:14b"
-temperature = 0.7
-max_tokens = 2048
-system_prompt = """You are a technical writing assistant.
-Generate clear documentation and commit messages."""
+# [[agent_network.agents]]
+# id = "writing-1"
+# agent_type = "Writing"
+# model = "phi3.5:3.8b"  # Alternative: Microsoft's efficient model
+# temperature = 0.7
+# max_tokens = 2048
+# system_prompt = """You are a technical writing assistant.
+# Generate clear documentation and commit messages."""
 
 [[agent_network.agents]]
 id = "evaluator-1"
-agent_type = "evaluator"
-model = "qwen2.5:14b"
+agent_type = "Evaluator"
+model = "gemma2:2b"  # Google's compact, high-quality model
 temperature = 0.3
 max_tokens = 1024
 system_prompt = """You are a code reviewer and quality evaluator.

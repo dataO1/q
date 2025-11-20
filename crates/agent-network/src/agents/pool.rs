@@ -5,12 +5,12 @@
 
 use crate::agents::{
     coding::CodingAgent, evaluator::EvaluatorAgent, planning::PlanningAgent,
-    writing::WritingAgent, Agent, AgentType,
+    writing::WritingAgent, Agent,
 };
 use crate::error::{AgentNetworkError, AgentNetworkResult};
 use std::collections::HashMap;
 use std::sync::Arc;
-use ai_agent_common::{AgentConfig, QualityStrategy};
+use ai_agent_common::{AgentConfig, AgentType, QualityStrategy};
 use tracing::{debug, info};
 
 /// Agent pool managing all available agents
@@ -19,47 +19,47 @@ pub struct AgentPool {
     agents: HashMap<String, Arc<dyn Agent>>,
 
     /// Index of agents by type for quick lookup
-    agents_by_type: HashMap<String, Vec<String>>,
+    agents_by_type: HashMap<AgentType, Vec<String>>,
 }
 
 impl AgentPool {
     /// Create a new agent pool from configurations
     pub async fn new(configs: &[AgentConfig]) -> AgentNetworkResult<Self> {
         let mut agents: HashMap<String, Arc<dyn Agent>> = HashMap::new();
-        let mut agents_by_type: HashMap<String, Vec<String>> = HashMap::new();
+        let mut agents_by_type: HashMap<AgentType, Vec<String>> = HashMap::new();
 
         for config in configs {
             debug!("Initializing agent: {} ({})", config.id, config.agent_type);
 
-            let agent: Arc<dyn Agent> = match config.agent_type.as_str() {
-                "coding" => Arc::new(CodingAgent::new(
+            let agent: Arc<dyn Agent> = match config.agent_type {
+                AgentType::Coding => Arc::new(CodingAgent::new(
                     config.id.clone(),
                     config.model.clone(),
                     config.system_prompt.clone(),
                     config.temperature,
                     config.max_tokens,
-                    "https://localhost",
+                    "http://localhost",
                     11434
                 )),
-                "planning" => Arc::new(PlanningAgent::new(
+                AgentType::Planning => Arc::new(PlanningAgent::new(
                     config.id.clone(),
                     config.model.clone(),
                     config.system_prompt.clone(),
                     config.temperature,
                     config.max_tokens,
-                    "https://localhost",
+                    "http://localhost",
                     11434
                 )),
-                "writing" => Arc::new(WritingAgent::new(
-                    config.id.clone(),
-                    config.model.clone(),
-                    config.system_prompt.clone(),
-                    config.temperature,
-                    config.max_tokens,
-                    "https://localhost",
-                    11434
-                )),
-                "evaluator" => {
+                // AgentType::Writing => Arc::new(WritingAgent::new(
+                //     config.id.clone(),
+                //     config.model.clone(),
+                //     config.system_prompt.clone(),
+                //     config.temperature,
+                //     config.max_tokens,
+                //     "http://localhost",
+                //     11434
+                // )),
+                AgentType::Evaluator => {
                     let quality_strategy = config
                         .quality_strategy
                         .unwrap_or(QualityStrategy::OnlyForCritical);
@@ -71,7 +71,7 @@ impl AgentPool {
                         config.temperature,
                         config.max_tokens,
                         quality_strategy,
-                        "https://localhost",
+                        "http://localhost",
                         11434
                     ))
                 }
@@ -111,15 +111,8 @@ impl AgentPool {
 
     /// Get all agents of a specific type
     pub fn get_agents_by_type(&self, agent_type: AgentType) -> Vec<Arc<dyn Agent>> {
-        let type_str = match agent_type {
-            AgentType::Coding => "coding",
-            AgentType::Planning => "planning",
-            AgentType::Writing => "writing",
-            AgentType::Evaluator => "evaluator",
-        };
-
         self.agents_by_type
-            .get(type_str)
+            .get(&agent_type)
             .cloned()
             .unwrap_or_default()
             .iter()
@@ -154,7 +147,7 @@ impl AgentPool {
 
     /// Get statistics about the pool
     pub fn statistics(&self) -> PoolStatistics {
-        let mut stats_by_type: HashMap<String, usize> = HashMap::new();
+        let mut stats_by_type: HashMap<AgentType, usize> = HashMap::new();
 
         for (type_str, ids) in &self.agents_by_type {
             stats_by_type.insert(type_str.clone(), ids.len());
@@ -171,7 +164,7 @@ impl AgentPool {
 #[derive(Debug, Clone)]
 pub struct PoolStatistics {
     pub total_agents: usize,
-    pub agents_by_type: HashMap<String, usize>,
+    pub agents_by_type: HashMap<AgentType, usize>,
 }
 
 #[cfg(test)]
@@ -183,7 +176,7 @@ mod tests {
         let configs = vec![
             AgentConfig {
                 id: "coding-1".to_string(),
-                agent_type: "coding".to_string(),
+                agent_type: AgentType::Coding,
                 model: "model".to_string(),
                 temperature: 0.7,
                 max_tokens: 4096,
@@ -209,7 +202,7 @@ mod tests {
         let configs = vec![
             AgentConfig {
                 id: "coding-1".to_string(),
-                agent_type: "coding".to_string(),
+                agent_type: AgentType::Coding,
                 model: "model".to_string(),
                 temperature: 0.7,
                 max_tokens: 4096,

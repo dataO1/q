@@ -6,25 +6,30 @@
 //! - Generates dynamic DAG workflows
 //! - Manages agent execution
 //! - Handles error recovery and HITL integration
+use derive_more::Display;
 use petgraph::dot::Dot;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use tracing::{info, debug, error, instrument, span, Level};
+use crate::agents::planning::TaskDecompositionPlan;
 use crate::error::{AgentNetworkError, AgentNetworkResult};
 use crate::hitl::{AuditLogger, ConsoleApprovalHandler, DefaultApprovalQueue};
 use crate::workflow::{
     DependencyType, TaskNode, TaskResult, WorkflowBuilder, WorkflowExecutor, WorkflowGraph,
 };
-use crate::agents::AgentPool;
+use crate::agents::{AgentContext, AgentPool, Agent};
 use crate::status_stream::StatusStream;
 use crate::sharedcontext::SharedContext;
 use crate::coordination::CoordinationManager;
 use crate::filelocks::FileLockManager;
 use ai_agent_common::llm::EmbeddingClient;
-use ai_agent_common::{AgentNetworkConfig, ConversationId, ErrorRecoveryStrategy, ProjectScope, SystemConfig};
+use ai_agent_common::{AgentConfig, AgentNetworkConfig, AgentType, ConversationId, ErrorRecoveryStrategy, ProjectScope, SystemConfig};
 use ai_agent_history::HistoryManager;
 use ai_agent_rag::SmartMultiSourceRag;
 use petgraph::algo::toposort;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -57,30 +62,88 @@ pub struct Orchestrator {
     embedding_client: Arc<EmbeddingClient>,
 }
 
+// Context for the decomposition step to be  better
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectContext {
+    /// Project name and description
+    pub project_name: String,
+    pub description: Option<String>,
+
+    /// Primary programming languages
+    pub languages: Vec<String>,
+
+    /// Main frameworks/technologies
+    pub frameworks: Vec<String>,
+
+    /// Project structure overview
+    pub directory_structure: String,  // e.g., "src/, tests/, docs/"
+
+    /// Key files and their purposes
+    pub key_files: Vec<KeyFile>,
+
+    /// Active development areas
+    pub active_areas: Vec<String>,
+
+    /// Known constraints or requirements
+    pub constraints: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyFile {
+    pub path: String,
+    pub purpose: String,  // e.g., "Main entry point", "Core business logic"
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DecompositionInput {
+    /// The user's query/goal
+    pub query: String,
+
+    /// Analyzed complexity and metadata
+    pub analysis: QueryAnalysis,
+
+    /// Available agent types and their capabilities
+    pub available_agents: Vec<AgentCapability>,
+
+    /// Project context (files, dependencies, etc.)
+    pub project_context: Option<String>,
+
+    /// RAG-retrieved relevant examples
+    pub example_decompositions: Option<Vec<String>>,
+}
+
 /// Represents a decomposed task for a single agent
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Display)]
+#[display("TaskID: {}, AgentID: {}, Description: {}, Dependencies: {:?}, HITL: {}, recovery_strategy: {}", id, agent_id, description, dependencies, requires_hitl, recovery_strategy)]
 pub struct DecomposedTask {
     pub id: String,
     pub agent_id: String,
     pub description: String,
-    pub dependencies: Vec<String>,
-    pub priority: u32,
+    pub dependencies: Vec<AgentCapability>,
     pub requires_hitl: bool,
     pub recovery_strategy: ErrorRecoveryStrategy,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Display)]
+#[display("AgentType: {}, Description: {}, Capabilities:{:?}", agent_type, description,capabilities)]
+pub struct AgentCapability {
+    pub agent_type: AgentType,
+    pub description: String,
+    pub capabilities: Vec<String>,
+}
+
 /// Query analysis result
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Display)]
+#[display("Query: {}, Complexity: {}, HITL:{}, Estimated Tokens:{}",query, complexity, requires_hitl, estimated_tokens)]
 pub struct QueryAnalysis {
     pub query: String,
     pub complexity: Complexity,
-    pub suggested_agent_types: Vec<String>,
     pub requires_hitl: bool,
     pub estimated_tokens: usize,
 }
 
 /// Complexity levels
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema, Display)]
 pub enum Complexity {
     Trivial = 0,
     Simple = 1,
@@ -154,7 +217,7 @@ impl Orchestrator {
         debug!("Query analysis: {:?}", analysis);
 
         // Step 2: Decompose into tasks
-        let tasks = self.decompose_query(&analysis).await?;
+        let tasks = self.decompose_query(&project_scope, &conversation_id, &analysis).await?;
         info!("Decomposed query into {} tasks", tasks.len());
 
         // Step 3: Build workflow DAG
@@ -178,7 +241,6 @@ impl Orchestrator {
 
         // Heuristic analysis (can be enhanced with LLM later)
         let complexity = self.estimate_complexity(query);
-        let suggested_agents = self.suggest_agent_types(query);
         let estimated_tokens = (query.len() / 4) + 200; // Rough estimate
 
         let requires_hitl = complexity >= Complexity::Complex;
@@ -186,7 +248,6 @@ impl Orchestrator {
         Ok(QueryAnalysis {
             query: query.to_string(),
             complexity,
-            suggested_agent_types: suggested_agents,
             requires_hitl,
             estimated_tokens,
         })
@@ -206,133 +267,118 @@ impl Orchestrator {
         }
     }
 
-    /// Suggest which agent types should handle this query
-    fn suggest_agent_types(&self, query: &str) -> Vec<String> {
-        let mut suggested = vec![];
-        let query_lower = query.to_lowercase();
 
-        if query_lower.contains("implement")
-            || query_lower.contains("code")
-            || query_lower.contains("write")
-        {
-            suggested.push("coding".to_string());
-        }
+    /// LLM-driven task decomposition using Planning Agent
+    #[instrument(skip(self, analysis, project_scope, conversation_id))]
+    async fn decompose_query(&self,
+        project_scope: &ProjectScope,
+        conversation_id: &ConversationId,
+        analysis: &QueryAnalysis) -> Result<Vec<DecomposedTask>> {
+        info!("Decomposing query using LLM planning agent: {}", analysis);
 
-        if query_lower.contains("plan")
-            || query_lower.contains("design")
-            || query_lower.contains("break")
-        {
-            suggested.push("planning".to_string());
-        }
+        // Get planning agent from pool
+        let planning_agent = self.agent_pool
+            .get_agent_by_type(AgentType::Planning)
+            .ok_or_else(|| AgentNetworkError::orchestration("No planning agent available"))?;
 
-        if query_lower.contains("document")
-            || query_lower.contains("comment")
-            || query_lower.contains("describe")
-        {
-            suggested.push("writing".to_string());
-        }
+        // Prepare decomposition input
+        let available_agents: Vec<AgentCapability> = self.agent_pool
+            .list_agent_ids()
+            .iter()
+            .map(|agent_id| {
+                let agent = self.agent_pool.get_agent(agent_id).unwrap();
+                AgentCapability {
+                    agent_type: agent.agent_type(),
+                    description: format!("{} agent", agent.system_prompt()),
+                    capabilities: vec![/* agent-specific capabilities */],
+                }
+            })
+            .collect();
 
-        if suggested.is_empty() {
-            // Default to available agent types
-            suggested = self.config.available_agent_types();
-        }
+        info!("Available agents: {:?}", available_agents);
 
-        suggested
+        let decomposition_input = DecompositionInput {
+            query: analysis.query.clone(),
+            analysis: analysis.clone(),
+            available_agents,
+            project_context: None, // TODO: add ProjectContext
+            example_decompositions: None, // Could add RAG examples here
+        };
+
+        let description = format!(
+                "Generate a task decomposition plant with a list of Subtasks for the following task:\n\n{}",
+                serde_json::to_string_pretty(&decomposition_input)?
+            );
+
+        // Build agent context for planning
+        let planning_context = AgentContext::new(
+            planning_agent.id().into(),
+            AgentType::Planning,
+            format!("{}-{}",planning_agent.agent_type(), Uuid::new_v4()),
+            description,
+            project_scope.clone(),
+            conversation_id.clone()
+        );
+
+        info!("Planning Context: {}",planning_context);
+
+        // Execute planning agent with extractor for structured output
+        let result = planning_agent.execute(planning_context).await?;
+
+        // Extract the structured plan
+        let plan: TaskDecompositionPlan = result.extract()?;
+
+        info!(
+            "LLM generated {} subtasks with reasoning: {}",
+            plan.subtasks.len(),
+            plan.reasoning
+        );
+
+        // Convert LLM output to DecomposedTask format
+        let tasks: Vec<DecomposedTask> = plan.subtasks
+            .into_iter()
+            .map(|subtask| {
+                let agent: &AgentConfig = self.config
+                    .get_agents_by_type(subtask.agent_type)
+                    .first()
+                    .ok_or_else(|| AgentNetworkError::orchestration(
+                        format!("No agent of type '{}' available", subtask.agent_type)
+                    ))?
+                    .clone();
+
+                Ok(DecomposedTask {
+                    id: format!("{}-{}",subtask.agent_type, Uuid::new_v4()),
+                    agent_id: agent.id.clone(),
+                    description: subtask.description,
+                    dependencies: subtask.dependencies,
+                    requires_hitl: subtask.requires_approval || plan.requires_hitl,
+                    recovery_strategy: agent.effective_recovery_strategy()
+                            .unwrap_or(ErrorRecoveryStrategy::Retry {
+                                max_attempts: 3,
+                                backoff_ms: 1000,
+                            }),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        info!(
+            "LLM generated {} decomposed tasks: {:?}",
+            tasks.len(),
+            tasks
+        );
+
+        Ok(tasks)
     }
 
-    /// Decompose query into executable tasks
-    #[instrument(skip(self, analysis))]
-    async fn decompose_query(&self, analysis: &QueryAnalysis) -> Result<Vec<DecomposedTask>> {
-        debug!("Decomposing query into tasks");
-
-        let mut tasks = vec![];
-
-        // Simple decomposition strategy based on complexity
-        match analysis.complexity {
-            Complexity::Trivial | Complexity::Simple => {
-                // Single task
-                let agent_type = analysis
-                    .suggested_agent_types
-                    .first()
-                    .cloned()
-                    .ok_or_else(|| AgentNetworkError::orchestration(
-                        "No suitable agent type found",
-                    ))?;
-
-                let agent = self.config
-                    .get_agents_by_type(&agent_type)
-                    .first()
-                    .ok_or_else(|| AgentNetworkError::orchestration(
-                        format!("No agent of type '{}' available", agent_type),
-                    ))?.clone();
-
-                tasks.push(DecomposedTask {
-                    id: format!("task-{}", Uuid::new_v4()),
-                    agent_id: agent.id.clone(),
-                    description: analysis.query.clone(),
-                    dependencies: vec![],
-                    priority: 0,
-                    requires_hitl: analysis.requires_hitl,
-                    recovery_strategy: agent
-                        .effective_recovery_strategy()
-                        .unwrap_or_else(|| ErrorRecoveryStrategy::Retry {
-                            max_attempts: self.config.retry.max_attempts,
-                            backoff_ms: self.config.retry.backoff_ms,
-                        }),
-                });
-            }
-            Complexity::Moderate | Complexity::Complex | Complexity::VeryComplex => {
-                // Multi-step workflow: plan -> implement -> verify
-
-                // Planning phase
-                if let Some(planner) = self.config.get_agents_by_type("planning").first() {
-                    tasks.push(DecomposedTask {
-                        id: "task-plan".to_string(),
-                        agent_id: planner.id.clone(),
-                        description: format!("Plan approach for: {}", analysis.query),
-                        dependencies: vec![],
-                        priority: 10,
-                        requires_hitl: false,
-                        recovery_strategy: ErrorRecoveryStrategy::Retry {
-                            max_attempts: 3,
-                            backoff_ms: 1000,
-                        },
-                    });
-                }
-
-                // Implementation phase
-                if let Some(coder) = self.config.get_agents_by_type("coding").first() {
-                    tasks.push(DecomposedTask {
-                        id: "task-implement".to_string(),
-                        agent_id: coder.id.clone(),
-                        description: format!("Implement solution for: {}", analysis.query),
-                        dependencies: vec!["task-plan".to_string()],
-                        priority: 20,
-                        requires_hitl: analysis.requires_hitl,
-                        recovery_strategy: ErrorRecoveryStrategy::Retry {
-                            max_attempts: 3,
-                            backoff_ms: 2000,
-                        },
-                    });
-                }
-
-                // Writing/Documentation phase
-                if let Some(writer) = self.config.get_agents_by_type("writing").first() {
-                    tasks.push(DecomposedTask {
-                        id: "task-document".to_string(),
-                        agent_id: writer.id.clone(),
-                        description: "Create documentation for implementation".to_string(),
-                        dependencies: vec!["task-implement".to_string()],
-                        priority: 5,
-                        requires_hitl: false,
-                        recovery_strategy: ErrorRecoveryStrategy::Skip,
-                    });
-                }
-            }
+    fn parse_recovery_strategy(&self, strategy_str: &str) -> Result<ErrorRecoveryStrategy> {
+        match strategy_str.to_lowercase().as_str() {
+            "retry" => Ok(ErrorRecoveryStrategy::Retry {
+                max_attempts: 3,
+                backoff_ms: 1000,
+            }),
+            "skip" => Ok(ErrorRecoveryStrategy::Skip),
+            "halt" => Ok(ErrorRecoveryStrategy::Abort),
+            _ => Err(anyhow::anyhow!("Unknown recovery strategy: {}", strategy_str)),
         }
-
-        info!("Generated {} tasks", tasks.len());
-        Ok(tasks)
     }
 
     /// Build workflow DAG from decomposed tasks
@@ -359,8 +405,19 @@ impl Orchestrator {
 
         // Add dependency edges
         for task in tasks {
-            for dep_id in &task.dependencies {
-                builder.add_dependency(dep_id, &task.id, DependencyType::Sequential)?;
+            // match found agent capabilities to task id
+            for agent_cap in &task.dependencies {
+                let matching_task = tasks.iter().find(|t| {
+                    self.agent_pool()
+                        .get_agent(&t.agent_id)
+                        .map(|a| a.agent_type() == agent_cap.agent_type)
+                        .unwrap_or(false)
+                    && t.description.contains(&agent_cap.description)
+                });
+
+                if let Some(dep_task) = matching_task {
+                    builder.add_dependency(&dep_task.id, &task.id, DependencyType::Sequential)?;
+                }
             }
         }
 

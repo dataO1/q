@@ -80,6 +80,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "derive_builder 0.20.2",
+ "derive_more",
  "fastembed",
  "schemars",
  "serde",

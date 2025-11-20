@@ -1,3 +1,3 @@
 - analyze_query is still hard-coded
 - decompose_query is still hard-coded
-- all the agents are hard-coded
+- actually connect the RAG to the agents

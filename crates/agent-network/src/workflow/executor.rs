@@ -403,20 +403,13 @@ async fn execute_single_task(
         .get_agent(&task.agent_id)
         .ok_or_else(|| AgentNetworkError::Agent(format!("Agent not found: {}", task.agent_id)))?;
 
-    // Create agent context
-    let context = AgentContext {
-        task_id: task.task_id.clone(),
-        description: task.description.clone(),
-        rag_context: None,
-        history_context: None,
-        tool_results: vec![],
-        metadata: HashMap::default(),
-        conversation_history: vec![],
-    };
-
-    let mut agent_context = crate::agents::AgentContext::new(
+    let mut agent_context = AgentContext::new(
+        agent.id().to_string(),
+        agent.agent_type(),
         task.task_id.clone(),
         task.description.clone(),
+        project_scope.clone(),
+        conversation_id.clone()
     );
 
     // Retrieve and inject context if provider available

@@ -3,7 +3,8 @@
 //! The coding agent specializes in generating, reviewing, and refactoring code.
 //! It integrates with Rig for LLM calls and supports local Ollama models.
 
-use crate::{ agents::{base::TypedAgent, Agent, AgentContext, AgentResult, AgentType}, error::AgentNetworkResult};
+use crate::{ agents::{base::TypedAgent, Agent, AgentContext, AgentResult}, error::AgentNetworkResult};
+use ai_agent_common::AgentType;
 use async_trait::async_trait;
 use ollama_rs::Ollama;
 use schemars::JsonSchema;

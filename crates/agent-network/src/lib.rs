@@ -32,7 +32,7 @@ pub use tracing_setup::{init_tracing_with_level, shutdown_tracer};
 pub use error::{AgentNetworkError};
 pub use orchestrator::Orchestrator;
 pub use workflow::{WorkflowBuilder, WorkflowExecutor, WorkflowGraph, TaskNode, TaskResult};
-pub use agents::{Agent, AgentType, AgentResult};
+pub use agents::{Agent, AgentResult};
 pub use status_stream::{StatusEvent, StatusEventType};
 
 // Version constant

@@ -7,6 +7,7 @@ use strum_macros::EnumIter;
 use strum_macros::Display;
 use schemars::JsonSchema;
 use derive_builder::Builder;
+use derive_more::Display as MoreDisplay;
 
 /// Unique identifier for tasks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -67,7 +68,8 @@ pub enum CollectionTier {
 }
 
 /// Project scope information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, MoreDisplay)]
+#[display("Project Root: {}, Current File: {:?}, Language Distribution: {:?}", root, current_file, language_distribution)]
 pub struct ProjectScope {
     pub root: String,
     pub current_file: Option<PathBuf>,
@@ -85,34 +87,14 @@ impl ProjectScope{
 }
 
 
-/// Task type for routing decisions
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TaskType {
-    Coding,
-    Documentation,
-    Planning,
-    Testing,
-    Research,
-}
-
 /// Agent type enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Display, Hash)]
 pub enum AgentType {
     Orchestrator,
     Coding,
     Planning,
     Writing,
-}
-
-impl AgentType {
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Orchestrator => "orchestrator",
-            Self::Coding => "coding",
-            Self::Planning => "planning",
-            Self::Writing => "writing",
-        }
-    }
+    Evaluator,
 }
 
 /// Document retrieved from RAG
@@ -341,7 +323,7 @@ impl Default for HitlMode {
 }
 
 /// Error recovery strategy for task failures
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorRecoveryStrategy {
     /// Retry the same agent with exponential backoff

@@ -3,30 +3,47 @@
 //! The coding agent specializes in generating, reviewing, and refactoring code.
 //! It integrates with Rig for LLM calls and supports local Ollama models.
 
-use crate::{ agents::{base::TypedAgent, Agent, AgentContext, AgentResult, AgentType}, error::AgentNetworkResult};
+use crate::{ agents::{base::TypedAgent, AgentContext}, orchestrator::AgentCapability};
+use ai_agent_common::{AgentType, ErrorRecoveryStrategy};
 use async_trait::async_trait;
 use ollama_rs::Ollama;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, instrument};
 
-/// Planning task structured output
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct PlanningOutput {
-    pub subtasks: Vec<Subtask>,
+pub struct TaskDecompositionPlan {
+    /// High-level strategy/reasoning
     pub reasoning: String,
-    pub complexity: String,
+
+    /// Estimated complexity
+    pub complexity_assessment: String,
+
+    /// Ordered list of subtasks
+    pub subtasks: Vec<SubtaskSpec>,
+
+    /// Critical path tasks
+    pub critical_path: Vec<String>,
+
+    /// Whether human review is needed
+    pub requires_hitl: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct Subtask {
-    pub id: String,
+pub struct SubtaskSpec {
+    /// Human-readable description
     pub description: String,
-    pub agent_type: String,
-    #[serde(default)]
-    pub dependencies: Vec<String>,
-    pub priority: u8,
+
+    /// Agent type to execute this
+    pub agent_type: AgentType,
+
+    /// IDs of tasks that must complete first
+    pub dependencies: Vec<AgentCapability>,
+
+    /// Whether this subtask needs human approval
+    pub requires_approval: bool,
 }
+
 
 /// Coding agent for code generation and review
 pub struct PlanningAgent {
@@ -120,29 +137,22 @@ impl TypedAgent for PlanningAgent {
     fn model(&self) -> &str { &self.model }
     fn temperature(&self) -> f32 { self.temperature }
     fn client(&self) -> &Ollama { &self.client }
-    type Output = PlanningOutput;
+    type Output = TaskDecompositionPlan;
 
     fn build_prompt(&self, context: &AgentContext) -> String {
         let mut parts = vec![format!("# Planning Task: {}", context.description)];
 
         if let Some(ref rag) = context.rag_context {
-            parts.push(format!("\n## Code Context:\n{}", rag));
+            parts.push(format!("\n## RAG Context:\n{}", rag));
         }
 
         if let Some(ref hist) = context.history_context {
             parts.push(format!("\n## History:\n{}", hist));
         }
-
-        // if !context.dependency_outputs.is_empty() {
-        //     parts.push("\n## Previous Outputs:".to_string());
-        //     for (id, out) in &context.dependency_outputs {
-        //         parts.push(format!("- {}: {}", id, out));
-        //     }
-        // }
-
-        parts.push("\n## Instructions:".to_string());
-        parts.push("Generate production-ready code with explanations.".to_string());
-
+        //
+        // parts.push("\n## Instructions:".to_string());
+        // parts.push("Output a TaskDecompositionPlan with de".to_string());
+        //
         parts.join("\n")
     }
 }

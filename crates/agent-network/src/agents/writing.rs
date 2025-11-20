@@ -2,12 +2,12 @@
 //!
 //! Generates documentation, commit messages, and communication.
 
-use crate::{agents::{base::TypedAgent, Agent, AgentContext, AgentResult, AgentType}, error::AgentNetworkResult};
+use crate::{agents::{base::TypedAgent, Agent, AgentContext, AgentResult}};
+use ai_agent_common::AgentType;
 use async_trait::async_trait;
 use ollama_rs::Ollama;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tracing::{info, instrument};
 
 /// Writing task structured output
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
