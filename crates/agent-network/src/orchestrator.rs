@@ -10,8 +10,8 @@ use derive_more::Display;
 use petgraph::dot::Dot;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tracing::{info, debug, error, instrument, span, Level};
-use crate::agents::planning::TaskDecompositionPlan;
+use tracing::{debug, error, info, instrument, span, warn, Level};
+use crate::agents::planning::{SubtaskSpec, TaskDecompositionPlan};
 use crate::error::{AgentNetworkError, AgentNetworkResult};
 use crate::hitl::{AuditLogger, ConsoleApprovalHandler, DefaultApprovalQueue};
 use crate::workflow::{
@@ -33,7 +33,7 @@ use std::fmt::Display;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 /// Core Orchestrator for multi-agent coordination
 pub struct Orchestrator {
@@ -119,7 +119,7 @@ pub struct DecomposedTask {
     pub id: String,
     pub agent_id: String,
     pub description: String,
-    pub dependencies: Vec<AgentCapability>,
+    pub dependencies: Vec<String>,
     pub requires_hitl: bool,
     pub recovery_strategy: ErrorRecoveryStrategy,
 }
@@ -306,7 +306,7 @@ impl Orchestrator {
         };
 
         let description = format!(
-                "Generate a task decomposition plant with a list of Subtasks for the following task:\n\n{}",
+                "Generate a task decomposition plan with a list of Subtasks for the following task:\n\n{}",
                 serde_json::to_string_pretty(&decomposition_input)?
             );
 
@@ -333,12 +333,33 @@ impl Orchestrator {
             plan.subtasks.len(),
             plan.reasoning
         );
+        // After extracting the plan from LLM:
+        let plan: TaskDecompositionPlan = result.extract()
+            .context("Failed to extract task decomposition plan")?;
 
-        // Convert LLM output to DecomposedTask format
-        let tasks: Vec<DecomposedTask> = plan.subtasks
+        // Step 1: Create mapping from LLM task IDs to actual UUIDs
+        let mut id_mapping: HashMap<String, String> = HashMap::new();
+
+        // Step 2: First pass - generate UUIDs and build mapping
+        let task_specs_with_ids: Vec<(String, SubtaskSpec)> = plan.subtasks
             .into_iter()
             .map(|subtask| {
-                let agent: &AgentConfig = self.config
+                let actual_task_id = format!("{}-{}", subtask.agent_type, Uuid::new_v4());
+
+                // Map LLM's ID to our generated UUID
+                id_mapping.insert(subtask.id.clone(), actual_task_id.clone());
+
+                (actual_task_id, subtask)
+            })
+            .collect();
+
+        info!("ID Mapping: {:?}", id_mapping);
+
+        // Step 3: Second pass - create tasks with resolved dependencies
+        let tasks: Vec<DecomposedTask> = task_specs_with_ids
+            .into_iter()
+            .map(|(actual_task_id, subtask)| {
+                let agent = self.config
                     .get_agents_by_type(subtask.agent_type)
                     .first()
                     .ok_or_else(|| AgentNetworkError::orchestration(
@@ -346,13 +367,29 @@ impl Orchestrator {
                     ))?
                     .clone();
 
+                // Resolve dependencies: convert LLM IDs to actual UUIDs
+                let resolved_dependencies: Vec<String> = subtask.dependencies
+                    .iter()
+                    .filter_map(|llm_dep_id| {
+                        id_mapping.get(llm_dep_id).cloned().or_else(|| {
+                            warn!("Could not resolve dependency '{}' for task '{}'", llm_dep_id, actual_task_id);
+                            None
+                        })
+                    })
+                    .collect();
+
+                info!(
+                    "Task '{}': LLM deps {:?} → Resolved deps {:?}",
+                    actual_task_id, subtask.dependencies, resolved_dependencies
+                );
+
                 Ok(DecomposedTask {
-                    id: format!("{}-{}",subtask.agent_type, Uuid::new_v4()),
+                    id: actual_task_id,
                     agent_id: agent.id.clone(),
                     description: subtask.description,
-                    dependencies: subtask.dependencies,
+                    dependencies: resolved_dependencies,  // Use resolved deps
                     requires_hitl: subtask.requires_approval || plan.requires_hitl,
-                    recovery_strategy: agent.effective_recovery_strategy()
+                    recovery_strategy:  agent.effective_recovery_strategy()
                             .unwrap_or(ErrorRecoveryStrategy::Retry {
                                 max_attempts: 3,
                                 backoff_ms: 1000,
@@ -360,11 +397,6 @@ impl Orchestrator {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        info!(
-            "LLM generated {} decomposed tasks: {:?}",
-            tasks.len(),
-            tasks
-        );
 
         Ok(tasks)
     }
@@ -404,20 +436,15 @@ impl Orchestrator {
         }
 
         // Add dependency edges
-        for task in tasks {
+        for (idx, task ) in tasks.iter().enumerate() {
+            info!(
+                "Task {}: id='{}', agent_id='{}', dependencies={:?}",
+                idx, task.id, task.agent_id, task.dependencies
+            );
             // match found agent capabilities to task id
-            for agent_cap in &task.dependencies {
-                let matching_task = tasks.iter().find(|t| {
-                    self.agent_pool()
-                        .get_agent(&t.agent_id)
-                        .map(|a| a.agent_type() == agent_cap.agent_type)
-                        .unwrap_or(false)
-                    && t.description.contains(&agent_cap.description)
-                });
+            for from_id in &task.dependencies {
 
-                if let Some(dep_task) = matching_task {
-                    builder.add_dependency(&dep_task.id, &task.id, DependencyType::Sequential)?;
-                }
+                    builder.add_dependency(&from_id, &task.id, DependencyType::Sequential)?;
             }
         }
 

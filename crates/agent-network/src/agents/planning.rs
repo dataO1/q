@@ -31,6 +31,7 @@ pub struct TaskDecompositionPlan {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SubtaskSpec {
+    pub id: String,  // e.g., "task-1", "task-2"
     /// Human-readable description
     pub description: String,
 
@@ -38,7 +39,7 @@ pub struct SubtaskSpec {
     pub agent_type: AgentType,
 
     /// IDs of tasks that must complete first
-    pub dependencies: Vec<AgentCapability>,
+    pub dependencies: Vec<String>,
 
     /// Whether this subtask needs human approval
     pub requires_approval: bool,
@@ -150,9 +151,20 @@ impl TypedAgent for PlanningAgent {
             parts.push(format!("\n## History:\n{}", hist));
         }
         //
-        // parts.push("\n## Instructions:".to_string());
-        // parts.push("Output a TaskDecompositionPlan with de".to_string());
-        //
+        parts.push("\n## Instructions:".to_string());
+        parts.push("CRITICAL RULES FOR DEPENDENCIES:
+        1. The entries of a subtasks dependencies MUST match actual subtask ids and agent_type of the task you're depending on.
+        2. If a Coding task with id 'task-2' depends on a Coding task with id 'task-1' , write: 'dependencies': [ 'task-1']
+        3. If a Writing task with id 'task-8' depends on a coding task with id 'task-2' and on a Planning task with id 'task-3' , write: 'dependencies': ['task-2','task-3']".to_string());
+
+        parts.push("Example CORRECT:
+        {
+          'subtasks': [
+            {'id': 'task-1', 'agent_type': 'Coding', 'description': 'task-1's description', 'dependencies': []},
+            {'id': 'task-2', 'agent_type': 'Coding', 'description': 'task-2's description', 'dependencies': ['task-1']},
+            {'id': 'task-3', 'agent_type': 'Testing', 'description': 'task-3's description', 'dependencies': ['task-1']}
+          ]
+        }".to_string());
         parts.join("\n")
     }
 }
