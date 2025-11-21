@@ -1,121 +1,112 @@
-//! Language Server Protocol tool for code analysis
-//!
-//! Provides code completion, diagnostics, and navigation via tower-lsp.
-
-use crate::agents::ToolResult;
-use crate::error::AgentNetworkResult;
-use crate::tools::Tool;
 use async_trait::async_trait;
-use std::collections::HashMap;
+use anyhow::{anyhow, Result};
+use serde_json::{json, Value};
 use tracing::debug;
 
-/// LSP tool for code analysis
+#[derive(Debug)]
 pub struct LspTool {
     language: String,
 }
 
 impl LspTool {
-    /// Create new LSP tool
     pub fn new(language: String) -> Self {
         debug!("LspTool initialized for language: {}", language);
         Self { language }
     }
 
-    /// Get code completions
-    async fn completions(&self, _context: &str) -> AgentNetworkResult<ToolResult> {
-        // TODO: Week 4 - Integrate with tower-lsp
-        // - Connect to language server for the configured language
-        // - Send completion request with context
-        // - Parse and return completion items
+    // Placeholder implementations, replace with actual tower-lsp async client logic
 
-        Ok(ToolResult::success(
-            "lsp_completions".to_string(),
-            "Completions: [placeholder implementations]".to_string(),
-        ))
+    async fn completions(&self, context: &str) -> Result<String> {
+        // TODO: integrate tower-lsp completion request
+        Ok(format!("Completions for context: {}", &context[..context.len().min(100)]))
     }
 
-    /// Get diagnostic information
-    async fn diagnostics(&self, _code: &str) -> AgentNetworkResult<ToolResult> {
-        // TODO: Week 4 - Get diagnostics from LSP
-        Ok(ToolResult::success(
-            "lsp_diagnostics".to_string(),
-            "No diagnostics".to_string(),
-        ))
+    async fn diagnostics(&self, code: &str) -> Result<String> {
+        // TODO: get diagnostics from language server
+        Ok("No diagnostics".to_string())
     }
 
-    /// Get symbol information
-    async fn symbols(&self, _code: &str) -> AgentNetworkResult<ToolResult> {
-        // TODO: Week 4 - Extract symbols from code via LSP
-        Ok(ToolResult::success(
-            "lsp_symbols".to_string(),
-            "Symbols: [placeholder]".to_string(),
-        ))
+    async fn symbols(&self, code: &str) -> Result<String> {
+        // TODO: analyze symbols via language server
+        Ok("Symbols: [placeholder]".to_string())
     }
 
-    /// Get type information
-    async fn type_info(&self, _code: &str, _position: usize) -> AgentNetworkResult<ToolResult> {
-        // TODO: Week 4 - Get type info at position
-        Ok(ToolResult::success(
-            "lsp_type_info".to_string(),
-            "Type: unknown".to_string(),
-        ))
+    async fn type_info(&self, code: &str, position: usize) -> Result<String> {
+        // TODO: get type info at position
+        Ok(format!("Type info at position {}: unknown", position))
     }
 }
 
 #[async_trait]
-impl Tool for LspTool {
-    async fn execute(
-        &self,
-        command: &str,
-        params: HashMap<String, String>,
-    ) -> AgentNetworkResult<ToolResult> {
-        match command {
-            "completions" => {
-                let context = params.get("context").cloned().unwrap_or_default();
-                self.completions(&context).await
-            }
-            "diagnostics" => {
-                let code = params.get("code").cloned().unwrap_or_default();
-                self.diagnostics(&code).await
-            }
-            "symbols" => {
-                let code = params.get("code").cloned().unwrap_or_default();
-                self.symbols(&code).await
-            }
-            "type_info" => {
-                let code = params.get("code").cloned().unwrap_or_default();
-                let position = params
-                    .get("position")
-                    .and_then(|s| s.parse::<usize>().ok())
-                    .unwrap_or(0);
-                self.type_info(&code, position).await
-            }
-            _ => Err(crate::error::AgentNetworkError::Tool(format!(
-                "Unknown LSP command: {}",
-                command
-            ))),
-        }
-    }
-
-    fn name(&self) -> &str {
+impl crate::tools::ToolExecutor for LspTool {
+    fn name(&self) -> &'static str {
         "lsp"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Language Server Protocol tool for code analysis and completion"
     }
 
-    fn available_commands(&self) -> Vec<String> {
-        vec![
-            "completions".to_string(),
-            "diagnostics".to_string(),
-            "symbols".to_string(),
-            "type_info".to_string(),
-        ]
+    fn provide_tool_info(&self) -> ollama_rs::generation::tools::ToolInfo {
+        let parameters = json!({
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "enum": ["completions", "diagnostics", "symbols", "type_info"]
+                },
+                "context": { "type": "string", "description": "Context for completions" },
+                "code": { "type": "string", "description": "Code to analyze" },
+                "position": { "type": "integer", "description": "Cursor position for type_info" }
+            },
+            "required": ["command"]
+        });
+
+        ollama_rs::generation::tools::ToolInfo {
+            tool_type: ollama_rs::generation::tools::ToolType::Function,
+            function: ollama_rs::generation::tools::ToolFunctionInfo {
+                name: self.name().to_string(),
+                description: self.description().to_string(),
+                parameters: serde_json::from_value(parameters).unwrap(),
+            },
+        }
     }
 
-    fn validate_params(&self, _command: &str, _params: &HashMap<String, String>) -> AgentNetworkResult<()> {
-        Ok(())
+    async fn call(&mut self, parameters: Value) -> Result<String> {
+        let command = parameters.get("command")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("Missing 'command' field"))?;
+
+        match command {
+            "completions" => {
+                let context = parameters.get("context")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                self.completions(context).await
+            }
+            "diagnostics" => {
+                let code = parameters.get("code")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                self.diagnostics(code).await
+            }
+            "symbols" => {
+                let code = parameters.get("code")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                self.symbols(code).await
+            }
+            "type_info" => {
+                let code = parameters.get("code")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let position = parameters.get("position")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize;
+                self.type_info(code, position).await
+            }
+            _ => Err(anyhow!("Unknown LSP command: {}", command)),
+        }
     }
 }
 
@@ -123,10 +114,11 @@ impl Tool for LspTool {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_lsp_tool_creation() {
-        let tool = LspTool::new("rust".to_string());
-        assert_eq!(tool.name(), "lsp");
-        assert!(!tool.available_commands().is_empty());
+    #[tokio::test]
+    async fn test_lsp_tool_call() {
+        let mut tool = LspTool::new("rust".to_string());
+        let params = json!({ "command": "completions", "context": "fn main() { pri" });
+        let result = tool.call(params).await.unwrap();
+        assert!(result.contains("Completions"));
     }
 }

@@ -4,97 +4,131 @@
 //! and web scraping into agent workflows.
 
 pub mod filesystem;
-pub mod git;
+// pub mod git;
 pub mod lsp;
-pub mod web;
 
+use chrono::{DateTime, Utc};
 pub use filesystem::FilesystemTool;
-pub use git::GitTool;
+// pub use git::GitTool;
 pub use lsp::LspTool;
-// pub use web::WebTool;
 
-use crate::{agents::ToolResult, error::AgentNetworkResult};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use std::collections::HashMap;
+use ollama_rs::generation::tools::{Tool, ToolCall, ToolCallFunction, ToolFunctionInfo, ToolInfo, ToolType};
+use schemars::SchemaGenerator;
+use serde_json::Value;
+use std::{collections::HashMap, future::Future, pin::Pin};
+use futures::{FutureExt, TryFutureExt};
+use std::fmt::Debug;
 
-/// Trait for all tools that agents can use
-#[async_trait]
-pub trait Tool: Send + Sync {
-    /// Execute the tool with given parameters
-    async fn execute(&self, command: &str, params: HashMap<String, String>) -> AgentNetworkResult<ToolResult>;
-
-    /// Get tool name
-    fn name(&self) -> &str;
-
-    /// Get tool description
-    fn description(&self) -> &str;
-
-    /// Get available commands for this tool
-    fn available_commands(&self) -> Vec<String>;
-
-    /// Validate parameters before execution
-    fn validate_params(&self, command: &str, params: &HashMap<String, String>) -> AgentNetworkResult<()>;
+#[derive(Debug, Clone)]
+pub struct ToolExecution {
+    pub tool_name: String,
+    pub parameters: serde_json::Value,
+    pub result: Option<String>,
+    pub error: Option<String>,
+    pub timestamp: DateTime<Utc>,
 }
 
-/// Tool registry for managing multiple tools
+/// Trait alias to handle calling tools with erased Params type.
+/// This matches `ToolHolder` pattern in ollama_rs for dynamic dispatch.
+#[async_trait]
+pub trait ToolExecutor: Send + Sync + Debug{
+    /// Returns the tool name to identify it.
+    fn name(&self) -> &'static str;
+
+    /// Returns the tool description.
+    fn description(&self) -> &'static str;
+
+    /// Calls the tool given untyped JSON parameters.
+    async fn call(
+        &mut self,
+        parameters: Value,
+    ) -> anyhow::Result<String>;
+
+    /// Helper: returns ToolCall info for exposing to LLM (static params schema)
+    fn provide_tool_info(&self) -> ToolInfo;
+}
+
+#[derive(Debug)]
+/// ToolRegistry holds heterogeneous tool implementations behind `ToolExecutor`
 pub struct ToolRegistry {
-    tools: HashMap<String, std::sync::Arc<dyn Tool>>,
+    tools: HashMap<String, Box<dyn ToolExecutor>>,
 }
 
 impl ToolRegistry {
-    /// Create a new tool registry
+    /// Creates new empty registry
     pub fn new() -> Self {
         Self {
             tools: HashMap::new(),
         }
     }
 
-    /// Register a tool
-    pub fn register(&mut self, tool: std::sync::Arc<dyn Tool>) {
+    /// Registers a new ToolExecutor implementation
+    pub fn register(&mut self, tool: Box<dyn ToolExecutor>) {
         self.tools.insert(tool.name().to_string(), tool);
     }
 
-    /// Get a tool by name
-    pub fn get(&self, name: &str) -> Option<std::sync::Arc<dyn Tool>> {
-        self.tools.get(name).cloned()
+    /// Lookup tool executor by name
+    pub fn get(&self, name: &str) -> Option<&dyn ToolExecutor> {
+        self.tools.get(name).map(|b| &**b)
     }
 
-    /// List all registered tools
-    pub fn list(&self) -> Vec<String> {
-        self.tools.keys().cloned().collect()
+    /// Provide vector of ToolCallFunction structs for LLM prompt
+    pub fn get_tools_info(&self) -> Vec<ToolInfo> {
+        self.tools
+            .values()
+            .map(|tool| tool.provide_tool_info())
+            .collect()
     }
 
-    /// Get tool by name and execute command
-    pub async fn execute_tool(
-        &self,
-        tool_name: &str,
-        command: &str,
-        params: HashMap<String, String>,
-    ) -> AgentNetworkResult<ToolResult> {
+    /// Execute specified tool with JSON args asynchronously
+    pub async fn execute(&mut self, name: &str, args: Value) -> Result<String> {
         let tool = self
-            .get(tool_name)
-            .ok_or_else(|| crate::error::AgentNetworkError::Tool(
-                format!("Tool not found: {}", tool_name),
-            ))?;
+            .tools
+            .get_mut(name)
+            .ok_or_else(|| anyhow!("Tool '{}' not found", name))?;
 
-        tool.validate_params(command, &params)?;
-        tool.execute(command, params).await
+        tool.call(args).await
     }
 }
 
-impl Default for ToolRegistry {
-    fn default() -> Self {
-        Self::new()
+// Implement ToolExecutor for all types that implement ollama_rs::Tool
+// This automates wrapping of ollama Tool trait implementations.
+#[async_trait]
+impl<T> ToolExecutor for T
+where
+    T: Tool<Params = Value> + Send + Sync + Debug,
+{
+    fn name(&self) -> &'static str {
+        T::name()
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    fn description(&self) -> &'static str {
+        T::description()
+    }
 
-    #[test]
-    fn test_tool_registry_creation() {
-        let registry = ToolRegistry::new();
-        assert_eq!(registry.list().len(), 0);
+    async fn call(
+        &mut self,
+        parameters: Value,
+    ) -> anyhow::Result<String> {
+        // Await the future from Tool::call, map error directly
+        Tool::call(self, parameters)
+            .await
+            .map_err(|e| anyhow::Error::msg(format!("Tool error: {:?}", e)))
+    }
+
+    fn provide_tool_info(&self) -> ToolInfo {
+        let mut generator = SchemaGenerator::default();
+        let schema = <T::Params as schemars::JsonSchema>::json_schema(&mut generator);
+
+        ToolInfo {
+            tool_type: ToolType::Function,
+            function: ToolFunctionInfo {
+                name: T::name().to_string(),
+                description: T::description().to_string(),
+                parameters: schema,
+            },
+        }
     }
 }

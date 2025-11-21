@@ -169,25 +169,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "ai-agent-mcp-tools"
-version = "0.1.0"
-dependencies = [
- "ai-agent-common",
- "anyhow",
- "async-trait",
- "mcp-core",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "ai-agent-network"
 version = "0.1.0"
 dependencies = [
  "ai-agent-common",
  "ai-agent-history",
- "ai-agent-mcp-tools",
  "ai-agent-rag",
  "anyhow",
  "async-trait",
@@ -3056,23 +3042,6 @@ checksum = "8ea1f30cedd69f0a2954655f7188c6a834246d2bcf1e315e2ac40c4b24dc9519"
 dependencies = [
  "cfg-if",
  "rayon",
-]
-
-[[package]]
-name = "mcp-core"
-version = "0.1.50"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a76673446eba2d1011f0dbc3b8668984f8b1ca2754b05b9c2bcd27d02ad73aa3"
-dependencies = [
- "anyhow",
- "async-trait",
- "futures",
- "libc",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "url",
 ]
 
 [[package]]

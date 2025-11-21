@@ -6,15 +6,16 @@
 use ai_agent_common::{AgentType, ConversationId, ProjectScope};
 use async_trait::async_trait;
 use derive_more::Display;
-use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, MessageRole}, parameters::{FormatType, JsonStructure}}, Ollama};
+use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, MessageRole}, parameters::{FormatType, JsonStructure}, tools::Tool}, Ollama};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::sync::Mutex;
 use tracing::{debug, info, instrument};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use schemars::JsonSchema;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 
-use crate::{agents::AgentResult, error::AgentNetworkResult};
+use crate::{agents::AgentResult, error::AgentNetworkResult, tools::{ToolExecution, ToolRegistry}};
 
 /// Marker trait for all structured agent outputs
 pub trait StructuredOutput:
@@ -53,12 +54,23 @@ pub trait Agent: Send + Sync {
     fn temperature(&self) -> f32;
     fn client(&self) -> &Ollama;
     fn build_prompt(&self, context: &AgentContext) -> String;
+    fn build_initial_messages(&self, context: &AgentContext) -> Vec<ChatMessage>;
+
 
     // Return the JSON schema dynamically
     fn output_schema(&self) -> JsonStructure;
 
     // Execute with type-erased result
-    async fn execute(&self, context: AgentContext) -> Result<AgentResult>;
+    async fn execute(&self, context: AgentContext, tool_registry: Arc<Mutex<ToolRegistry>>) -> Result<AgentResult>;
+
+    async fn execute_react_loop(
+        &self,
+        context: AgentContext,
+        tool_registry: Arc<Mutex<ToolRegistry>>,
+    ) -> Result<AgentResult>;
+
+
+    async fn execute_single_shot(&self, context: AgentContext) -> Result<AgentResult> ;
 }
 
 // Blanket implementation: any TypedAgent automatically becomes an Agent
@@ -78,8 +90,105 @@ impl<T: TypedAgent> Agent for T {
         JsonStructure::new::<T::Output>()
     }
 
+    fn build_initial_messages(&self, context: &AgentContext) -> Vec<ChatMessage> {
+        let mut messages = Vec::new();
+
+        // 1. Add system message (agent role/instructions)
+        messages.push(ChatMessage::system(self.system_prompt().to_string()));
+
+        // 2. Add user message (the actual task/query)
+        let user_prompt = self.build_prompt(context);
+        messages.push(ChatMessage::user(user_prompt));
+
+        // 3. Optionally add RAG context as additional user or system message
+        if let Some(rag_context) = &context.rag_context {
+            messages.push(ChatMessage::user(format!(
+                "Relevant context:\n{}",
+                rag_context
+            )));
+        }
+
+        messages
+    }
+
     #[instrument(skip(self, context), fields(agent_id = %self.id()))]
-    async fn execute(&self, context: AgentContext) -> Result<AgentResult> {
+    async fn execute(&self, context: AgentContext, tool_registry: Arc<Mutex<ToolRegistry>>) -> Result<AgentResult> {
+        // Orchestrator provides tools for this specific execution
+        let tools = tool_registry.lock().await.get_tools_info(); // From context, not agent config
+
+        if tools.is_empty() {
+            // No tools → Single-shot execution
+            return self.execute_single_shot(context).await;
+        }
+
+        // Tools present → ReAct loop
+        self.execute_react_loop(context, tool_registry).await
+    }
+
+    #[instrument(skip(self, context), fields(agent_id = %self.id()))]
+    async fn execute_react_loop(
+        &self,
+        context: AgentContext,
+        tool_registry: Arc<Mutex<ToolRegistry>>,
+    ) -> Result<AgentResult> {
+        // Initialize conversation messages with system/user context
+        let mut messages = self.build_initial_messages(&context);
+
+        // Get tools info for prompt injection
+        let tools_info = tool_registry.lock().await.get_tools_info();
+
+        // Maximum allowed iterations of tool usage to avoid infinite loops
+        let max_iterations = 10;
+
+        for _iteration in 0..max_iterations {
+            // Build request including tools
+            let request = ChatMessageRequest::new(
+                self.model().to_string(),
+                messages.clone(),
+            ).tools(tools_info.clone());
+
+            // Call Ollama chat completion with current messages and tool metadata
+            let response = self.client().send_chat_messages(request).await?;
+
+            // Add LLM assistant message to conversation history
+            messages.push(response.message.clone());
+
+            // Check if LLM requested any tool calls
+            // Execute each tool call sequentially
+            for tool_call in &response.message.tool_calls {
+                // Parse JSON arguments
+                let args: serde_json::Value = tool_call.function.arguments.clone();
+
+                // Execute tool via the registry
+                let result = tool_registry.lock().await
+                    .execute(&tool_call.function.name, args)
+                    .await
+                    .map_err(|e| anyhow!("Tool '{}' execution failed: {}", &tool_call.function.name, e))?;
+
+                // Feed back tool result as a special Tool message in chat history
+                messages.push(ChatMessage::tool(result));
+            }
+
+            // After processing tool calls, continue loop for next LLM response
+
+                // No tool calls - LLM finished reasoning, extract final result
+            return AgentResult::from_response(self.id(),response)
+                .context("Failed to create agent result")
+        }
+
+        // Exceeded max iterations, likely infinite loop or error
+        Err(anyhow!("Max tool call iterations reached in ReAct loop"))
+    }
+
+    // #[instrument(skip(self, context), fields(agent_id = %self.id()))]
+    // async fn execute_single_shot(&self, context: AgentContext) -> Result<AgentResult> {
+    //     // Simple LLM call without tools
+    //     let response = self.call_llm_simple(&context).await?;
+    //     self.extract_result(response)
+    // }
+
+    #[instrument(skip(self, context), fields(agent_id = %self.id()))]
+    async fn execute_single_shot(&self, context: AgentContext) -> Result<AgentResult> {
         let prompt_text = self.build_prompt(&context);
         let client = self.client();
 
@@ -111,8 +220,8 @@ impl<T: TypedAgent> Agent for T {
 }
 
 /// Context passed to agents during execution
-#[derive(Debug, Clone, Display)]
-#[display("AgentID: {}, AgentType: {}, TaskID: {}, Description:{}, dependencies: {:?}, dependency_outputs: {:?}, rag_context: {:?}, history_context: {:?}, file_context: {:?}, tool_results: {:?}, conversation_history: {:?}, project_scope: {}, conversation_id: {}, metadata: {:?}",agent_id, agent_type, task_id, description,dependencies, dependency_outputs, rag_context, history_context, file_context, tool_results, conversation_history, project_scope, conversation_id, metadata)]
+#[derive(Debug, Display)]
+#[display("AgentID: {}, AgentType: {}, TaskID: {}, Description:{}, dependencies: {:?}, dependency_outputs: {:?}, rag_context: {:?}, history_context: {:?}, file_context: {:?}, conversation_history: {:?}, project_scope: {}, conversation_id: {}, metadata: {:?}",agent_id, agent_type, task_id, description,dependencies, dependency_outputs, rag_context, history_context, file_context, conversation_history, project_scope, conversation_id, metadata)]
 pub struct AgentContext {
     // === Agent Identification ===
     /// Which agent is executing this task
@@ -145,9 +254,8 @@ pub struct AgentContext {
     /// Relevant file paths for this task
     pub file_context: Vec<String>,
 
-    // === Tool & Execution Results ===
-    /// Results from tool executions (e.g., file reads, git ops)
-    pub tool_results: Vec<ToolResult>,
+    // NEW: Tool results from this execution (for audit)
+    pub tool_executions: Vec<ToolExecution>,
 
     // === Conversation & Scope ===
     /// Conversation history for multi-turn interactions
@@ -184,11 +292,11 @@ impl AgentContext {
             rag_context: None,
             history_context: None,
             file_context: vec![],
-            tool_results: vec![],
             conversation_history: vec![],
             project_scope,
             conversation_id,
             metadata: HashMap::new(),
+            tool_executions: vec![],
         }
     }
 
@@ -222,12 +330,6 @@ impl AgentContext {
         self
     }
 
-    /// Add tool result
-    pub fn with_tool_result(mut self, result: ToolResult) -> Self {
-        self.tool_results.push(result);
-        self
-    }
-
     /// Add metadata
     pub fn with_metadata(mut self, key: &str, value: Value) -> Self {
         self.metadata.insert(key.to_string(), value);
@@ -238,58 +340,6 @@ impl AgentContext {
     pub fn with_message(mut self, message: ConversationMessage) -> Self {
         self.conversation_history.push(message);
         self
-    }
-
-    /// Build system prompt from context
-    pub fn build_context_string(&self) -> String {
-        let mut context = String::new();
-
-        // Dependency outputs first (most important for chained tasks)
-        if !self.dependency_outputs.is_empty() {
-            context.push_str("## Previous Task Outputs\n");
-            for (task_id, output) in &self.dependency_outputs {
-                context.push_str(&format!("### {}\n", task_id));
-                context.push_str(&format!("{}\n\n", output));
-            }
-        }
-
-        if let Some(rag) = &self.rag_context {
-            context.push_str("## Retrieved Context\n");
-            context.push_str(rag);
-            context.push_str("\n\n");
-        }
-
-        if !self.file_context.is_empty() {
-            context.push_str("## Relevant Files\n");
-            for file in &self.file_context {
-                context.push_str(&format!("- {}\n", file));
-            }
-            context.push_str("\n");
-        }
-
-        if let Some(history) = &self.history_context {
-            context.push_str("## Recent History\n");
-            context.push_str(history);
-            context.push_str("\n\n");
-        }
-
-        for tool_result in &self.tool_results {
-            context.push_str(&format!("## Tool: {}\n", tool_result.tool_name));
-            context.push_str(&tool_result.output);
-            context.push_str("\n\n");
-        }
-
-        context
-    }
-
-    /// Get estimated token count for context
-    pub fn estimate_tokens(&self) -> usize {
-        let context_str = self.build_context_string();
-        let dep_tokens: usize = self.dependency_outputs.values()
-            .map(|v| v.to_string().len() / 4)
-            .sum();
-
-        (context_str.len() / 4) + (self.description.len() / 4) + dep_tokens + 100
     }
 }
 

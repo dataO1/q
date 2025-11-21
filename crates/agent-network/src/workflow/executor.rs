@@ -8,6 +8,7 @@ use opentelemetry::trace::{TraceContextExt, Span as OtelSpan};
 use opentelemetry::{global, KeyValue};
 use crate::error::{AgentNetworkError, AgentNetworkResult};
 use crate::hitl::{ApprovalRequest, AuditEvent, AuditLogger, DefaultApprovalQueue, RiskAssessment};
+use crate::tools::ToolRegistry;
 use crate::workflow::{TaskNode, TaskResult, WorkflowGraph, DependencyType};
 use crate::agents::{AgentPool, AgentContext};
 use crate::status_stream::StatusStream;
@@ -21,7 +22,7 @@ use petgraph::visit::EdgeRef;
 use std::collections::{HashMap, VecDeque, BTreeMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -171,7 +172,7 @@ impl WorkflowExecutor {
             audit_logger: Arc<AuditLogger>,
             project_scope: ProjectScope,
             conversation_id: ConversationId,
-
+            tool_registry: Arc<Mutex<ToolRegistry>>
         ) -> AgentNetworkResult<Vec<TaskResult>> {
         let start_time = Instant::now();
         info!("Starting workflow execution: {} tasks", graph.node_count());
@@ -194,7 +195,8 @@ impl WorkflowExecutor {
         // Execute waves sequentially, tasks within waves in parallel
         let mut all_results: HashMap<String, TaskResult> = HashMap::new();
 
-        for (wave_idx, wave) in waves.iter().enumerate() {
+        let mut tmp = waves.iter().enumerate().into_iter();
+        while let Some((_wave_idx, wave)) = tmp.next() {
             let wave_results = self.execute_wave_with_hitl(
                 &graph,
                 wave,
@@ -203,6 +205,7 @@ impl WorkflowExecutor {
                 Arc::clone(&audit_logger),
                 project_scope.clone(),
                 conversation_id.clone(),
+                tool_registry.clone()
             ).await?;
 
             for result in wave_results {
@@ -244,6 +247,7 @@ impl WorkflowExecutor {
         audit_logger: Arc<AuditLogger>,
         project_scope: ProjectScope,
         conversation_id: ConversationId,
+        tool_registry: Arc<Mutex<ToolRegistry>>
     ) -> AgentNetworkResult<Vec<TaskResult>> {
         debug!("Executing wave {}: {} parallel tasks", wave.wave_index, wave.task_indices.len());
         // Add OTel attributes
@@ -270,6 +274,8 @@ impl WorkflowExecutor {
 
             let project_scope = project_scope.clone();
             let conversation_id = conversation_id.clone();
+            let tool_registry = tool_registry.clone();
+
 
             let handle = tokio::spawn(async move {
                 execute_task_with_retry(
@@ -285,7 +291,8 @@ impl WorkflowExecutor {
                     max_retries,
                     wave_index,
                     project_scope,
-                    conversation_id
+                    conversation_id,
+                    tool_registry
                 )
                 .await
             });
@@ -397,6 +404,7 @@ async fn execute_single_task(
     file_locks: Arc<FileLockManager>,
     project_scope: ProjectScope,
     conversation_id: ConversationId,
+    tool_registry: Arc<Mutex<ToolRegistry>>
 ) -> AgentNetworkResult<TaskResult> {
     // Get agent
     let agent = agent_pool
@@ -430,7 +438,7 @@ async fn execute_single_task(
     }
 
     // Execute agent
-    match agent.execute(agent_context).await {
+    match agent.execute(agent_context, tool_registry).await {
         Ok(result) => {
             // Store exchange in history if provider available
             if let Some(provider) = context_provider.as_ref() {
@@ -474,6 +482,7 @@ async fn execute_task_with_retry(
     wave_index: usize,
     project_scope: ProjectScope,
     conversation_id: ConversationId,
+    tool_registry: Arc<Mutex<ToolRegistry>>
 ) -> AgentNetworkResult<TaskResult> {
 
     let cx = opentelemetry::Context::current();
@@ -511,6 +520,7 @@ async fn execute_task_with_retry(
             Arc::clone(&file_locks),
             project_scope.clone(),
             conversation_id.clone(),
+            tool_registry.clone()
         ))
         .await;
 

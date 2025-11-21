@@ -14,6 +14,7 @@ use tracing::{debug, error, info, instrument, span, warn, Level};
 use crate::agents::planning::{SubtaskSpec, TaskDecompositionPlan};
 use crate::error::{AgentNetworkError, AgentNetworkResult};
 use crate::hitl::{AuditLogger, ConsoleApprovalHandler, DefaultApprovalQueue};
+use crate::tools::{FilesystemTool, ToolRegistry};
 use crate::workflow::{
     DependencyType, TaskNode, TaskResult, WorkflowBuilder, WorkflowExecutor, WorkflowGraph,
 };
@@ -31,7 +32,7 @@ use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 use anyhow::{Context, Result};
 
@@ -60,6 +61,7 @@ pub struct Orchestrator {
     rag: Arc<SmartMultiSourceRag>,
     history_manager: Arc<RwLock<HistoryManager>>,
     embedding_client: Arc<EmbeddingClient>,
+    tool_registry: Arc<Mutex<ToolRegistry>>
 }
 
 // Context for the decomposition step to be  better
@@ -186,6 +188,7 @@ impl Orchestrator {
         let rag = SmartMultiSourceRag::new(&config,embedding_client.clone()).await?;
     // Initialize HistoryManager (if Postgres configured)
         let history_manager = Arc::new(RwLock::new(HistoryManager::new(&config.storage.postgres_url, &config.rag).await?));
+        let tool_registry = Arc::new(Mutex::new(ToolRegistry::new()));
 
         info!("Orchestrator initialized successfully");
         Ok(Self {
@@ -199,7 +202,8 @@ impl Orchestrator {
             audit_logger,
             history_manager,
             rag,
-            embedding_client
+            embedding_client,
+            tool_registry
         })
     }
 
@@ -322,8 +326,12 @@ impl Orchestrator {
 
         info!("Planning Context: {}",planning_context);
 
+        //TODO: populate with tools
+        let fs_tool = FilesystemTool::new(&project_scope.root);
+        self.tool_registry.lock().await.register(Box::new(fs_tool));
+
         // Execute planning agent with extractor for structured output
-        let result = planning_agent.execute(planning_context).await?;
+        let result = planning_agent.execute(planning_context, self.tool_registry.clone()).await?;
 
         // Extract the structured plan
         let plan: TaskDecompositionPlan = result.extract()?;
@@ -484,7 +492,7 @@ impl Orchestrator {
             Some(self.history_manager.clone()),
         );
 
-        let results = executor.execute_with_hitl(graph, self.approval_queue.clone(), self.audit_logger.clone(),project_scope, conversation_id,).await?;
+        let results = executor.execute_with_hitl(graph, self.approval_queue.clone(), self.audit_logger.clone(),project_scope, conversation_id, self.tool_registry.clone()).await?;
 
         info!("Workflow execution completed with {} results", results.len());
         Ok(results)

@@ -49,6 +49,15 @@ max_tokens = 4096
 system_prompt = """You are an expert coding assistant.
 You write clean, idiomatic code following best practices.
 Always consider error handling and type safety."""
+# Available tools this agent CAN use (pool)
+available_tools = [
+    "read_file",
+    "write_file",
+    "list_files",
+    "search_code",
+    "run_tests"
+]
+required_tools = ["read_file", "write_file"]
 
 [[agent_network.agents]]
 id = "planning-1"
@@ -58,6 +67,9 @@ temperature = 0.7
 max_tokens = 2048
 system_prompt = """You are a planning agent that decomposes complex tasks.
 Break down tasks into logical steps with clear dependencies."""
+# No tools for planning agent
+available_tools = []
+required_tools = []
 
 # [[agent_network.agents]]
 # id = "writing-1"
@@ -76,6 +88,9 @@ temperature = 0.3
 max_tokens = 1024
 system_prompt = """You are a code reviewer and quality evaluator.
 Assess outputs for correctness, quality, and best practices."""
+# Read-only tools for evaluation
+available_tools = ["read_file", "lsp"]
+required_tools = ["read_file"] # Must have this
 
 [agent_network.hitl]
 enabled = true

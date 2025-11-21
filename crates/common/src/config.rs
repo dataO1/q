@@ -281,6 +281,14 @@ pub struct AgentConfig {
     /// Metadata for agent capabilities
     #[serde(default)]
     pub capabilities: Vec<String>,
+
+    /// Required tools for the agent
+    #[serde(default)]
+    pub required_tools: Vec<String>,
+
+    /// Available tools for the agent
+    #[serde(default)]
+    pub available_tools: Vec<String>,
 }
 
 impl AgentConfig {

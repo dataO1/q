@@ -77,57 +77,6 @@ impl PlanningAgent {
             max_tokens,
         }
     }
-
-    /// Build the prompt for the LLM
-    fn build_prompt(&self, context: &AgentContext) -> String {
-        let mut prompt = format!("Task ID: {}\n\n", context.task_id);
-        prompt.push_str(&format!("Task: {}\n\n", context.description));
-
-        if !context.tool_results.is_empty() {
-            prompt.push_str("## Available Information\n");
-            for tool_result in &context.tool_results {
-                if tool_result.success {
-                    prompt.push_str(&format!("From {}: {}\n", tool_result.tool_name, tool_result.output));
-                }
-            }
-            prompt.push_str("\n");
-        }
-
-        if let Some(rag_context) = &context.rag_context {
-            prompt.push_str("## Relevant Code Examples\n");
-            prompt.push_str(rag_context);
-            prompt.push_str("\n\n");
-        }
-
-        prompt.push_str("Please provide your response in the following format:\n");
-        prompt.push_str("1. Analysis\n");
-        prompt.push_str("2. Implementation\n");
-        prompt.push_str("3. Explanation\n");
-
-        prompt
-    }
-
-    /// Estimate confidence based on prompt characteristics
-    fn estimate_confidence(&self, output: &str) -> f32 {
-        let has_code = output.contains("```") || output.contains("fn ");
-        let is_complete = output.len() > 200;
-        let has_explanation = output.to_lowercase().contains("explanation")
-            || output.to_lowercase().contains("why")
-            || output.to_lowercase().contains("because");
-
-        let mut confidence: f32 = 0.6;
-        if has_code {
-            confidence += 0.2;
-        }
-        if is_complete {
-            confidence += 0.1;
-        }
-        if has_explanation {
-            confidence += 0.1;
-        }
-
-        confidence.min(0.99)
-    }
 }
 
 #[async_trait]
