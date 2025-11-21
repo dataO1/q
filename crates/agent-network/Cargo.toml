@@ -63,7 +63,7 @@ opentelemetry-otlp = { version = "*", features = ["tonic", "trace", "metrics"] }
 opentelemetry-semantic-conventions = "*"
 once_cell = "*"
 derive_more = {version = "*", features = ["display"]}
-schemars = "*"
+schemars = { version = "*", features = ["chrono04"] }
 
 # opentelemetry-jaeger = "0.17.0"
 

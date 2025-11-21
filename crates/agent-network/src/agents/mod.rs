@@ -20,6 +20,8 @@ use serde_json::Value;
 use anyhow::{anyhow, Context, Result};
 pub use writing::WritingAgent;
 
+use crate::tools::ToolExecution;
+
 /// Result from agent execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentResult {
@@ -40,6 +42,10 @@ pub struct AgentResult {
 
     /// Reasoning or explanation
     pub reasoning: Option<String>,
+
+    // NEW: Tool results from this execution (for audit)
+    pub tool_executions: Vec<ToolExecution>,
+
 }
 
 impl AgentResult {
@@ -53,6 +59,7 @@ impl AgentResult {
             requires_hitl: false,
             tokens_used: None,
             reasoning: None,
+            tool_executions: vec![]
         })
     }
 
@@ -66,6 +73,7 @@ impl AgentResult {
             requires_hitl: false,
             tokens_used: None,
             reasoning: None,
+            tool_executions: vec![]
         })
     }
 
@@ -102,6 +110,11 @@ impl AgentResult {
     /// Set reasoning
     pub fn with_reasoning(mut self, reasoning: String) -> Self {
         self.reasoning = Some(reasoning);
+        self
+    }
+
+    pub fn with_tools_exectutions(mut self, executions: Vec<ToolExecution>) -> Self {
+        self.tool_executions.extend(executions);
         self
     }
 }

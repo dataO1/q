@@ -6,7 +6,7 @@
 use ai_agent_common::{AgentType, ConversationId, ProjectScope};
 use async_trait::async_trait;
 use derive_more::Display;
-use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, MessageRole}, parameters::{FormatType, JsonStructure}, tools::Tool}, Ollama};
+use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, ChatMessageResponse, MessageRole}, parameters::{FormatType, JsonStructure}, tools::{Tool, ToolInfo}}, Ollama};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -142,12 +142,15 @@ impl<T: TypedAgent> Agent for T {
     ) -> Result<AgentResult> {
         // Initialize conversation messages with system/user context
         let mut messages = self.build_initial_messages(&context);
+        let mut tool_executions: Vec<ToolExecution> = vec![];
 
         // Get tools info for prompt injection
         let tools_info = tool_registry.lock().await.get_tools_info();
 
         // Maximum allowed iterations of tool usage to avoid infinite loops
         let max_iterations = 10;
+
+        let mut latest_response = None;
 
         for _iteration in 0..max_iterations {
             // Build request including tools
@@ -173,23 +176,26 @@ impl<T: TypedAgent> Agent for T {
 
                 // Execute tool via the registry
                 let result = tool_registry.lock().await
-                    .execute(&tool_call.function.name, args)
-                    .await
-                    .map_err(|e| anyhow!("Tool '{}' execution failed: {}", &tool_call.function.name, e))?;
+                    .execute(&tool_call.function.name, args.clone())
+                    .await;
+                    // .map_err(|e| anyhow!("Tool '{}' execution failed: {}", &tool_call.function.name, e))?;
 
+                let tool_execution = ToolExecution::new(&tool_call.function.name, &args).with_result(&result);
+                tool_executions.push(tool_execution);
                 // Feed back tool result as a special Tool message in chat history
-                messages.push(ChatMessage::tool(result));
+                messages.push(ChatMessage::tool(result?));
             }
-
-            // After processing tool calls, continue loop for next LLM response
-
-                // No tool calls - LLM finished reasoning, extract final result
-            return AgentResult::from_response(self.id(),response)
-                .context("Failed to create agent result")
+            latest_response = Some(response);
+        };
+        match latest_response {
+            Some(response) => {
+                Ok(AgentResult::from_response(self.id(),response).context("Failed to create agent result")?.with_tools_exectutions(tool_executions))
+            },
+            None => {
+                // Exceeded max iterations, likely infinite loop or error
+                Err(anyhow!("Max tool call iterations reached in ReAct loop"))
+            }
         }
-
-        // Exceeded max iterations, likely infinite loop or error
-        Err(anyhow!("Max tool call iterations reached in ReAct loop"))
     }
 
     // #[instrument(skip(self, context), fields(agent_id = %self.id()))]
@@ -265,9 +271,7 @@ pub struct AgentContext {
 
     /// Relevant file paths for this task
     pub file_context: Vec<String>,
-
-    // NEW: Tool results from this execution (for audit)
-    pub tool_executions: Vec<ToolExecution>,
+    pub available_tools: Vec<ToolInfo>,
 
     // === Conversation & Scope ===
     /// Conversation history for multi-turn interactions
@@ -308,8 +312,14 @@ impl AgentContext {
             project_scope,
             conversation_id,
             metadata: HashMap::new(),
-            tool_executions: vec![],
+            available_tools: vec![],
         }
+    }
+
+    /// Add dependencies
+    pub fn with_tools(mut self, tools: Vec<ToolInfo>) -> Self {
+        self.available_tools = tools;
+        self
     }
 
     /// Add dependencies

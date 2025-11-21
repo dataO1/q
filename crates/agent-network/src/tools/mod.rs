@@ -15,13 +15,14 @@ pub use lsp::LspTool;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use ollama_rs::generation::tools::{Tool, ToolCall, ToolCallFunction, ToolFunctionInfo, ToolInfo, ToolType};
-use schemars::SchemaGenerator;
+use schemars::{JsonSchema, SchemaGenerator};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, future::Future, pin::Pin};
 use futures::{FutureExt, TryFutureExt};
 use std::fmt::Debug;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ToolExecution {
     pub tool_name: String,
     pub parameters: serde_json::Value,
@@ -29,6 +30,32 @@ pub struct ToolExecution {
     pub error: Option<String>,
     pub timestamp: DateTime<Utc>,
 }
+
+// Implement From<i32> for Number (an infallible conversion)
+impl ToolExecution {
+    pub fn new(name: &str, args: &Value)-> Self{
+        Self{
+            tool_name: name.to_string(),
+            parameters: args.clone(),
+            result: None,
+            error: None,
+            timestamp: Utc::now(),
+        }
+    }
+    pub fn with_result(mut self, item: &Result<String>) -> Self {
+        match item{
+            Ok(result) =>{
+                self.result = Some(result.clone());
+            },
+            Err(err) =>{
+                self.error = Some(err.to_string());
+            }
+        }
+        self.timestamp = Utc::now();
+        self
+    }
+}
+
 
 /// Trait alias to handle calling tools with erased Params type.
 /// This matches `ToolHolder` pattern in ollama_rs for dynamic dispatch.
@@ -89,7 +116,7 @@ impl ToolRegistry {
             .get_mut(name)
             .ok_or_else(|| anyhow!("Tool '{}' not found", name))?;
 
-        tool.call(args).await
+        tool.call(args.clone()).await
     }
 }
 
