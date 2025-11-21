@@ -103,10 +103,19 @@ impl<T: TypedAgent> Agent for T {
         // 3. Optionally add RAG context as additional user or system message
         if let Some(rag_context) = &context.rag_context {
             messages.push(ChatMessage::user(format!(
-                "Relevant context:\n{}",
+                "Relevant RAG context:\n{}",
                 rag_context
             )));
         }
+
+        // 3. Optionally add RAG context as additional user or system message
+        if let Some(history_context) = &context.history_context {
+            messages.push(ChatMessage::user(format!(
+                "History context:\n{}",
+                history_context
+            )));
+        }
+
 
         messages
     }
@@ -142,10 +151,13 @@ impl<T: TypedAgent> Agent for T {
 
         for _iteration in 0..max_iterations {
             // Build request including tools
+            let json_structure = self.output_schema();
             let request = ChatMessageRequest::new(
                 self.model().to_string(),
                 messages.clone(),
-            ).tools(tools_info.clone());
+            )
+                .format(FormatType::StructuredJson(Box::new(json_structure)))
+                .tools(tools_info.clone());
 
             // Call Ollama chat completion with current messages and tool metadata
             let response = self.client().send_chat_messages(request).await?;

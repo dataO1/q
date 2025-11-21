@@ -62,7 +62,7 @@ required_tools = ["read_file", "write_file"]
 [[agent_network.agents]]
 id = "planning-1"
 agent_type = "Planning"
-model = "qwen2.5:14b"  # Down from 14b → 89% smaller
+model = "qwen2.5:7b"  # Down from 14b → 89% smaller
 temperature = 0.7
 max_tokens = 2048
 system_prompt = """You are a planning agent that decomposes complex tasks.
@@ -83,7 +83,7 @@ required_tools = []
 [[agent_network.agents]]
 id = "evaluator-1"
 agent_type = "Evaluator"
-model = "gemma2:2b"  # Google's compact, high-quality model
+model = "cow/gemma2_tools:2b"  # Google's compact, high-quality model
 temperature = 0.3
 max_tokens = 1024
 system_prompt = """You are a code reviewer and quality evaluator.
