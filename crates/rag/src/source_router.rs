@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use ai_agent_common::{CollectionTier, ProjectScope, SystemConfig};
 use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, MessageRole}, parameters::{FormatType, JsonStructure}}, Ollama};
 use strum::IntoEnumIterator;
-use tracing::info; // You must bring the trait into scope
+use tracing::{debug, info, instrument}; // You must bring the trait into scope
 
 #[derive(Debug)]
 /// SourceRouter with hybrid intent detection: keywords + fallback LLM classification
@@ -23,6 +23,7 @@ impl SourceRouter {
 
     /// Fast heuristic keyword intent detection
 
+    #[instrument(skip(self), fields(query))]
     /// Fallback async Ollama LLM call for intent classification,
     /// returns vector of CollectionTiers or empty vec for unknown
     pub async fn classify_intent_llm(&self, query: &str) -> anyhow::Result<Vec<CollectionTier>> {
@@ -66,12 +67,13 @@ impl SourceRouter {
             },
         ];
 
+        debug!("Querying intent classification model [{}]: {:?}", &self.classification_model, &messages);
         let request = ChatMessageRequest::new(self.classification_model.clone(), messages)
             .format(FormatType::StructuredJson(Box::new(json_structure)));
 
         let response = self.ollama.send_chat_messages(request).await?.message.content;
 
-        info!("Classification Result: {}", response);
+        debug!("Classification Result: {}", response);
 
         // Deserialize response into your output type
         let classification_output: Vec<CollectionTier> = serde_json::from_str(&response)?;
@@ -79,6 +81,7 @@ impl SourceRouter {
         Ok(classification_output)
     }
 
+    #[instrument(skip(self), fields(user_query))]
     /// Main routing function - calls fast heuristic first,
     /// falls back to LLM classification if unsure, returns queries vec.
     pub async fn route_query(

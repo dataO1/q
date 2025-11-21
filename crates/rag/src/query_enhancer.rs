@@ -6,6 +6,7 @@ use tokenizers::pre_tokenizers::whitespace::Whitespace;
 use tokenizers::processors::template::TemplateProcessing;
 use tokenizers::{Tokenizer, models::wordpiece::WordPiece, normalizers::BertNormalizer};
 use sha2::{Digest, Sha256};
+use tracing::{debug, instrument};
 
 #[derive(Debug)]
 pub struct QueryEnhancer {
@@ -57,6 +58,7 @@ impl QueryEnhancer {
     }
 
 
+    #[instrument(skip(self), fields(raw_query))]
     /// Apply simple heuristics: synonym expansions, normalization, token filtering
     fn heuristic_expand(&self, query: &str) -> anyhow::Result<Vec<String>> {
         let mut results = Vec::new();
@@ -81,6 +83,7 @@ impl QueryEnhancer {
             .collect();
         results.push(filtered_tokens.join(" "));
 
+        debug!("Computed heuristic variants: {:?}",&results);
         Ok(results)
     }
 
@@ -116,6 +119,7 @@ impl QueryEnhancer {
         hex::encode(Sha256::digest(key_str.as_bytes()))
     }
 
+    #[instrument(skip(self), fields(raw_query))]
     /// Fully enhanced multi-source per-source query generator with layered cache including heuristics and LLM enhancement
     pub async fn enhance(
         &self,
@@ -129,14 +133,17 @@ impl QueryEnhancer {
         const HEURISTIC_VERSION: u8 = 1; // increment on heuristic changes
 
         let cache_key = self.compute_cache_key(raw_query, conversation_id,tier, project_scope, HEURISTIC_VERSION);
+        debug!("Computed cache key: {}", cache_key);
 
         // Check in-memory cache first
         if let Some(cached) = self.mem_cache.get(&cache_key).await {
+            debug!("Found in-memory cached result: {:?}", &cached);
             return Ok(cached);
         }
 
         // Check Redis cache
         if let Ok(Some(redis_cached)) = self.redis_get(&cache_key).await {
+            debug!("Found redis cached result: {:?}", &redis_cached);
             self.mem_cache.insert(cache_key.clone(), redis_cached.clone()).await;
             return Ok(redis_cached);
         }
@@ -150,9 +157,9 @@ impl QueryEnhancer {
             "Generate an enhanced search query optimized for this source:\n{:?}\n\nRaw query and heuristic variants:\n{:?}\n\nProject context:\n{:?}\nConversation ID:\n{}",
             tier, heuristic_variants, project_scope, conversation_id
         );
-
-        // Query Ollama LLM for final enhanced query
+// Query Ollama LLM for final enhanced query
         let enhanced = self.ollama_client.query(&prompt).await?;
+        debug!("LLM enhanced query: {}", &enhanced);
 
         results.append(&mut heuristic_variants);
         results.push(enhanced.clone());

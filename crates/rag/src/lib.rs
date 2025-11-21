@@ -11,6 +11,7 @@ use ai_agent_common::llm::EmbeddingClient;
 use ai_agent_storage::QdrantClient;
 use anyhow::{Context, Result};
 use futures::{Stream};
+use tracing::{debug, instrument};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -38,6 +39,7 @@ impl SmartMultiSourceRag {
         }))
     }
 
+    #[instrument(skip(self), fields(source_queries))]
     async fn enhance_queries(
         &self,
         source_queries: &HashMap<CollectionTier, String>,
@@ -59,6 +61,7 @@ impl SmartMultiSourceRag {
         Ok(enhanced_queries)
     }
 
+    #[instrument(skip(self), fields(raw_query, project_scope, conversation_id))]
     /// Runs the multi-stage priority batched streaming retrieval pipeline
     pub async fn retrieve_stream(
         self:Arc<Self>,
@@ -73,8 +76,11 @@ impl SmartMultiSourceRag {
         let source_queries = rag.source_router.route_query(&raw_query, &project_scope)
             .await.context("Source routing failed")?;
 
+        debug!("Generated source specific queries: {:?}", source_queries);
+
         // Enhance per tier (parallel, context-aware)
         let enhanced_queries = rag.enhance_queries(&source_queries, &project_scope,&conversation_id).await.context("Enhancing queries failed!")?;
+        debug!("Generated enhanced queries for source specific queries: {:?}", source_queries);
 
         // Step 3: Prepare priority-ordered streams from MultiSourceRetriever
         let prioritized_streams = rag.retriever.clone().retrieve_stream(raw_query,enhanced_queries, project_scope);

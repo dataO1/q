@@ -21,8 +21,10 @@ use serde_json::Value;
 use std::{collections::HashMap, future::Future, pin::Pin};
 use futures::{FutureExt, TryFutureExt};
 use std::fmt::Debug;
+use derive_more::Display;
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Display)]
+#[display("Name: {}, Params: {}, Result: {:?}, Error: {:?}, timestamp: {}", tool_name, parameters, result, error, timestamp)]
 pub struct ToolExecution {
     pub tool_name: String,
     pub parameters: serde_json::Value,

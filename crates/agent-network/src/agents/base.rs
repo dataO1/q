@@ -127,7 +127,7 @@ impl<T: TypedAgent> Agent for T {
         messages
     }
 
-    #[instrument(skip(self, context), fields(agent_id = %self.id()))]
+    #[instrument(skip(self, context), fields(context))]
     async fn execute(&self, context: AgentContext, tool_registry: Arc<Mutex<ToolRegistry>>) -> Result<AgentResult> {
         // Orchestrator provides tools for this specific execution
         let tools = tool_registry.lock().await.get_tools_info(); // From context, not agent config
@@ -149,17 +149,19 @@ impl<T: TypedAgent> Agent for T {
     ) -> Result<AgentResult> {
         // Initialize conversation messages with system/user context
         let mut messages = self.build_initial_messages(&context);
+        debug!("Initial messages: {:?}", messages);
         let mut tool_executions: Vec<ToolExecution> = vec![];
 
         // Get tools info for prompt injection
         let tools_info = tool_registry.lock().await.get_tools_info();
+        debug!("Tools info: {:?}", tools_info);
 
         // Maximum allowed iterations of tool usage to avoid infinite loops
         let max_iterations = 10;
 
         let mut latest_response = None;
 
-        for _iteration in 0..max_iterations {
+        for iteration in 0..max_iterations {
             // Build request including tools
             let json_structure = self.output_schema();
             let request = ChatMessageRequest::new(
@@ -171,6 +173,8 @@ impl<T: TypedAgent> Agent for T {
 
             // Call Ollama chat completion with current messages and tool metadata
             let response = self.client().send_chat_messages(request).await?;
+            debug!("Agent Response Message [iteration #{}]: {:?}", &iteration,response.message.content);
+            debug!("Agent planned Tool Calls [iteration #{}]: {:?}", &iteration,response.message.tool_calls);
 
             // Add LLM assistant message to conversation history
             messages.push(response.message.clone());
@@ -181,6 +185,7 @@ impl<T: TypedAgent> Agent for T {
                 // Parse JSON arguments
                 let args: serde_json::Value = tool_call.function.arguments.clone();
 
+                debug!("Calling tool {} with params: {}",&tool_call.function.name, args.clone());
                 // Execute tool via the registry
                 let result = tool_registry.lock().await
                     .execute(&tool_call.function.name, args.clone())
@@ -188,6 +193,7 @@ impl<T: TypedAgent> Agent for T {
                     // .map_err(|e| anyhow!("Tool '{}' execution failed: {}", &tool_call.function.name, e))?;
 
                 let tool_execution = ToolExecution::new(&tool_call.function.name, &args).with_result(&result);
+                debug!("Tool Execution Result: {}",&tool_execution);
                 tool_executions.push(tool_execution);
                 // Feed back tool result as a special Tool message in chat history
                 messages.push(ChatMessage::tool(result?));
