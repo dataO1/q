@@ -68,27 +68,4 @@ impl TypedAgent for EvaluatorAgent {
     fn client(&self) -> &Ollama { &self.client }
     type Output = EvaluatorOutput;
 
-    fn build_prompt(&self, context: &AgentContext) -> String {
-        let mut parts = vec![format!("# Evaluator Task: {}", context.description)];
-
-        if let Some(ref rag) = context.rag_context {
-            parts.push(format!("\n## Code Context:\n{}", rag));
-        }
-
-        if let Some(ref hist) = context.history_context {
-            parts.push(format!("\n## History:\n{}", hist));
-        }
-
-        // if !context.dependency_outputs.is_empty() {
-        //     parts.push("\n## Previous Outputs:".to_string());
-        //     for (id, out) in &context.dependency_outputs {
-        //         parts.push(format!("- {}: {}", id, out));
-        //     }
-        // }
-
-        parts.push("\n## Instructions:".to_string());
-        parts.push("Generate production-ready code with explanations.".to_string());
-
-        parts.join("\n")
-    }
 }

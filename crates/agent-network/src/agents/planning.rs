@@ -68,6 +68,7 @@ impl PlanningAgent {
         ollama_port: u16,
     ) -> Self {
         let client = Ollama::new(ollama_host, ollama_port);
+        let system_prompt = PlanningAgent::build_system_prompt(&system_prompt);
         Self {
             id,
             client,
@@ -76,6 +77,34 @@ impl PlanningAgent {
             temperature: temperature.clamp(0.0, 2.0),
             max_tokens,
         }
+    }
+
+    fn build_system_prompt(system_prompt: &str) -> String {
+        let usage = r#"
+        ## WORKFLOW:
+            1. Analyse your given context (RAG, History, user prompt) and understand which files of the working_directory are important for the task
+            2. Get a list of files via the filesystem tool and generate a mental model of the underlying structure.
+            2. Decompose the task into relevant subtasks, assign them their dependencies and give each subtask a detailed description of what to do, which files might be relevant etc.
+
+        ## CRITICAL TOOLS USAGE RULES:
+            - You are only allowed to use the "list" function of the filesystem tool. Do NOT use other functions of this tool.
+
+
+        ## CRITICAL RULES FOR DEPENDENCIES:
+            1. The entries of a subtasks dependencies MUST match actual subtask ids and agent_type of the task you're depending on.
+            2. If a Coding task with id 'task-2' depends on a Coding task with id 'task-1' , write: 'dependencies': [ 'task-1']
+            3. If a Writing task with id 'task-8' depends on a coding task with id 'task-2' and on a Planning task with id 'task-3' , write: 'dependencies': ['task-2','task-3']".to_string());
+
+            Example CORRECT:
+            {
+              'subtasks': [
+                {'id': 'task-1', 'agent_type': 'Coding', 'description': 'task-1's description', 'dependencies': []},
+                {'id': 'task-2', 'agent_type': 'Coding', 'description': 'task-2's description', 'dependencies': ['task-1']},
+                {'id': 'task-3', 'agent_type': 'Testing', 'description': 'task-3's description', 'dependencies': ['task-1']}
+              ]
+        }"#;
+
+        format!("##{}\n{}", system_prompt, usage)
     }
 }
 
@@ -89,31 +118,4 @@ impl TypedAgent for PlanningAgent {
     fn client(&self) -> &Ollama { &self.client }
     type Output = TaskDecompositionPlan;
 
-    fn build_prompt(&self, context: &AgentContext) -> String {
-        let mut parts = vec![format!("# Planning Task: {}", context.description)];
-
-        if let Some(ref rag) = context.rag_context {
-            parts.push(format!("\n## RAG Context:\n{}", rag));
-        }
-
-        if let Some(ref hist) = context.history_context {
-            parts.push(format!("\n## History:\n{}", hist));
-        }
-        //
-        parts.push("\n## Instructions:".to_string());
-        parts.push("CRITICAL RULES FOR DEPENDENCIES:
-        1. The entries of a subtasks dependencies MUST match actual subtask ids and agent_type of the task you're depending on.
-        2. If a Coding task with id 'task-2' depends on a Coding task with id 'task-1' , write: 'dependencies': [ 'task-1']
-        3. If a Writing task with id 'task-8' depends on a coding task with id 'task-2' and on a Planning task with id 'task-3' , write: 'dependencies': ['task-2','task-3']".to_string());
-
-        parts.push("Example CORRECT:
-        {
-          'subtasks': [
-            {'id': 'task-1', 'agent_type': 'Coding', 'description': 'task-1's description', 'dependencies': []},
-            {'id': 'task-2', 'agent_type': 'Coding', 'description': 'task-2's description', 'dependencies': ['task-1']},
-            {'id': 'task-3', 'agent_type': 'Testing', 'description': 'task-3's description', 'dependencies': ['task-1']}
-          ]
-        }".to_string());
-        parts.join("\n")
-    }
 }

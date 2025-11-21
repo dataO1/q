@@ -39,7 +39,6 @@ pub trait TypedAgent: Send + Sync {
     fn model(&self) -> &str;
     fn temperature(&self) -> f32;
     fn client(&self) -> &Ollama;
-    fn build_prompt(&self, context: &AgentContext) -> String;
 
     // async fn execute_typed(&self, context: AgentContext) -> Result<Self::Output>{}
 }
@@ -53,7 +52,6 @@ pub trait Agent: Send + Sync {
     fn model(&self) -> &str;
     fn temperature(&self) -> f32;
     fn client(&self) -> &Ollama;
-    fn build_prompt(&self, context: &AgentContext) -> String;
     fn build_initial_messages(&self, context: &AgentContext) -> Vec<ChatMessage>;
 
 
@@ -82,9 +80,6 @@ impl<T: TypedAgent> Agent for T {
     fn model(&self) -> &str { TypedAgent::model(self) }
     fn temperature(&self) -> f32 { TypedAgent::temperature(self) }
     fn client(&self) -> &Ollama { TypedAgent::client(self) }
-    fn build_prompt(&self, context: &AgentContext) -> String {
-        TypedAgent::build_prompt(self, context)
-    }
 
     fn output_schema(&self) -> JsonStructure {
         JsonStructure::new::<T::Output>()
@@ -94,27 +89,39 @@ impl<T: TypedAgent> Agent for T {
         let mut messages = Vec::new();
 
         // 1. Add system message (agent role/instructions)
-        messages.push(ChatMessage::system(self.system_prompt().to_string()));
+        messages.push(ChatMessage::system(format!("#INSTRUCTIONS:\n{}",
+                    self.system_prompt().to_string()
+        )));
 
-        // 2. Add user message (the actual task/query)
-        let user_prompt = self.build_prompt(context);
-        messages.push(ChatMessage::user(user_prompt));
-
-        // 3. Optionally add RAG context as additional user or system message
+        // 2. Optionally add RAG context as additional user or system message
         if let Some(rag_context) = &context.rag_context {
             messages.push(ChatMessage::user(format!(
-                "Relevant RAG context:\n{}",
+                "# RAG CONTEXT:\n{}",
                 rag_context
             )));
         }
 
-        // 3. Optionally add RAG context as additional user or system message
+        // 3. Optionally add History context as additional user or system message
         if let Some(history_context) = &context.history_context {
             messages.push(ChatMessage::user(format!(
-                "History context:\n{}",
+                "# HISTORY CONTEXT:\n{}",
                 history_context
             )));
         }
+
+        // 4. Optionally add Tools context as additional user or system message
+        if let Ok(available_tools)= serde_json::to_string_pretty(&context.available_tools) {
+            messages.push(ChatMessage::user(format!(
+                "# AVAILABLE TOOLS:\n{}",
+                available_tools
+            )));
+        }
+
+        //TODO: add dependency_outputs here.
+
+        // 5. Add user message (the actual task/query)
+        messages.push(ChatMessage::user(format!("# USER PROMPT:\n{}",context.description)));
+
 
 
         messages
@@ -207,31 +214,13 @@ impl<T: TypedAgent> Agent for T {
 
     #[instrument(skip(self, context), fields(agent_id = %self.id()))]
     async fn execute_single_shot(&self, context: AgentContext) -> Result<AgentResult> {
-        let prompt_text = self.build_prompt(&context);
-        let client = self.client();
-
-        let messages = vec![
-            ChatMessage {
-                role: MessageRole::System,
-                content: self.system_prompt().to_string(),
-                tool_calls: vec![],
-                images: None,
-                thinking: None,
-            },
-            ChatMessage {
-                role: MessageRole::User,
-                content: prompt_text,
-                tool_calls: vec![],
-                images: None,
-                thinking: None,
-            },
-        ];
+        let messages = self.build_initial_messages(&context);
 
         let json_structure = self.output_schema();
         let request = ChatMessageRequest::new(self.model().to_string(), messages)
             .format(FormatType::StructuredJson(Box::new(json_structure)));
 
-        let response = client.send_chat_messages(request).await?;
+        let response = self.client().send_chat_messages(request).await?;
         AgentResult::from_response(self.id(),response)
             .context("Failed to create agent result")
     }

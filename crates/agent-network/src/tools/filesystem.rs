@@ -36,7 +36,57 @@ impl ToolExecutor for FilesystemTool {
     }
 
     fn description(&self) -> &'static str {
-        "Filesystem operations: read, write, list, mkdir, delete, exists, metadata"
+        r#"Filesystem tool for managing files and directories. All paths must be absolute  and must be valid subpaths of the working directory.
+
+        COMMANDS:
+
+        read
+        - Reads and returns the entire content of a file
+        - Required: path (string) - absolute file path
+        - Returns: file contents as text
+        - Example: {"command": "read", "path": "/home/user/projects/test_project/src/main.rs"}
+
+        write
+        - Writes content to a file, creating parent directories if needed
+        - Required: path (string), content (string)
+        - Returns: confirmation with byte count
+        - Example: {"command": "write", "path": "/home/user/projects/test_project/output/result.txt", "content": "Hello World"}
+
+        list
+        - Lists all files and directories in a directory
+        - Required: path (string) - directory path
+        - Returns: list with [DIR] or [FILE] prefix for each entry
+        - Example: {"command": "list", "path": "/home/user/projects/test_project/src/"}
+
+        mkdir
+        - Creates a directory and all parent directories
+        - Required: path (string)
+        - Returns: confirmation message
+        - Example: {"command": "mkdir", "path": "/home/user/projects/test_project/output/logs"}
+
+        delete
+        - Deletes a file (not directories)
+        - Required: path (string)
+        - Returns: confirmation message
+        - Example: {"command": "delete", "path": "/home/user/projects/test_project/temp/old.txt"}
+
+        exists
+        - Checks if a file or directory exists
+        - Required: path (string)
+        - Returns: "Exists: true" or "Exists: false"
+        - Example: {"command": "exists", "path": "/home/user/projects/test_project/config.toml"}
+
+        metadata
+        - Returns file/directory information
+        - Required: path (string)
+        - Returns: size, directory status, readonly status
+        - Example: {"command": "metadata", "path": "/home/user/projects/test_project/Cargo.toml"}
+
+        IMPORTANT:
+        - All paths must be absolute  and must be valid subpaths of the working directory.
+        - Use forward slashes in paths
+        - Parent directories are auto-created for write operations
+        "#
     }
 
     fn provide_tool_info(&self) -> ollama_rs::generation::tools::ToolInfo {

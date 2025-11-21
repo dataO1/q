@@ -13,13 +13,20 @@ use tracing::{debug, info, instrument};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CodingOutput {
-    pub code: String,
-    pub language: String,
-    pub explanation: String,
-    pub tests: Option<String>,
-    #[serde(default)]
-    pub dependencies: Vec<String>,
+    // pub code: String,
+    // pub language: String,
+    pub change_log: Vec<ChangeLog>,
+    // pub tests: Option<String>,
+    // #[serde(default)]
+    // pub dependencies: Vec<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ChangeLog {
+    changed_file: String,
+    summary_of_changes: String,
+}
+
 
 /// Coding agent for code generation and review
 pub struct CodingAgent {
@@ -43,6 +50,7 @@ impl CodingAgent {
         ollama_port: u16,
     ) -> Self {
         let client = Ollama::new(ollama_host, ollama_port);
+        let system_prompt = CodingAgent::build_system_prompt(system_prompt);
         Self {
             id,
             client,
@@ -51,6 +59,27 @@ impl CodingAgent {
             temperature: temperature.clamp(0.0, 2.0),
             max_tokens,
         }
+    }
+
+    fn build_system_prompt(prompt: String) -> String{
+        let tools_usage = r#"
+            ## CRITICAL TOOL-USAGE RULES:
+            - You can use the "list", "exists", "read" and "write" functions of the filesystem tool as described
+            - Do NOT use "delete" or "metadata" functions
+            - You MUST use the filesystem tool to write all generated code to files
+            - DO NOT return code in your message - always write it using tools
+            - DO NOT write the change_log as a file output, just as a resulting message
+
+            ## YOUR WORKFLOW:
+            1. Analyze which code files are relevant for your coding task, given your information (RAG Context, History, Available Tools and user prompts).
+            2. If youre unsure, check if code files already exist and if so then read them.
+            3. Based on the current status of existing code, mentally generate the new code file based on the prompts by the user.
+            4. Call filesystem tool to write the generated code to the corresponding files.
+            5. Output a detailed change_log of the changes you made to any file.
+
+            NEVER output code directly in your response."
+            }"#;
+        format!("##{}\n{}", prompt, tools_usage)
     }
 }
 
@@ -63,28 +92,4 @@ impl TypedAgent for CodingAgent {
     fn temperature(&self) -> f32 { self.temperature }
     fn client(&self) -> &Ollama { &self.client }
     type Output = CodingOutput;
-
-    fn build_prompt(&self, context: &AgentContext) -> String {
-        let mut parts = vec![format!("# Coding Task: {}", context.description)];
-
-        if let Some(ref rag) = context.rag_context {
-            parts.push(format!("\n## Code Context:\n{}", rag));
-        }
-
-        if let Some(ref hist) = context.history_context {
-            parts.push(format!("\n## History:\n{}", hist));
-        }
-
-        // if !context.dependency_outputs.is_empty() {
-        //     parts.push("\n## Previous Outputs:".to_string());
-        //     for (id, out) in &context.dependency_outputs {
-        //         parts.push(format!("- {}: {}", id, out));
-        //     }
-        // }
-
-        parts.push("\n## Instructions:".to_string());
-        parts.push("Generate production-ready code with explanations.".to_string());
-
-        parts.join("\n")
-    }
 }

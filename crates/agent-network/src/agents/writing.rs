@@ -61,27 +61,4 @@ impl TypedAgent for WritingAgent {
     fn client(&self) -> &Ollama { &self.client }
     type Output = WritingOutput;
 
-    fn build_prompt(&self, context: &AgentContext) -> String {
-        let mut parts = vec![format!("# Writing Task: {}", context.description)];
-
-        if let Some(ref rag) = context.rag_context {
-            parts.push(format!("\n## RAG Context:\n{}", rag));
-        }
-
-        if let Some(ref hist) = context.history_context {
-            parts.push(format!("\n## History:\n{}", hist));
-        }
-
-        // if !context.dependency_outputs.is_empty() {
-        //     parts.push("\n## Previous Outputs:".to_string());
-        //     for (id, out) in &context.dependency_outputs {
-        //         parts.push(format!("- {}: {}", id, out));
-        //     }
-        // }
-
-        parts.push("\n## Instructions:".to_string());
-        parts.push("Write me about this:".to_string());
-
-        parts.join("\n")
-    }
 }
