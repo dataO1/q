@@ -133,8 +133,8 @@ where
         T::name()
     }
 
-    fn description(&self) -> &'static str {
-        T::description()
+    fn description(&self) -> String {
+        T::description().to_string()
     }
 
     async fn call(

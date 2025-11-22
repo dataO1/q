@@ -220,9 +220,18 @@ impl Orchestrator {
         let analysis = self.analyze_query(query).await?;
         debug!("Query analysis: {:?}", analysis);
 
-        // Step 2: Decompose into tasks
-        let tasks = self.decompose_query(&project_scope, &conversation_id, &analysis).await?;
-        info!("Decomposed query into {} tasks", tasks.len());
+        // Step 2: Decompose into tasks (or route directly for simple tasks)
+        let tasks = match analysis.complexity {
+            Complexity::Trivial | Complexity::Simple => {
+                info!("Simple task detected, routing directly to appropriate agent");
+                self.route_to_single_agent(&analysis, &project_scope, &conversation_id).await?
+            },
+            _ => {
+                info!("Complex task detected, using planning agent decomposition");
+                self.decompose_query(&project_scope, &conversation_id, &analysis).await?
+            }
+        };
+        info!("Generated {} tasks", tasks.len());
 
         // Step 3: Build workflow DAG
         let workflow = self.build_workflow(&tasks).await?;
@@ -268,6 +277,99 @@ impl Orchestrator {
             (w, _) if w < 30 => Complexity::Moderate,
             (w, _) if w < 100 => Complexity::Complex,
             _ => Complexity::VeryComplex,
+        }
+    }
+
+    /// Route simple tasks directly to appropriate agent without planning
+    #[instrument(skip(self, analysis, project_scope, conversation_id))]
+    async fn route_to_single_agent(&self,
+        analysis: &QueryAnalysis,
+        project_scope: &ProjectScope,
+        conversation_id: &ConversationId) -> Result<Vec<DecomposedTask>> {
+        
+        debug!("Routing simple task directly to agent");
+
+        // Get available agent types and their capabilities
+        let available_agents: Vec<AgentCapability> = self.agent_pool
+            .list_agent_ids()
+            .iter()
+            .map(|agent_id| {
+                let agent = self.agent_pool.get_agent(agent_id).unwrap();
+                AgentCapability {
+                    agent_type: agent.agent_type(),
+                    description: format!("{} agent", agent.system_prompt()),
+                    capabilities: vec![],
+                }
+            })
+            .filter(|agent| agent.agent_type != AgentType::Planning) // exclude planning
+            .collect();
+
+        // Use a small model to classify which agent should handle this task
+        let selected_agent_type = self.classify_task_agent(&analysis.query, &available_agents).await?;
+        
+        // Get the actual agent instance
+        let agent = self.agent_pool
+            .get_agent_by_type(selected_agent_type)
+            .ok_or_else(|| AgentNetworkError::orchestration(
+                format!("No agent of type '{}' available", selected_agent_type)
+            ))?;
+
+        // Create a single task
+        let task_id = format!("{}-{}", selected_agent_type, Uuid::new_v4());
+        let task = DecomposedTask {
+            id: task_id,
+            agent_id: agent.id().to_string(),
+            description: analysis.query.clone(),
+            dependencies: vec![],
+            recovery_strategy: ErrorRecoveryStrategy::Skip,
+            requires_hitl: analysis.requires_hitl,
+        };
+
+        Ok(vec![task])
+    }
+
+    /// Use a lightweight model to classify which agent type should handle the task
+    async fn classify_task_agent(&self, query: &str, available_agents: &[AgentCapability]) -> Result<AgentType> {
+        // Create agent type descriptions for classification
+        let agent_descriptions: Vec<String> = available_agents
+            .iter()
+            .map(|agent| format!("{}: {}", agent.agent_type, agent.description))
+            .collect();
+
+        // Simple classification prompt
+        let classification_prompt = format!(
+            r#"Given this task: "{}"
+
+Available agents:
+{}
+
+Which single agent type should handle this task? Consider:
+- Coding tasks -> Coding
+- Writing/documentation tasks -> Writing  
+- Quality review/evaluation tasks -> Evaluator
+
+Return only the agent type name (e.g., "Coding", "Writing", "Evaluator")."#,
+            query,
+            agent_descriptions.join("\n")
+        );
+
+        // For now, use simple heuristics (can be enhanced with LLM later)
+        let query_lower = query.to_lowercase();
+        
+        // Simple keyword-based classification
+        if query_lower.contains("write") || query_lower.contains("implement") || 
+           query_lower.contains("create") || query_lower.contains("function") ||
+           query_lower.contains("code") || query_lower.contains("script") {
+            Ok(AgentType::Coding)
+        } else if query_lower.contains("document") || query_lower.contains("readme") ||
+                  query_lower.contains("explain") || query_lower.contains("describe") {
+            Ok(AgentType::Writing)
+        } else if query_lower.contains("review") || query_lower.contains("evaluate") ||
+                  query_lower.contains("assess") || query_lower.contains("check") {
+            Ok(AgentType::Evaluator)
+        } else {
+            // Default to Coding for ambiguous cases
+            Ok(AgentType::Coding)
         }
     }
 

@@ -24,3 +24,4 @@ crates/indexing/.fastembed_cache
 .fastembed_cache
 test-notes
 test-workspace/src
+jaeger-trace1.json

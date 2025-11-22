@@ -84,25 +84,41 @@ impl PlanningAgent {
         ## WORKFLOW:
             1. Analyse your given context (RAG, History, user prompt) and understand which files of the working_directory are important for the task
             2. Get a list of files via the filesystem tool and generate a mental model of the underlying structure.
-            2. Decompose the task into relevant subtasks, assign them their dependencies and give each subtask a detailed description of what to do, which files might be relevant etc.
+            3. Assess the complexity level from the provided analysis and determine appropriate task count
+            4. Decompose the task into relevant subtasks ONLY if necessary, assign dependencies and give detailed descriptions
+
+        ## COMPLEXITY-BASED TASK GUIDELINES:
+        You will receive a complexity analysis. Use it to determine task decomposition:
+            - **Moderate**: Prefer 1-2 tasks maximum. Only split if genuinely independent components exist.
+            - **Complex**: 2-3 tasks maximum. Split into logical phases or components.
+            - **VeryComplex**: 3+ tasks allowed. Break down into clear subsystems or phases.
+
+        IMPORTANT: Favor fewer tasks over many. Each task should be substantial and meaningful.
 
         ## CRITICAL TOOLS USAGE RULES:
             - You are only allowed to use the "list" function of the filesystem tool. Do NOT use other functions of this tool.
 
-
         ## CRITICAL RULES FOR DEPENDENCIES:
             1. The entries of a subtasks dependencies MUST match actual subtask ids and agent_type of the task you're depending on.
-            2. If a Coding task with id 'task-2' depends on a Coding task with id 'task-1' , write: 'dependencies': [ 'task-1']
-            3. If a Writing task with id 'task-8' depends on a coding task with id 'task-2' and on a Planning task with id 'task-3' , write: 'dependencies': ['task-2','task-3']".to_string());
+            2. Use the exact agent types from the available_agents list provided to you.
+            3. If task 'task-2' depends on task 'task-1', write: 'dependencies': ['task-1']
 
-            Example CORRECT:
+            ## Examples by Complexity:
+
+            MODERATE (prefer single task):
             {
               'subtasks': [
-                {'id': 'task-1', 'agent_type': 'Coding', 'description': 'task-1's description', 'dependencies': []},
-                {'id': 'task-2', 'agent_type': 'Coding', 'description': 'task-2's description', 'dependencies': ['task-1']},
-                {'id': 'task-3', 'agent_type': 'Testing', 'description': 'task-3's description', 'dependencies': ['task-1']}
+                {'id': 'task-1', 'agent_type': '<agent_type>', 'description': 'Complete implementation including all components', 'dependencies': []}
               ]
-        }"#;
+            }
+            
+            COMPLEX (2-3 tasks if truly needed):
+            {
+              'subtasks': [
+                {'id': 'task-1', 'agent_type': '<agent_type_1>', 'description': 'Core foundation and data structures', 'dependencies': []},
+                {'id': 'task-2', 'agent_type': '<agent_type_2>', 'description': 'Main business logic using foundation', 'dependencies': ['task-1']}
+              ]
+            }"#;
 
         format!("##{}\n{}", system_prompt, usage)
     }
