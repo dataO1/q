@@ -49,4 +49,5 @@ pub struct TaskResult {
     pub success: bool,
     pub output: Option<String>,
     pub error: Option<String>,
+    pub tool_executions: Vec<crate::tools::ToolExecution>,
 }

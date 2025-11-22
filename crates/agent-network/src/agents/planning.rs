@@ -134,4 +134,29 @@ impl TypedAgent for PlanningAgent {
     fn client(&self) -> &Ollama { &self.client }
     type Output = TaskDecompositionPlan;
 
+    /// Define planning workflow steps
+    fn define_workflow_steps(&self, context: &crate::agents::AgentContext) -> Vec<crate::agents::base::WorkflowStep> {
+        use crate::agents::base::{WorkflowStep, StepExecutionMode};
+        use std::collections::HashMap;
+        
+        // Multi-step workflow for planning: analysis, then planning
+        vec![
+            WorkflowStep {
+                id: "analyze_structure".to_string(),
+                name: "Project Structure Analysis".to_string(),
+                description: "Analyze the project structure using filesystem tool to understand the codebase layout and existing files".to_string(),
+                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(5) }, // Needs filesystem tool
+                required_tools: vec!["filesystem".to_string()],
+                parameters: HashMap::new(),
+            },
+            WorkflowStep {
+                id: "generate_plan".to_string(),
+                name: "Task Decomposition Planning".to_string(),
+                description: "Generate a structured task decomposition plan based on complexity analysis and project understanding".to_string(),
+                execution_mode: StepExecutionMode::OneShot, // Pure planning, no tools needed
+                required_tools: vec![],
+                parameters: HashMap::new(),
+            }
+        ]
+    }
 }

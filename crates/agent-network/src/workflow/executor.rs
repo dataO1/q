@@ -277,6 +277,7 @@ impl WorkflowExecutor {
             let tool_registry = tool_registry.clone();
 
 
+            let previous_results_clone = previous_results.clone();
             let handle = tokio::spawn(async move {
                 execute_task_with_retry(
                     task.clone(),
@@ -292,7 +293,8 @@ impl WorkflowExecutor {
                     wave_index,
                     project_scope,
                     conversation_id,
-                    tool_registry
+                    tool_registry,
+                    &previous_results_clone
                 )
                 .await
             });
@@ -314,6 +316,7 @@ impl WorkflowExecutor {
                         success: false,
                         output: None,
                         error: Some(e.to_string()),
+                        tool_executions: vec![],
                     });
                 }
                 Err(e) => {
@@ -323,6 +326,7 @@ impl WorkflowExecutor {
                         success: false,
                         output: None,
                         error: Some(format!("Join error: {}", e)),
+                        tool_executions: vec![],
                     });
                 }
             }
@@ -404,7 +408,8 @@ async fn execute_single_task(
     file_locks: Arc<FileLockManager>,
     project_scope: ProjectScope,
     conversation_id: ConversationId,
-    tool_registry: Arc<Mutex<ToolRegistry>>
+    tool_registry: Arc<Mutex<ToolRegistry>>,
+    previous_results: &HashMap<String, TaskResult>
 ) -> AgentNetworkResult<TaskResult> {
     // Get agent
     let agent = agent_pool
@@ -419,6 +424,34 @@ async fn execute_single_task(
         project_scope.clone(),
         conversation_id.clone()
     );
+
+    // Build dependency outputs from previous results
+    let mut dependency_outputs = HashMap::new();
+    for (task_id, task_result) in previous_results.iter() {
+        if task_result.success {
+            // Create a structured dependency output including both the agent output and tool executions
+            let mut dep_output = serde_json::Map::new();
+            
+            // Add the agent's structured output
+            if let Some(output) = &task_result.output {
+                if let Ok(parsed_output) = serde_json::from_str::<serde_json::Value>(output) {
+                    dep_output.insert("agent_output".to_string(), parsed_output);
+                }
+            }
+            
+            // Add tool executions (this is the key missing piece!)
+            let tool_executions_json = serde_json::to_value(&task_result.tool_executions)?;
+            dep_output.insert("tool_executions".to_string(), tool_executions_json);
+            
+            dependency_outputs.insert(task_id.clone(), serde_json::Value::Object(dep_output));
+        }
+    }
+
+    if !dependency_outputs.is_empty() {
+        let num_deps = dependency_outputs.len();
+        agent_context = agent_context.with_dependency_outputs(dependency_outputs);
+        debug!("Added {} dependency outputs to agent context", num_deps);
+    }
 
     // Retrieve and inject context if provider available
     if let Some(provider) = context_provider.as_ref() {
@@ -455,6 +488,7 @@ async fn execute_single_task(
                 success: true,
                 output: Some(serde_json::to_string(&result.output)?),
                 error: None,
+                tool_executions: result.tool_executions,
             })
         }
         Err(e) => {
@@ -482,7 +516,8 @@ async fn execute_task_with_retry(
     wave_index: usize,
     project_scope: ProjectScope,
     conversation_id: ConversationId,
-    tool_registry: Arc<Mutex<ToolRegistry>>
+    tool_registry: Arc<Mutex<ToolRegistry>>,
+    previous_results: &HashMap<String, TaskResult>
 ) -> AgentNetworkResult<TaskResult> {
 
     let cx = opentelemetry::Context::current();
@@ -520,7 +555,8 @@ async fn execute_task_with_retry(
             Arc::clone(&file_locks),
             project_scope.clone(),
             conversation_id.clone(),
-            tool_registry.clone()
+            tool_registry.clone(),
+            previous_results
         ))
         .await;
 
@@ -629,6 +665,7 @@ async fn execute_task_with_retry(
         success: false,
         output: None,
         error: Some(error_msg),
+        tool_executions: vec![],
     })
 
 }

@@ -10,12 +10,70 @@ use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, Ch
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, error, instrument};
 use std::{collections::HashMap, sync::Arc};
 use schemars::JsonSchema;
 use anyhow::{Context, Result, anyhow};
 
 use crate::{agents::AgentResult, error::AgentNetworkResult, tools::{ToolExecution, ToolRegistry}};
+
+/// Workflow step execution mode
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum StepExecutionMode {
+    /// Single LLM call without tools - fast for analysis/planning
+    OneShot,
+    /// ReAct loop with tools - for tasks requiring tool usage
+    ReAct { max_iterations: Option<usize> },
+}
+
+/// Reusable workflow step definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowStep {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub execution_mode: StepExecutionMode,
+    pub required_tools: Vec<String>,
+    pub parameters: HashMap<String, Value>, // Step-specific configuration
+}
+
+/// Result of executing a workflow step
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepResult {
+    pub step_id: String,
+    pub success: bool,
+    pub output: Option<Value>,
+    pub error: Option<String>,
+    pub tool_executions: Vec<ToolExecution>,
+}
+
+/// Workflow execution state passed between steps
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowState {
+    pub step_results: Vec<StepResult>, // Sequential results
+    pub shared_context: HashMap<String, Value>, // Data shared between steps
+}
+
+impl WorkflowState {
+    pub fn new() -> Self {
+        Self {
+            step_results: Vec::new(),
+            shared_context: HashMap::new(),
+        }
+    }
+
+    pub fn latest_result(&self) -> Option<&StepResult> {
+        self.step_results.last()
+    }
+
+    pub fn get_step_result(&self, step_id: &str) -> Option<&StepResult> {
+        self.step_results.iter().find(|r| r.step_id == step_id)
+    }
+
+    pub fn add_step_result(&mut self, result: StepResult) {
+        self.step_results.push(result);
+    }
+}
 
 /// Marker trait for all structured agent outputs
 pub trait StructuredOutput:
@@ -40,6 +98,262 @@ pub trait TypedAgent: Send + Sync {
     fn temperature(&self) -> f32;
     fn client(&self) -> &Ollama;
 
+    /// Define the workflow steps for this agent
+    /// Each agent can define its own sequence of steps, each either OneShot or ReAct
+    fn define_workflow_steps(&self, context: &AgentContext) -> Vec<WorkflowStep>;
+
+    /// Execute workflow steps sequentially
+    async fn execute_workflow(
+        &self,
+        context: AgentContext,
+        workflow_steps: Vec<WorkflowStep>,
+        tool_registry: Arc<Mutex<ToolRegistry>>
+    ) -> Result<AgentResult> {
+        let mut workflow_state = WorkflowState::new();
+        let mut final_result = None;
+        let mut all_tool_executions = Vec::new();
+
+        for (step_index, step) in workflow_steps.iter().enumerate() {
+            debug!("Executing workflow step {}/{}: {}", step_index + 1, workflow_steps.len(), step.name);
+
+            // Update context with workflow state for this step
+            let mut updated_context = context.clone();
+            updated_context.metadata.insert("workflow_step_id".to_string(), serde_json::to_value(&step.id)?);
+            updated_context.metadata.insert("workflow_state".to_string(), serde_json::to_value(&workflow_state)?);
+
+            // Execute the individual step
+            let step_result = match &step.execution_mode {
+                StepExecutionMode::OneShot => {
+                    self.execute_step_oneshot(&updated_context, step).await
+                }
+                StepExecutionMode::ReAct { max_iterations } => {
+                    self.execute_step_react(&updated_context, step, tool_registry.clone(), *max_iterations).await
+                }
+            };
+
+            match step_result {
+                Ok(result) => {
+                    // Collect tool executions
+                    all_tool_executions.extend(result.tool_executions.clone());
+
+                    // Update shared context with step results
+                    if let Some(output) = &result.output {
+                        workflow_state.shared_context.insert(step.id.clone(), output.clone());
+                    }
+
+                    workflow_state.add_step_result(result.clone());
+                    final_result = Some(result.output.unwrap_or_default());
+
+                    debug!("Step '{}' completed successfully", step.name);
+                }
+                Err(e) => {
+                    let error_msg = format!("Workflow step '{}' failed: {}", step.name, e);
+                    error!("{}", error_msg);
+
+                    let failed_result = StepResult {
+                        step_id: step.id.clone(),
+                        success: false,
+                        output: None,
+                        error: Some(error_msg.clone()),
+                        tool_executions: Vec::new(),
+                    };
+                    workflow_state.add_step_result(failed_result);
+
+                    return Err(anyhow!(error_msg));
+                }
+            }
+        }
+
+        // Create final agent result combining all workflow steps
+        Ok(AgentResult {
+            agent_id: self.id().to_string(),
+            output: final_result.unwrap_or_default(),
+            confidence: 0.8, // Workflow completion confidence
+            requires_hitl: false,
+            tokens_used: None, // Could aggregate from steps
+            reasoning: Some(format!("Completed {}-step workflow: {}",
+                workflow_steps.len(),
+                workflow_steps.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(" → ")
+            )),
+            tool_executions: all_tool_executions,
+        })
+    }
+
+    /// Execute a single OneShot workflow step
+    async fn execute_step_oneshot(&self, context: &AgentContext, step: &WorkflowStep) -> Result<StepResult> {
+        // Build messages for this specific step
+        let mut messages = vec![
+            ChatMessage::system(format!("# STEP: {}\n{}\n\n# INSTRUCTIONS:\n{}",
+                step.name,
+                step.description,
+                self.system_prompt()
+            ))
+        ];
+
+        // Add relevant context
+        if let Some(rag_context) = &context.rag_context {
+            messages.push(ChatMessage::user(format!("# RAG CONTEXT:\n{}", rag_context)));
+        }
+
+        if !context.dependency_outputs.is_empty() {
+            let dependency_msg = serde_json::to_string_pretty(&context.dependency_outputs)
+                .unwrap_or_else(|_| "Failed to serialize dependency outputs".to_string());
+            messages.push(ChatMessage::user(format!("# PREVIOUS TASK OUTPUTS:\n{}", dependency_msg)));
+        }
+
+        // Add workflow state if available
+        if let Some(workflow_state) = context.metadata.get("workflow_state") {
+            messages.push(ChatMessage::user(format!("# WORKFLOW CONTEXT:\n{}",
+                serde_json::to_string_pretty(workflow_state).unwrap_or_default())));
+        }
+
+        // Add step parameters
+        if !step.parameters.is_empty() {
+            messages.push(ChatMessage::user(format!("# STEP PARAMETERS:\n{}",
+                serde_json::to_string_pretty(&step.parameters).unwrap_or_default())));
+        }
+
+        // Add main user prompt
+        messages.push(ChatMessage::user(format!("# USER PROMPT:\n{}", context.description)));
+
+        // Execute LLM call
+        let json_structure = JsonStructure::new::<Self::Output>();
+        let request = ChatMessageRequest::new(self.model().to_string(), messages)
+            .format(FormatType::StructuredJson(Box::new(json_structure)));
+
+        let response = self.client().send_chat_messages(request).await?;
+
+        // Parse response
+        let parsed_output = response.message.content
+            .strip_prefix("```json")
+            .unwrap_or(&response.message.content)
+            .strip_suffix("```")
+            .unwrap_or(&response.message.content);
+
+        let output = serde_json::from_str::<Value>(parsed_output)?;
+
+        Ok(StepResult {
+            step_id: step.id.clone(),
+            success: true,
+            output: Some(output),
+            error: None,
+            tool_executions: vec![], // OneShot doesn't use tools
+        })
+    }
+
+    /// Execute a single ReAct workflow step
+    async fn execute_step_react(
+        &self,
+        context: &AgentContext,
+        step: &WorkflowStep,
+        tool_registry: Arc<Mutex<ToolRegistry>>,
+        max_iterations: Option<usize>
+    ) -> Result<StepResult> {
+        // Build initial messages for this step
+        let mut messages = vec![
+            ChatMessage::system(format!("# STEP: {}\n{}\n\n# INSTRUCTIONS:\n{}",
+                step.name,
+                step.description,
+                self.system_prompt()
+            ))
+        ];
+
+        // Add context (similar to oneshot but will be extended in ReAct loop)
+        if let Some(rag_context) = &context.rag_context {
+            messages.push(ChatMessage::user(format!("# RAG CONTEXT:\n{}", rag_context)));
+        }
+
+        if !context.dependency_outputs.is_empty() {
+            let dependency_msg = serde_json::to_string_pretty(&context.dependency_outputs)
+                .unwrap_or_else(|_| "Failed to serialize dependency outputs".to_string());
+            messages.push(ChatMessage::user(format!("# PREVIOUS TASK OUTPUTS:\n{}", dependency_msg)));
+        }
+
+        // Add workflow state
+        if let Some(workflow_state) = context.metadata.get("workflow_state") {
+            messages.push(ChatMessage::user(format!("# WORKFLOW CONTEXT:\n{}",
+                serde_json::to_string_pretty(workflow_state).unwrap_or_default())));
+        }
+
+        // Add step parameters
+        if !step.parameters.is_empty() {
+            messages.push(ChatMessage::user(format!("# STEP PARAMETERS:\n{}",
+                serde_json::to_string_pretty(&step.parameters).unwrap_or_default())));
+        }
+
+        // Add available tools
+        let tools_info = tool_registry.lock().await.get_tools_info();
+        if !tools_info.is_empty() {
+            if let Ok(available_tools) = serde_json::to_string_pretty(&tools_info) {
+                messages.push(ChatMessage::user(format!("# AVAILABLE TOOLS:\n{}", available_tools)));
+            }
+        }
+
+        // Add main user prompt
+        messages.push(ChatMessage::user(format!("# USER PROMPT:\n{}", context.description)));
+
+        // Execute ReAct loop for this step
+        let mut tool_executions = Vec::new();
+        let max_iter = max_iterations.unwrap_or(10);
+        let mut latest_response = None;
+
+        for _iteration in 0..max_iter {
+            // Build request with tools
+            let json_structure = JsonStructure::new::<Self::Output>();
+            let request = ChatMessageRequest::new(self.model().to_string(), messages.clone())
+                .format(FormatType::StructuredJson(Box::new(json_structure)))
+                .tools(tools_info.clone());
+
+            let response = self.client().send_chat_messages(request).await?;
+            latest_response = Some(response.message.content.clone());
+
+            // Process tool calls if any
+            if !response.message.tool_calls.is_empty() {
+                let tool_calls = response.message.tool_calls;
+                for tool_call in tool_calls {
+                    let mut execution = ToolExecution::new(&tool_call.function.name, &tool_call.function.arguments);
+
+                    // Execute tool
+                    match tool_registry.lock().await.execute(&tool_call.function.name, tool_call.function.arguments).await {
+                        Ok(result) => {
+                            execution.result = Some(result.clone());
+                            messages.push(ChatMessage::user(format!("Tool Result: {}", result)));
+                        }
+                        Err(e) => {
+                            let error_msg = e.to_string();
+                            execution.error = Some(error_msg.clone());
+                            messages.push(ChatMessage::user(format!("Tool Error: {}", error_msg)));
+                        }
+                    }
+
+                    tool_executions.push(execution);
+                }
+            } else {
+                // No tool calls - step is complete
+                break;
+            }
+        }
+
+        // Parse final response
+        let final_content = latest_response.unwrap_or_default();
+        let parsed_output = final_content
+            .strip_prefix("```json")
+            .unwrap_or(&final_content)
+            .strip_suffix("```")
+            .unwrap_or(&final_content);
+
+        let output = serde_json::from_str::<Value>(parsed_output)
+            .unwrap_or_else(|_| Value::String(final_content));
+
+        Ok(StepResult {
+            step_id: step.id.clone(),
+            success: true,
+            output: Some(output),
+            error: None,
+            tool_executions,
+        })
+    }
+
     // async fn execute_typed(&self, context: AgentContext) -> Result<Self::Output>{}
 }
 
@@ -60,12 +374,6 @@ pub trait Agent: Send + Sync {
 
     // Execute with type-erased result
     async fn execute(&self, context: AgentContext, tool_registry: Arc<Mutex<ToolRegistry>>) -> Result<AgentResult>;
-
-    async fn execute_react_loop(
-        &self,
-        context: AgentContext,
-        tool_registry: Arc<Mutex<ToolRegistry>>,
-    ) -> Result<AgentResult>;
 
 
     async fn execute_single_shot(&self, context: AgentContext) -> Result<AgentResult> ;
@@ -117,7 +425,15 @@ impl<T: TypedAgent> Agent for T {
             )));
         }
 
-        //TODO: add dependency_outputs here.
+        // 4.5. Add dependency outputs from previous tasks (includes tool executions!)
+        if !context.dependency_outputs.is_empty() {
+            let dependency_msg = serde_json::to_string_pretty(&context.dependency_outputs)
+                .unwrap_or_else(|_| "Failed to serialize dependency outputs".to_string());
+            messages.push(ChatMessage::user(format!(
+                "# PREVIOUS TASK OUTPUTS:\n{}",
+                dependency_msg
+            )));
+        }
 
         // 5. Add user message (the actual task/query)
         messages.push(ChatMessage::user(format!("# USER PROMPT:\n{}",context.description)));
@@ -129,111 +445,10 @@ impl<T: TypedAgent> Agent for T {
 
     #[instrument(skip(self, context), fields(context))]
     async fn execute(&self, context: AgentContext, tool_registry: Arc<Mutex<ToolRegistry>>) -> Result<AgentResult> {
-        // Orchestrator provides tools for this specific execution
-        let tools = tool_registry.lock().await.get_tools_info(); // From context, not agent config
-
-        if tools.is_empty() {
-            // No tools → Single-shot execution
-            return self.execute_single_shot(context).await;
-        }
-
-        // Tools present → ReAct loop
-        self.execute_react_loop(context, tool_registry).await
+        // All agents use workflow execution
+        let workflow_steps = self.define_workflow_steps(&context);
+        self.execute_workflow(context, workflow_steps, tool_registry).await
     }
-
-    #[instrument(skip(self, context), fields(agent_id = %self.id()))]
-    async fn execute_react_loop(
-        &self,
-        context: AgentContext,
-        tool_registry: Arc<Mutex<ToolRegistry>>,
-    ) -> Result<AgentResult> {
-        // Initialize conversation messages with system/user context
-        let mut messages = self.build_initial_messages(&context);
-        debug!("Initial messages: {:?}", messages);
-        let mut tool_executions: Vec<ToolExecution> = vec![];
-
-        // Get tools info for prompt injection
-        let tools_info = tool_registry.lock().await.get_tools_info();
-        debug!("Tools info: {:?}", tools_info);
-
-        // Maximum allowed iterations of tool usage to avoid infinite loops
-        let max_iterations = 10;
-
-        let mut latest_response = None;
-
-        for iteration in 0..max_iterations {
-            // Build request including tools
-            let json_structure = self.output_schema();
-            let request = ChatMessageRequest::new(
-                self.model().to_string(),
-                messages.clone(),
-            )
-                .format(FormatType::StructuredJson(Box::new(json_structure)))
-                .tools(tools_info.clone());
-
-            // Call Ollama chat completion with current messages and tool metadata
-            let response = self.client().send_chat_messages(request).await?;
-            debug!("Agent Response Message [iteration #{}]: {:?}", &iteration,response.message.content);
-            debug!("Agent planned Tool Calls [iteration #{}]: {:?}", &iteration,response.message.tool_calls);
-
-            // Add LLM assistant message to conversation history
-            messages.push(response.message.clone());
-
-            // EARLY EXIT: If we have valid structured output AND no tool calls, we're done
-            if response.message.tool_calls.is_empty() {
-                // Try to validate that we can parse the structured output
-                match AgentResult::from_response(self.id(), response.clone()) {
-                    Ok(_) => {
-                        // Valid JSON structure + no tools = success, exit loop
-                        debug!("Early exit: Valid structured output received with no tool calls at iteration #{}", iteration);
-                        latest_response = Some(response);
-                        break;
-                    },
-                    Err(_) => {
-                        // Invalid JSON, continue loop to let LLM try again
-                        debug!("Invalid JSON structure, continuing to iteration #{}", iteration + 1);
-                    }
-                }
-            }
-
-            // Check if LLM requested any tool calls
-            // Execute each tool call sequentially
-            for tool_call in &response.message.tool_calls {
-                // Parse JSON arguments
-                let args: serde_json::Value = tool_call.function.arguments.clone();
-
-                debug!("Calling tool {} with params: {}",&tool_call.function.name, args.clone());
-                // Execute tool via the registry
-                let result = tool_registry.lock().await
-                    .execute(&tool_call.function.name, args.clone())
-                    .await;
-                    // .map_err(|e| anyhow!("Tool '{}' execution failed: {}", &tool_call.function.name, e))?;
-
-                let tool_execution = ToolExecution::new(&tool_call.function.name, &args).with_result(&result);
-                debug!("Tool Execution Result: {}",&tool_execution);
-                tool_executions.push(tool_execution);
-                // Feed back tool result as a special Tool message in chat history
-                messages.push(ChatMessage::tool(result?));
-            }
-            latest_response = Some(response);
-        };
-        match latest_response {
-            Some(response) => {
-                Ok(AgentResult::from_response(self.id(),response).context("Failed to create agent result")?.with_tools_exectutions(tool_executions))
-            },
-            None => {
-                // Exceeded max iterations, likely infinite loop or error
-                Err(anyhow!("Max tool call iterations reached in ReAct loop"))
-            }
-        }
-    }
-
-    // #[instrument(skip(self, context), fields(agent_id = %self.id()))]
-    // async fn execute_single_shot(&self, context: AgentContext) -> Result<AgentResult> {
-    //     // Simple LLM call without tools
-    //     let response = self.call_llm_simple(&context).await?;
-    //     self.extract_result(response)
-    // }
 
     #[instrument(skip(self, context), fields(agent_id = %self.id()))]
     async fn execute_single_shot(&self, context: AgentContext) -> Result<AgentResult> {
@@ -250,7 +465,7 @@ impl<T: TypedAgent> Agent for T {
 }
 
 /// Context passed to agents during execution
-#[derive(Debug, Display)]
+#[derive(Debug, Display, Clone)]
 #[display("AgentID: {}, AgentType: {}, TaskID: {}, Description:{}, dependencies: {:?}, dependency_outputs: {:?}, rag_context: {:?}, history_context: {:?}, file_context: {:?}, conversation_history: {:?}, project_scope: {}, conversation_id: {}, metadata: {:?}",agent_id, agent_type, task_id, description,dependencies, dependency_outputs, rag_context, history_context, file_context, conversation_history, project_scope, conversation_id, metadata)]
 pub struct AgentContext {
     // === Agent Identification ===

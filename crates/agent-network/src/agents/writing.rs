@@ -2,7 +2,7 @@
 //!
 //! Generates documentation, commit messages, and communication.
 
-use crate::{agents::{base::TypedAgent, Agent, AgentContext, AgentResult}};
+use crate::agents::base::TypedAgent;
 use ai_agent_common::AgentType;
 use async_trait::async_trait;
 use ollama_rs::Ollama;
@@ -61,4 +61,19 @@ impl TypedAgent for WritingAgent {
     fn client(&self) -> &Ollama { &self.client }
     type Output = WritingOutput;
 
+    /// Define writing workflow steps
+    fn define_workflow_steps(&self, _context: &crate::agents::AgentContext) -> Vec<crate::agents::base::WorkflowStep> {
+        use crate::agents::base::{WorkflowStep, StepExecutionMode};
+        use std::collections::HashMap;
+        
+        // Simple single-step workflow for writing: pure content generation
+        vec![WorkflowStep {
+            id: "generate_content".to_string(),
+            name: "Content Generation".to_string(),
+            description: "Generate written content based on the provided requirements and context".to_string(),
+            execution_mode: StepExecutionMode::OneShot, // Writing is typically pure LLM generation
+            required_tools: vec![], // No tools needed for content generation
+            parameters: HashMap::new(),
+        }]
+    }
 }
