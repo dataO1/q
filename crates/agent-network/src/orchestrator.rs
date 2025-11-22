@@ -314,7 +314,14 @@ impl Orchestrator {
                 serde_json::to_string_pretty(&decomposition_input)?
             );
 
-        // Build agent context for planning
+        //TODO: populate with tools
+        let fs_tool = FilesystemTool::new(&project_scope.root);
+        self.tool_registry.lock().await.register(Box::new(fs_tool));
+
+        // Get the tools info after registration
+        let tools_info = self.tool_registry.lock().await.get_tools_info();
+
+        // Build agent context for planning with tools included
         let planning_context = AgentContext::new(
             planning_agent.id().into(),
             AgentType::Planning,
@@ -322,13 +329,9 @@ impl Orchestrator {
             description,
             project_scope.clone(),
             conversation_id.clone()
-        );
+        ).with_tools(tools_info);
 
         info!("Planning Context: {}",planning_context);
-
-        //TODO: populate with tools
-        let fs_tool = FilesystemTool::new(&project_scope.root);
-        self.tool_registry.lock().await.register(Box::new(fs_tool));
 
         // Execute planning agent with extractor for structured output
         let result = planning_agent.execute(planning_context, self.tool_registry.clone()).await?;

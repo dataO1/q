@@ -126,7 +126,7 @@ impl ToolExecutor for FilesystemTool {
             .ok_or_else(|| anyhow::anyhow!("Missing or invalid 'path' parameter"))?;
         let path = Path::new(path);
 
-        if self.is_path_allowed(path) {
+        if !self.is_path_allowed(path) {
             Err(anyhow!("Given path is not a subpath of the working dir!"))
         }else{
 

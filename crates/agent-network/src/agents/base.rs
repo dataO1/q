@@ -179,6 +179,23 @@ impl<T: TypedAgent> Agent for T {
             // Add LLM assistant message to conversation history
             messages.push(response.message.clone());
 
+            // EARLY EXIT: If we have valid structured output AND no tool calls, we're done
+            if response.message.tool_calls.is_empty() {
+                // Try to validate that we can parse the structured output
+                match AgentResult::from_response(self.id(), response.clone()) {
+                    Ok(_) => {
+                        // Valid JSON structure + no tools = success, exit loop
+                        debug!("Early exit: Valid structured output received with no tool calls at iteration #{}", iteration);
+                        latest_response = Some(response);
+                        break;
+                    },
+                    Err(_) => {
+                        // Invalid JSON, continue loop to let LLM try again
+                        debug!("Invalid JSON structure, continuing to iteration #{}", iteration + 1);
+                    }
+                }
+            }
+
             // Check if LLM requested any tool calls
             // Execute each tool call sequentially
             for tool_call in &response.message.tool_calls {
