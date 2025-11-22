@@ -35,8 +35,8 @@ impl ToolExecutor for FilesystemTool {
         "filesystem"
     }
 
-    fn description(&self) -> &'static str {
-        r#"Filesystem tool for managing files and directories. All paths must be absolute  and must be valid subpaths of the working directory.
+    fn description(&self) -> String {
+        format!(r#"Filesystem tool for managing files and directories. All paths must be absolute and must be valid subpaths of the working directory: {}
 
         COMMANDS:
 
@@ -44,49 +44,60 @@ impl ToolExecutor for FilesystemTool {
         - Reads and returns the entire content of a file
         - Required: path (string) - absolute file path
         - Returns: file contents as text
-        - Example: {"command": "read", "path": "/home/user/projects/test_project/src/main.rs"}
+        - Example: {{"command": "read", "path": "{}/src/main.rs"}}
 
         write
         - Writes content to a file, creating parent directories if needed
         - Required: path (string), content (string)
         - Returns: confirmation with byte count
-        - Example: {"command": "write", "path": "/home/user/projects/test_project/output/result.txt", "content": "Hello World"}
+        - Example: {{"command": "write", "path": "{}/output/result.txt", "content": "Hello World"}}
 
         list
         - Lists all files and directories in a directory
         - Required: path (string) - directory path
         - Returns: list with [DIR] or [FILE] prefix for each entry
-        - Example: {"command": "list", "path": "/home/user/projects/test_project/src/"}
+        - Example: {{"command": "list", "path": "{}/src/"}}
 
         mkdir
         - Creates a directory and all parent directories
         - Required: path (string)
         - Returns: confirmation message
-        - Example: {"command": "mkdir", "path": "/home/user/projects/test_project/output/logs"}
+        - Example: {{"command": "mkdir", "path": "{}/output/logs"}}
 
         delete
         - Deletes a file (not directories)
         - Required: path (string)
         - Returns: confirmation message
-        - Example: {"command": "delete", "path": "/home/user/projects/test_project/temp/old.txt"}
+        - Example: {{"command": "delete", "path": "{}/temp/old.txt"}}
 
         exists
         - Checks if a file or directory exists
         - Required: path (string)
         - Returns: "Exists: true" or "Exists: false"
-        - Example: {"command": "exists", "path": "/home/user/projects/test_project/config.toml"}
+        - Example: {{"command": "exists", "path": "{}/config.toml"}}
 
         metadata
         - Returns file/directory information
         - Required: path (string)
         - Returns: size, directory status, readonly status
-        - Example: {"command": "metadata", "path": "/home/user/projects/test_project/Cargo.toml"}
+        - Example: {{"command": "metadata", "path": "{}/Cargo.toml"}}
 
         IMPORTANT:
-        - All paths must be absolute  and must be valid subpaths of the working directory.
+        - All paths must be absolute and must be valid subpaths of the working directory: {}
         - Use forward slashes in paths
         - Parent directories are auto-created for write operations
-        "#
+        - Working directory is: {}
+        "#, 
+        self.base_path.display(),
+        self.base_path.display(),
+        self.base_path.display(),
+        self.base_path.display(),
+        self.base_path.display(),
+        self.base_path.display(),
+        self.base_path.display(),
+        self.base_path.display(),
+        self.base_path.display(),
+        self.base_path.display())
     }
 
     fn provide_tool_info(&self) -> ollama_rs::generation::tools::ToolInfo {
@@ -109,7 +120,7 @@ impl ToolExecutor for FilesystemTool {
             tool_type: ollama_rs::generation::tools::ToolType::Function,
             function: ollama_rs::generation::tools::ToolFunctionInfo {
                 name: self.name().to_string(),
-                description: self.description().to_string(),
+                description: self.description(),
                 parameters: serde_json::from_value(parameters).unwrap(), // converts to schemars::schema::Schema
             },
         }

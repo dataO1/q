@@ -67,7 +67,7 @@ pub trait ToolExecutor: Send + Sync + Debug{
     fn name(&self) -> &'static str;
 
     /// Returns the tool description.
-    fn description(&self) -> &'static str;
+    fn description(&self) -> String;
 
     /// Calls the tool given untyped JSON parameters.
     async fn call(

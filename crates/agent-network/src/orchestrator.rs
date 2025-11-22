@@ -297,6 +297,7 @@ impl Orchestrator {
                     capabilities: vec![/* agent-specific capabilities */],
                 }
             })
+            .filter(|agent| agent.agent_type != AgentType::Planning) // dont use planning tasks
             .collect();
 
         info!("Available agents: {:?}", available_agents);

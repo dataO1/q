@@ -43,8 +43,8 @@ impl crate::tools::ToolExecutor for LspTool {
         "lsp"
     }
 
-    fn description(&self) -> &'static str {
-        "Language Server Protocol tool for code analysis and completion"
+    fn description(&self) -> String {
+        "Language Server Protocol tool for code analysis and completion".to_string()
     }
 
     fn provide_tool_info(&self) -> ollama_rs::generation::tools::ToolInfo {
@@ -66,7 +66,7 @@ impl crate::tools::ToolExecutor for LspTool {
             tool_type: ollama_rs::generation::tools::ToolType::Function,
             function: ollama_rs::generation::tools::ToolFunctionInfo {
                 name: self.name().to_string(),
-                description: self.description().to_string(),
+                description: self.description(),
                 parameters: serde_json::from_value(parameters).unwrap(),
             },
         }
