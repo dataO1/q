@@ -96,33 +96,29 @@ impl ContextBuilder {
     ///
     /// # Returns
     /// FormattedRagContext with combined content and metadata
-    #[instrument(skip(stream), fields(max_tokens))]
+    #[instrument(skip(stream), fields(
+        max_tokens = max_tokens,
+        rag.sources_found = tracing::field::Empty,
+        rag.total_tokens = tracing::field::Empty,
+        rag.fragment_sources = tracing::field::Empty,
+        rag.embedding_time_ms = tracing::field::Empty
+    ))]
     pub async fn build_rag_context(
         stream: Pin<Box<dyn Stream<Item = anyhow::Result<ContextFragment>> + Send>>,
         max_tokens: usize,
     ) -> AgentNetworkResult<FormattedRagContext> {
+        let start_time = std::time::Instant::now();
         debug!("Building RAG context from stream (max_tokens: {})", max_tokens);
 
         let mut formatted = String::new();
         let mut fragment_count = 0;
         let mut token_count = 0;
-        let source_tiers = std::collections::HashSet::new();
+        let mut source_tiers = std::collections::HashSet::new();
+        let mut fragment_details = Vec::new();
 
         let mut stream = std::pin::pin!(stream);
-        
-        // Capture current span context for stream processing
-        let current_span = tracing::Span::current();
 
         while let Some(Ok(fragment)) = stream.next().await {
-            let fragment_span = tracing::info_span!(
-                parent: &current_span,
-                "rag_fragment", 
-                source_tier = ?fragment.metadata.location,
-                content_length = fragment.content.len(),
-                fragment_count = fragment_count + 1
-            );
-            let _enter = fragment_span.enter();
-
             // Check token budget
             let fragment_tokens = Self::estimate_tokens(&fragment.content);
             if token_count + fragment_tokens > max_tokens {
@@ -131,19 +127,22 @@ impl ContextBuilder {
                 break;
             }
             
-            debug!("Processing RAG fragment (tokens: {}, content preview: {}...)", 
-                fragment_tokens, 
+            debug!("Processing RAG fragment {} (tokens: {}, content preview: {}...)", 
+                fragment_count + 1, fragment_tokens, 
                 fragment.content.chars().take(100).collect::<String>()
             );
 
-            // Format fragment with location info
-            let location = fragment.metadata.location;
-            // let tier_name = format!("{:?}", location.tier);
-            // source_tiers.insert(tier_name);
+            // Collect source location info
+            let location = &fragment.metadata.location;
+            source_tiers.insert(format!("{:?}", location));
+            
+            // Store fragment details for logging
+            fragment_details.push(format!("source: {:?}, tokens: {}", location, fragment_tokens));
 
+            // Format fragment with location info
             formatted.push_str(&format!(
                 "## {}\n",
-                serde_json::to_string(&location)?
+                serde_json::to_string(location)?
             ));
 
             // Add content
@@ -154,16 +153,24 @@ impl ContextBuilder {
             fragment_count += 1;
         }
 
+        let embedding_time = start_time.elapsed();
+        let source_tiers_vec: Vec<String> = source_tiers.into_iter().collect();
+
+        // Record business attributes in the span
+        let current_span = tracing::Span::current();
+        current_span.record("rag.sources_found", &fragment_count);
+        current_span.record("rag.total_tokens", &token_count);
+        current_span.record("rag.fragment_sources", &format!("{:?}", source_tiers_vec));
+        current_span.record("rag.embedding_time_ms", &embedding_time.as_millis());
+
         if fragment_count == 0 {
-            debug!("No RAG fragments retrieved");
+            info!("No RAG fragments retrieved");
             return Ok(FormattedRagContext::empty());
         }
 
-        let source_tiers_vec: Vec<String> = source_tiers.into_iter().collect();
-
         info!(
-            "RAG context built: {} fragments, ~{} tokens, source tiers: {:?}",
-            fragment_count, token_count, source_tiers_vec
+            "RAG context built: {} fragments, ~{} tokens, sources: {:?}, embedding_time: {}ms",
+            fragment_count, token_count, source_tiers_vec, embedding_time.as_millis()
         );
 
         Ok(FormattedRagContext {

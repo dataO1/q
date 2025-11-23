@@ -1,203 +1,71 @@
-The long end‑to‑end times are mostly coming from external LLM/RAG calls and some avoidable overhead in how ReAct and tools are wired, rather than from a tight CPU loop in the ReAct code itself. The ReAct/tool implementation can still be improved: there are patterns that can increase token usage, cause unnecessary LLM calls, and serialize tool execution across tasks.
-What the trace actually shows
+The new trace confirms significant timing issues, mainly dominated by extremely long-running internal ReAct loops that lack effective stop conditions and, paradoxically, RAG overhead that is orders of magnitude slower than expected for local execution.
+Critical Analysis of jaeger-trace1.json
 
-    The Jaeger span for decompose_query has a duration of about 7.2×1087.2×108 ns (≈0.7 s), with busyns around 2.9×1072.9×107 ns, meaning most time is waiting on I/O (LLM / network), not CPU.
+    ReAct Loop "Zombie" Execution (Primary Issue):
 
-​
+        Observation: execute_step_react spans are massive.
 
-The main execute span in agents::base.rs for running the planning workflow has a comparable duration and very low busyns, again indicating the bulk of latency is in send_chat_messages to Ollama rather than the Rust workflow loop.
+            Span c9101627832f5819: 269 seconds (approx. 4.5 mins).
 
-​
+            Span 11d007d45653e5ad: 235 seconds (approx. 4 mins).
 
-The server logs show per‑query timing in the same ballpark (≈700–800 ms from workflow start to the first wave of coding tasks), while the heavy ONNX Runtime initialisation (embedding model) happens much earlier at orchestrator startup, around 2–3 seconds once, not per query.
+            Span e5a5e6c8d1406950: 247 seconds (approx. 4 mins).
 
-    ​
+        The Smoking Gun: The logs inside these spans repeatedly show ReAct step completed - no tool calls and no explicit continuation signal followed by another iteration.
 
-So the ReAct loop is not spinning wildly for hundreds of iterations on this trace, but there are aspects of its design that can make each LLM call heavier and introduce contention when tools are used in parallel.
-ReAct loop issues
+        Interpretation: The model is "spinning." It produces a response that neither calls a tool nor emits the semantic status="done". Your code likely treats this as "keep going" until max_iterations is hit. If max_iterations is 10 and each LLM call takes 20-30s, you get 4-5 minutes of wasted time per task.
 
-From execute_step_react in base.rs there are several design choices that can hurt latency under some workloads.
+        Fix: If a ReAct step produces no tool calls and no done signal, it should be considered a failure or a forced completion (if the text looks like an answer), not a reason to retry. The model is effectively saying "I have nothing else to do," but the loop forces it to try again.
 
-​
+    RAG Retrieval Latency is Suspiciously High:
 
-    Assistant messages are never added back into the history.
-    Each iteration calls send_chat_messages with messages.clone(), but the only new messages added after a response are ChatMessage::user("Tool Result: ...") or ChatMessage::user("Tool Error: ..."). The assistant’s previous response (response.message.content) is never pushed as a ChatMessage::assistant.
+        Observation: The rag_retrieval spans are surprisingly slow for a local agent.
 
-​
+            Span retrieve_rag_context: 30.5 seconds.
 
-    This means the model does not see its own prior thoughts/tool calls; it only sees the original system/user context plus an accumulating pile of “Tool Result” user messages. That can lead to more iterations than necessary because the model repeatedly re‑derives the tool call logic instead of building on its last response.
+            Span retrieve_context: 28.0 seconds.
 
-Max iterations are fairly high with no semantic stop condition.
-The loop runs for _iteration in 0..max_iter with max_iter = max_iterations.unwrap_or(10).
+        Drill-down: Inside these, sparse_embed takes ~1.5s. The bulk of the time (25s+) is unaccounted for in child spans or hidden in retrieve_stream overhead.
 
-​
+        Hypothesis: You might be re-loading the embedding model or the Qdrant/vector DB connection on every query. Alternatively, if you are using tokio::fs to read thousands of files for a "naive" RAG implementation without a vector store, that would explain the 30s linear scan.
 
-    The only break condition is “no tool calls” in the last response; there is no explicit “task complete” signal in the schema. In bad prompt/model combinations, the model can ping‑pong between tool calls and results up to max_iter, adding extra LLM round‑trips.
+        Fix: Ensure your EmbeddingClient and Vector Store (Qdrant/LanceDB) are initialized once in main.rs and passed via Arc. Do not create new instances in the retrieve_context hot path.
 
-Very large tool descriptions are injected into messages.
-You already pass tools_info via .tools(tools_info.clone()) on the request, which Ollama uses for function calling. In addition, you serialize the tool list into a big # AVAILABLE TOOLS: user message that includes the full FilesystemTool::description() string (multi‑page documentation with all commands).
+    Intent Classification & Query Enhancement Overhead:
 
-​
+        Observation: classify_intent_llm takes 22-24 seconds. enhance_queries takes 51 seconds (!).
 
-    That description is huge and becomes part of the prompt every time the ReAct step runs. On a small local model, the extra hundreds of tokens of tool prose can easily add tens or hundreds of milliseconds per call.
+        Impact: Before a coding agent even starts thinking about code, you have burned ~75 seconds just preparing the context.
 
-Final parsing is brittle, adding retries/extra calls risk.
-The loop always tries to serde_json::from_str the final content into Value, falling back to Value::String if that fails.
+        Cause: These are distinct LLM calls (likely phi3 or similar). If they run sequentially for every sub-task, they kill performance.
 
-    ​
+        Fix:
 
-        With FormatType::StructuredJson(Box::new(JsonStructure::new::<()>>)), the model may struggle to satisfy both JSON output and tool‑call protocol simultaneously; misalignment here can cause extra thinking tokens or tool calls before it stops.
+            Parallelize: If you have multiple sub-tasks (e.g., "Create test script" and "Implement function"), run their enhance and classify steps in parallel tokio::spawn handles.
 
-None of these create an infinite loop in the trace you provided, but together they make each ReAct step heavier and more error‑prone than necessary.
-Tool execution and locking
+            Cache: The intent of "Write binary search" doesn't change much. Cache the intent classification for the conversation or project scope.
 
-Your tool plumbing introduces a couple of potential bottlenecks when several tasks use tools concurrently.
+            Disable for Sub-tasks: Often, the orchestrator's initial plan is specific enough ("Implement X in file Y"). You might not need a per-task RAG retrieval + intent classification. Trust the planner's prompt.
 
-    Global Mutex<ToolRegistry> held across async I/O.
-    In execute_step_react, you do tool_registry.lock().await.execute(...).await.
+    Parallelism "Lie":
 
-​
+        Observation: The trace shows Task 0 and Task 1 starting nearby, but their heavy spans (like execute_step_react) seem to stagger or overlap inefficiently.
 
-    If ToolRegistry::execute awaits on the tool (which it will for FilesystemTool), the tokio::sync::Mutex guard is held for the entire duration of filesystem I/O. That serializes all tool calls across all agents that share the same registry.
+        Thread Contention: You see busyns (CPU time) is relatively low compared to duration, but multiple heavy spans share thread.id (e.g., thread 14 and 15).
 
-FilesystemTool::call takes &mut self even though it is stateless.
-The tool’s call(&mut self, parameters: Value) method forces ToolRegistry to store executors as mutable and, combined with the global mutex, prevents concurrent calls to the same tool.
+        Risk: If you are running local LLMs (Ollama), they process requests sequentially by default. Even if Rust spawns 5 concurrent tasks, they will all queue up behind the single Ollama inference slot.
 
-​
+        Realization: You cannot "parallelize" execution effectively if the bottleneck is a single GPU/LLM endpoint. 5 tasks * 30s per inference = 150s minimum, no matter how async your Rust code is.
 
-    For a stateless tool that just delegates to tokio::fs, taking &self is enough and would allow per‑call concurrency once the registry is changed accordingly.
+        Fix: Use a stronger model for the Planner so it creates fewer, higher-quality tasks, rather than many small ones. Or, accept the serial nature and show a "Queueing..." status to the user.
 
-Single shared tool instance for all parallel coding tasks.
-The workflow executes a wave of 5 coding tasks in parallel, but all of them share the same filesystem instance in the global registry.
+Actionable Plan
 
-    ​
+    Kill the Zombie Loop:
+    In base.rs (execute_step_react), add logic:
 
-        With the current design, a burst of list / write calls from multiple coding agents will be serialized through that one mutex, adding queueing delay even though the underlying filesystem and Tokio can handle them concurrently.
-
-On the single example query this probably adds modest delays (filesystem ops are fast), but once you have heavier tools or more tasks, it can significantly stretch execution time.
-Extra LLM / RAG work around the ReAct step
-
-The orchestrator and RAG stack add additional LLM hops around your main coding agents, which show up clearly in the logs.
-
-    A “moderate” query is decomposed via the planning agent, which itself uses a two‑step workflow: a ReAct Project Structure Analysis step with filesystem access, then a OneShot Task Decomposition Planning step.
-
-​
-
-    That means at least one ReAct step (1–N LLM calls) plus one extra LLM call for planning before any coding agent runs.
-
-Each coding task then goes through RAG retrieval and an intent‑classification LLM call (phi3mini), followed by the actual generation step. The logs show repeated classify_intent_llm and “Querying intent classification model phi3mini” entries for each subtask.
-
-​
-
-    With 5 coding subtasks, that can easily become 5–10 extra LLM calls per query on top of the planning agent and RAG rewriter. On a local CPU‑bound model, that cost dominates any Rust‑side overhead.
-
-ONNX Runtime for embeddings (all-MiniLM-L6-v2) is initialised via EmbeddingClient and SmartMultiSourceRag::new, which allocates tens of MB and takes about 2–3 seconds once.
-
-    ​
-
-        If the orchestrator is accidentally constructed per request instead of once at server startup, you would pay that 2–3 s penalty on every query.
-
-Concrete fixes and diagnostics
-
-Given your suspicion around ReAct/tool usage, these are the most impactful, targeted changes to try:
-
-    Tighten the ReAct protocol.
-
-        Push each assistant response into messages as ChatMessage::assistant so the model sees its own prior reasoning.
-
-        Add an explicit "done" flag or status field in the structured output schema and break the loop when the model sets status = "done" instead of relying solely on "no tool calls".
-
-        Lower max_iterations for the planning ReAct step (e.g. 2–3) and any simple tools‑only analysis steps; your filesystem‑based project scan rarely needs 10 rounds.
-
-    Reduce prompt bloat from tools.
-
-        Keep .tools(tools_info) on the request, but remove or drastically shorten the human‑readable # AVAILABLE TOOLS message. At minimum, don't inline the full FilesystemTool::description(); provide a one‑paragraph summary and let the formal tool schema do the rest.
-
-    ​
-
-Make tools concurrent and reduce contention.
-
-    Change ToolExecutor::call(&mut self, ...) to &self for stateless tools like filesystem, and update ToolRegistry so it doesn't hold a global Mutex across async I/O; use per‑tool Arc<dyn ToolExecutor + Send + Sync> and, if needed, internal Mutex only around truly mutable state.
-
-    ​
-
-Measure per‑iteration and per‑tool timings.
-
-    Add logging inside the ReAct loop with iteration, number of tool_calls, and elapsed time per send_chat_messages plus per execute(...) call. That will tell you immediately if some prompts are hitting max_iter or if tools are backing up behind the global mutex.
-
-    ​
-
-Ensure orchestrator and RAG are singletons.
-
-    Verify that Orchestrator::new is called once on server startup and reused, so the expensive ORT initialisation is not repeated per request.
-
----
-
-## IMPLEMENTATION TODO LIST
-
-### Phase 1: ReAct Loop Core Fixes ✅ PRIORITY
-- [x] **Fix Assistant Message History** (base.rs:300-335)
-  - Add `messages.push(ChatMessage::assistant(response.message.content.clone()))` after LLM response
-  - Ensure model sees its own reasoning between iterations
-  - Location: `execute_step_react()` method in base.rs
-
-- [x] **Add Semantic Stop Conditions**
-  - Define step-specific structured outputs with `status: "done" | "continue" | "error"`
-  - Break ReAct loop when `status = "done"` instead of just no tool calls
-  - Implement per-step output schemas instead of single agent schema
-
-- [x] **Reduce Tool Description Injection**
-  - Move tool descriptions to initial system prompt only (lines 285-290)
-  - Remove repeated `# AVAILABLE TOOLS:` injection in each iteration
-  - Keep `.tools(tools_info)` for function calling but remove human-readable descriptions
-
-### Phase 2: Tool Concurrency ✅ PRIORITY
-- [x] **Fix ToolExecutor Signature** (tools/mod.rs:73-76)
-  - Change `async fn call(&mut self, parameters: Value)` to `&self`
-  - Update FilesystemTool and other stateless tools to use `&self`
-  - Location: ToolExecutor trait definition
-
-- [x] **Replace Global Tool Mutex** (tools/mod.rs:115-122)
-  - Change `tools: HashMap<String, Box<dyn ToolExecutor>>` to `HashMap<String, Arc<dyn ToolExecutor + Send + Sync>>`
-  - Remove global mutex from ToolRegistry::execute
-  - Enable concurrent tool calls across parallel agents
-
-- [x] **Update Tool Registry Execute Method**
-  - Remove `.lock().await` from tool execution path
-  - Allow multiple agents to call tools simultaneously
-  - Keep per-tool synchronization only if needed for mutable state
-
-### Phase 3: Context & Structure Optimization
-- [x] **Implement Step-Specific Output Schemas**
-  - Define different structured outputs per workflow step type
-  - Remove irrelevant structure requirements for simple analysis steps
-  - Use lighter schemas for tool-only steps vs final output steps
-
-- [x] **Optimize Context Injection**
-  - Move static tool info to system prompt instead of per-iteration user messages
-  - Reduce token count per ReAct iteration by 200-500 tokens
-  - Preserve essential context while eliminating bloat
-
-### Phase 4: Performance Monitoring & Validation
-- [ ] **Add ReAct Loop Instrumentation**
-  - Log iteration count, tool call count, and timing per step
-  - Add spans for `send_chat_messages` and `tool.execute()` calls
-  - Detect max_iteration hits and tool contention
-
-- [ ] **Validate Performance Improvements**
-  - Measure before/after execution times for sample queries
-  - Confirm tool concurrency with parallel agent execution
-  - Verify token usage reduction in logs
-
-- [ ] **Add Structured Logging**
-  - Track per-iteration metrics in ReAct loops
-  - Monitor tool execution queue depth
-  - Alert on performance regressions
-
-### Progress Log:
-- [2025-11-23] Analysis completed - identified 5 critical performance bottlenecks
-- [2025-11-23] Implementation plan created and approved
-- [ ] Phase 1 implementation started
-- [ ] Phase 2 implementation started
-- [ ] Phase 3 implementation started
-- [ ] Phase 4 validation completed
+rust
+if tool_calls.is_empty() && !has_stop_signal {
+    warn!("Model returned no tools and no done signal. Forcing exit.");
+    break; // or return Ok(StepResult::success(content))
+}

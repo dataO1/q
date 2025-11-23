@@ -109,6 +109,11 @@ pub trait TypedAgent: Send + Sync {
     /// Define the workflow steps for this agent
     /// Each agent can define its own sequence of steps, each either OneShot or ReAct
     fn define_workflow_steps(&self, context: &AgentContext) -> Vec<WorkflowStep>;
+    
+    /// Estimate token count (rough: 1 token ≈ 4 characters)
+    fn estimate_tokens(text: &str) -> usize {
+        (text.len() / 4).max(1)
+    }
 
     /// Execute workflow steps sequentially
     async fn execute_workflow(
@@ -234,18 +239,37 @@ pub trait TypedAgent: Send + Sync {
             step.name, self.model(), messages.len());
         
         // Execute LLM call with dedicated span instrumentation
+        let prompt_tokens = Self::estimate_tokens(&messages.iter().map(|m| m.content.clone()).collect::<Vec<_>>().join("\n"));
+        let start_time = std::time::Instant::now();
+        
         let llm_call_future = async {
             self.client().send_chat_messages(request).await
         };
         
         let response = llm_call_future
-            .instrument(tracing::info_span!("llm_call", 
+            .instrument(tracing::info_span!("llm_inference", 
                 step_id = %step.id,
                 step_name = %step.name,
-                model = %self.model(),
+                "llm.provider" = "ollama",
+                "llm.model" = %self.model(),
+                "llm.token_count.prompt" = prompt_tokens,
+                "llm.token_count.completion" = tracing::field::Empty,
+                "llm.latency_per_token" = tracing::field::Empty,
                 message_count = messages.len()
             ))
             .await?;
+            
+        // Calculate and record completion metrics
+        let completion_tokens = Self::estimate_tokens(&response.message.content);
+        let duration = start_time.elapsed();
+        let latency_per_token = if completion_tokens > 0 {
+            duration.as_millis() / completion_tokens as u128
+        } else { 0 };
+        
+        // Record completion metrics in span
+        let current_span = tracing::Span::current();
+        current_span.record("llm.token_count.completion", &completion_tokens);
+        current_span.record("llm.latency_per_token", &format!("{}ms", latency_per_token));
         
         debug!("LLM call completed for OneShot step '{}' (response length: {} chars)", 
             step.name, response.message.content.len());
@@ -319,11 +343,20 @@ pub trait TypedAgent: Send + Sync {
         let mut tool_executions = Vec::new();
         let max_iter = max_iterations.unwrap_or(10);
         let mut latest_response = None;
+        let mut completed_iterations = 0;
 
         info!("Starting ReAct loop for step '{}' with max {} iterations", step.name, max_iter);
         
         for iteration in 0..max_iter {
-            let iteration_span = tracing::info_span!("react_iteration", iteration = iteration, step_id = %step.id);
+            completed_iterations = iteration + 1;
+            let iteration_span = tracing::info_span!("react_iteration", 
+                iteration = iteration, 
+                step_id = %step.id,
+                "agent.name" = %self.agent_type(),
+                "agent.iteration" = iteration + 1,
+                "agent.state" = "thinking",
+                "agent.stop_reason" = tracing::field::Empty
+            );
             let _enter = iteration_span.enter();
             
             debug!("ReAct iteration {}/{} starting", iteration + 1, max_iter);
@@ -337,18 +370,37 @@ pub trait TypedAgent: Send + Sync {
                 iteration + 1, self.model(), messages.len(), tools_info.len());
             
             // Execute LLM call with dedicated span instrumentation
+            let prompt_tokens = Self::estimate_tokens(&messages.iter().map(|m| m.content.clone()).collect::<Vec<_>>().join("\n"));
+            let start_time = std::time::Instant::now();
+            
             let llm_call_future = async {
                 self.client().send_chat_messages(request).await
             };
             
             let response = llm_call_future
-                .instrument(tracing::info_span!("llm_call", 
+                .instrument(tracing::info_span!("llm_inference", 
                     iteration = iteration,
-                    model = %self.model(),
+                    "llm.provider" = "ollama",
+                    "llm.model" = %self.model(),
+                    "llm.token_count.prompt" = prompt_tokens,
+                    "llm.token_count.completion" = tracing::field::Empty,
+                    "llm.latency_per_token" = tracing::field::Empty,
                     message_count = messages.len(),
                     tool_count = tools_info.len()
                 ))
                 .await?;
+                
+            // Calculate and record completion metrics
+            let completion_tokens = Self::estimate_tokens(&response.message.content);
+            let duration = start_time.elapsed();
+            let latency_per_token = if completion_tokens > 0 {
+                duration.as_millis() / completion_tokens as u128
+            } else { 0 };
+            
+            // Record completion metrics in span
+            let current_span = tracing::Span::current();
+            current_span.record("llm.token_count.completion", &completion_tokens);
+            current_span.record("llm.latency_per_token", &format!("{}ms", latency_per_token));
                 
             latest_response = Some(response.message.content.clone());
             
@@ -366,15 +418,21 @@ pub trait TypedAgent: Send + Sync {
 
             // Process tool calls if any
             if !response.message.tool_calls.is_empty() {
+                // Update agent state to tool_use
+                iteration_span.record("agent.state", "tool_use");
                 let tool_calls = response.message.tool_calls;
                 for (tool_idx, tool_call) in tool_calls.into_iter().enumerate() {
+                    
                     let tool_execution_future = async {
                         let mut execution = ToolExecution::new(&tool_call.function.name, &tool_call.function.arguments);
                         
                         debug!("Executing tool '{}' with args: {}", tool_call.function.name, tool_call.function.arguments);
 
                         // Execute tool
-                        match tool_registry.execute(&tool_call.function.name, tool_call.function.arguments).await {
+                        let tool_name = &tool_call.function.name;
+                        let tool_args = tool_call.function.arguments;
+                        let result = (*tool_registry).execute_tool(tool_name, tool_args).await;
+                        match result {
                             Ok(result) => {
                                 debug!("Tool '{}' succeeded (result length: {} chars)", tool_call.function.name, result.len());
                                 execution.result = Some(result.clone());
@@ -405,19 +463,28 @@ pub trait TypedAgent: Send + Sync {
                 }
             } else {
                 // No tool calls - check for semantic completion
+                iteration_span.record("agent.state", "done");
+                
                 // Try to parse response for semantic stop conditions
                 if let Ok(step_output) = serde_json::from_str::<ReactStepOutput>(&response.message.content) {
                     if step_output.status.to_lowercase() == "done" ||
                        step_output.status.to_lowercase() == "complete" ||
                        step_output.status.to_lowercase() == "finished" {
+                        iteration_span.record("agent.stop_reason", "stop_sequence");
                         debug!("ReAct step completed with semantic stop condition: {}", step_output.status);
                         break;
                     }
                 }
                 // If no valid semantic output but no tool calls, step is complete
+                iteration_span.record("agent.stop_reason", "no_tool_calls");
                 info!("ReAct step completed - no tool calls and no explicit continuation signal (iteration {})", iteration + 1);
                 break;
             }
+        }
+
+        // Check if we exited due to max iterations
+        if completed_iterations >= max_iter {
+            info!("ReAct loop completed due to max iterations reached ({}/{})", completed_iterations, max_iter);
         }
 
         // Parse final response

@@ -116,8 +116,14 @@ impl ToolRegistry {
 
     /// Execute specified tool with JSON args asynchronously
     /// Uses Arc for lock-free concurrent access across multiple agents
-    #[instrument(skip(self), fields(tool_name = %tool_name, args = %args))]
-    pub async fn execute(&self, tool_name: &str, args: serde_json::Value) -> Result<String> {
+    #[instrument(skip(self), fields(
+        tool_name = %tool_name,
+        tool_action = tracing::field::Empty,
+        tool_target = tracing::field::Empty,
+        tool_status = tracing::field::Empty,
+        args = %args
+    ))]
+    pub async fn execute_tool(&self, tool_name: &str, args: serde_json::Value) -> Result<String> {
         let tool = {
             // Acquire read lock, get the tool, and DROP the lock immediately
             let tools = self.tools.read().unwrap();
@@ -126,26 +132,102 @@ impl ToolRegistry {
 
         if let Some(tool) = tool {
             debug!("Executing tool '{}'", tool_name);
-            
+
+            // Extract tool action and target from args
+            let (action, target) = Self::parse_tool_details(tool_name, &args);
+
+            // Record business attributes in span
+            let current_span = tracing::Span::current();
+            current_span.record("tool.action", &action);
+            current_span.record("tool.target", &target);
+
             // Execute without holding the registry lock
             // Note: ToolExecutor::call should take &self, not &mut self
             let result = tool.call(args).await;
-            
+
             match &result {
                 Ok(output) => {
-                    info!("Tool '{}' completed successfully (output length: {} chars)", 
+                    current_span.record("tool.status", "ok");
+                    info!("Tool '{}' completed successfully (output length: {} chars)",
                         tool_name, output.len());
                 }
                 Err(e) => {
+                    current_span.record("tool.status", "error");
                     error!("Tool '{}' failed: {}", tool_name, e);
                 }
             }
-            
+
             result
         } else {
+            let current_span = tracing::Span::current();
+            current_span.record("tool.status", "not_found");
             error!("Tool not found: {}", tool_name);
             Err(anyhow::anyhow!("Tool not found: {}", tool_name))
         }
+    }
+
+    /// Parse tool details from arguments to extract action and target
+    /// Provides business context for debugging tool executions
+    fn parse_tool_details(tool_name: &str, args: &serde_json::Value) -> (String, String) {
+        let action = match tool_name {
+            "filesystem" => {
+                // Extract filesystem operation from args
+                if let Some(operation) = args.get("operation") {
+                    operation.as_str().unwrap_or("unknown").to_string()
+                } else if args.get("path").is_some() {
+                    // Infer operation based on other fields
+                    if args.get("content").is_some() {
+                        "write_file".to_string()
+                    } else {
+                        "read_file".to_string()
+                    }
+                } else {
+                    "filesystem_op".to_string()
+                }
+            }
+            "lsp" => {
+                // Extract LSP operation
+                if let Some(method) = args.get("method") {
+                    method.as_str().unwrap_or("unknown").to_string()
+                } else if let Some(command) = args.get("command") {
+                    command.as_str().unwrap_or("unknown").to_string()
+                } else {
+                    "lsp_op".to_string()
+                }
+            }
+            _ => tool_name.to_string()
+        };
+
+        let target = match tool_name {
+            "filesystem" => {
+                // Extract file path
+                args.get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown_path")
+                    .to_string()
+            }
+            "lsp" => {
+                // Extract target file or project
+                args.get("uri")
+                    .or_else(|| args.get("file_path"))
+                    .or_else(|| args.get("path"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown_target")
+                    .to_string()
+            }
+            _ => {
+                // Generic target extraction - look for common field names
+                args.get("target")
+                    .or_else(|| args.get("path"))
+                    .or_else(|| args.get("file"))
+                    .or_else(|| args.get("resource"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown_target")
+                    .to_string()
+            }
+        };
+
+        (action, target)
     }
 }
 

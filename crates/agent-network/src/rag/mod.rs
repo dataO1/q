@@ -91,13 +91,16 @@ impl ContextProvider {
     }
 
     /// Retrieve RAG context from SmartMultiSourceRag
-    #[instrument(skip(self))]
+    #[instrument(skip(self), fields(
+        rag.query = %query,
+        token_budget = self.token_budget / 2
+    ))]
     async fn retrieve_rag_context(&self,
         query: String,
         project_scope: ProjectScope,
         conversation_id: ConversationId,
         ) -> AgentNetworkResult<FormattedRagContext> {
-        debug!("Querying RAG with refined query");
+        debug!("Querying RAG with refined query: {}", query);
 
         // Call SmartMultiSourceRag::retrieve_stream with task-specific query
         let stream = self.rag.clone().retrieve_stream(
