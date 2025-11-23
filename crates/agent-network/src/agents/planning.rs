@@ -111,7 +111,7 @@ impl PlanningAgent {
                 {'id': 'task-1', 'agent_type': '<agent_type>', 'description': 'Complete implementation including all components', 'dependencies': []}
               ]
             }
-            
+
             COMPLEX (2-3 tasks if truly needed):
             {
               'subtasks': [
@@ -138,16 +138,17 @@ impl TypedAgent for PlanningAgent {
     fn define_workflow_steps(&self, context: &crate::agents::AgentContext) -> Vec<crate::agents::base::WorkflowStep> {
         use crate::agents::base::{WorkflowStep, StepExecutionMode};
         use std::collections::HashMap;
-        
+
         // Multi-step workflow for planning: analysis, then planning
         vec![
             WorkflowStep {
                 id: "analyze_structure".to_string(),
                 name: "Project Structure Analysis".to_string(),
                 description: "Analyze the project structure using filesystem tool to understand the codebase layout and existing files".to_string(),
-                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(5) }, // Needs filesystem tool
+                execution_mode: StepExecutionMode::OneShot, // Needs filesystem tool
                 required_tools: vec!["filesystem".to_string()],
                 parameters: HashMap::new(),
+                formatted: false,
             },
             WorkflowStep {
                 id: "generate_plan".to_string(),
@@ -156,6 +157,7 @@ impl TypedAgent for PlanningAgent {
                 execution_mode: StepExecutionMode::OneShot, // Pure planning, no tools needed
                 required_tools: vec![],
                 parameters: HashMap::new(),
+                formatted: true,
             }
         ]
     }

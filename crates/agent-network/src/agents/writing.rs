@@ -65,7 +65,7 @@ impl TypedAgent for WritingAgent {
     fn define_workflow_steps(&self, _context: &crate::agents::AgentContext) -> Vec<crate::agents::base::WorkflowStep> {
         use crate::agents::base::{WorkflowStep, StepExecutionMode};
         use std::collections::HashMap;
-        
+
         // Simple single-step workflow for writing: pure content generation
         vec![WorkflowStep {
             id: "generate_content".to_string(),
@@ -74,6 +74,7 @@ impl TypedAgent for WritingAgent {
             execution_mode: StepExecutionMode::OneShot, // Writing is typically pure LLM generation
             required_tools: vec![], // No tools needed for content generation
             parameters: HashMap::new(),
+            formatted: false,
         }]
     }
 }

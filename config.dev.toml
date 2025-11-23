@@ -30,7 +30,7 @@ redis_url = "redis://localhost:16379"       # Test Redis
 
 [rag]
 max_results = 5
-query_enhancement_model = "qwen2.5:7b"
+query_enhancement_model = "qwen2.5:1.5b"
 classification_model = "phi3:mini"
 
 [rag.reranking_weights]
@@ -43,7 +43,7 @@ dependency_boost = 0.8
 [[agent_network.agents]]
 id = "coding-1"
 agent_type = "Coding"
-model = "qwen2.5-coder:7b"  # Down from 32b → 90% smaller
+model = "qwen2.5-coder:1.5b"  # Down from 32b → 90% smaller
 temperature = 0.1
 max_tokens = 4096
 system_prompt = """You are an expert coding assistant.
@@ -62,7 +62,7 @@ required_tools = ["read_file", "write_file"]
 [[agent_network.agents]]
 id = "planning-1"
 agent_type = "Planning"
-model = "qwen2.5:3b"
+model = "qwen2.5:1.5b"
 temperature = 0.4
 max_tokens = 2048
 system_prompt = """You are a planning agent that decomposes complex tasks.
@@ -83,7 +83,7 @@ required_tools = []
 [[agent_network.agents]]
 id = "evaluator-1"
 agent_type = "Evaluator"
-model = "qwen2.5:7b"
+model = "qwen2.5:1.5b"
 temperature = 0.3
 max_tokens = 1024
 system_prompt = """You are a code reviewer and quality evaluator.

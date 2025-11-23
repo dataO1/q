@@ -104,17 +104,19 @@ impl TypedAgent for CodingAgent {
                 id: "analyze_codebase".to_string(),
                 name: "Codebase Analysis".to_string(),
                 description: "Analyze relevant code files, understand existing structure and dependencies for the coding task".to_string(),
-                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(10) }, // Needs filesystem tool for reading
+                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(1) }, // Needs filesystem tool for writing
                 required_tools: vec!["filesystem".to_string()],
                 parameters: HashMap::new(),
+                formatted: false,
             },
             WorkflowStep {
                 id: "implement_code".to_string(),
                 name: "Code Implementation".to_string(),
                 description: "Generate and write the actual code based on requirements and existing codebase analysis".to_string(),
-                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(3) }, // Needs filesystem tool for writing
+                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(1) }, // Needs filesystem tool for writing
                 required_tools: vec!["filesystem".to_string()],
                 parameters: HashMap::new(),
+                formatted: false,
             }
         ]
     }

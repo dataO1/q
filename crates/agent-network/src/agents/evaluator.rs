@@ -67,12 +67,12 @@ impl TypedAgent for EvaluatorAgent {
     fn temperature(&self) -> f32 { self.temperature }
     fn client(&self) -> &Ollama { &self.client }
     type Output = EvaluatorOutput;
-    
+
     /// Define evaluator workflow steps with file reading logic
     fn define_workflow_steps(&self, context: &crate::agents::AgentContext) -> Vec<crate::agents::base::WorkflowStep> {
         use crate::agents::base::{WorkflowStep, StepExecutionMode};
         use std::collections::HashMap;
-        
+
         // Extract files to evaluate from dependency tool executions
         let mut files_to_evaluate = Vec::new();
         for (_task_id, dep_output) in &context.dependency_outputs {
@@ -106,7 +106,7 @@ impl TypedAgent for EvaluatorAgent {
                 }
                 Err(e) => {
                     file_contents_param.insert(
-                        file_path.clone(), 
+                        file_path.clone(),
                         serde_json::Value::String(format!("Error reading file: {}", e))
                     );
                 }
@@ -130,6 +130,7 @@ impl TypedAgent for EvaluatorAgent {
             execution_mode: StepExecutionMode::OneShot, // Evaluator doesn't need tools, just analyzes
             required_tools: vec![], // No tools needed for evaluation
             parameters: step_parameters,
+            formatted: false,
         }]
     }
 }

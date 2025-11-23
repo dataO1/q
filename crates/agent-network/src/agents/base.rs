@@ -42,6 +42,7 @@ pub struct WorkflowStep {
     pub description: String,
     pub execution_mode: StepExecutionMode,
     pub required_tools: Vec<String>,
+    pub formatted: bool,
     pub parameters: HashMap<String, Value>, // Step-specific configuration
 }
 
@@ -109,7 +110,7 @@ pub trait TypedAgent: Send + Sync {
     /// Define the workflow steps for this agent
     /// Each agent can define its own sequence of steps, each either OneShot or ReAct
     fn define_workflow_steps(&self, context: &AgentContext) -> Vec<WorkflowStep>;
-    
+
     /// Estimate token count (rough: 1 token ≈ 4 characters)
     fn estimate_tokens(text: &str) -> usize {
         (text.len() / 4).max(1)
@@ -204,11 +205,6 @@ pub trait TypedAgent: Send + Sync {
             ))
         ];
 
-        // Add relevant context
-        if let Some(rag_context) = &context.rag_context {
-            messages.push(ChatMessage::user(format!("# RAG CONTEXT:\n{}", rag_context)));
-        }
-
         if !context.dependency_outputs.is_empty() {
             let dependency_msg = serde_json::to_string_pretty(&context.dependency_outputs)
                 .unwrap_or_else(|_| "Failed to serialize dependency outputs".to_string());
@@ -232,17 +228,19 @@ pub trait TypedAgent: Send + Sync {
 
         // Execute LLM call
         let json_structure = JsonStructure::new::<Self::Output>();
-        let request = ChatMessageRequest::new(self.model().to_string(), messages.clone())
-            .format(FormatType::StructuredJson(Box::new(json_structure)));
+        let mut request = ChatMessageRequest::new(self.model().to_string(), messages.clone());
+        if step.formatted{
+            request = request.format(FormatType::StructuredJson(Box::new(json_structure)));
+        }
 
-        debug!("Starting LLM call for OneShot step '{}' (model: {}, messages: {})", 
+        debug!("Starting LLM call for OneShot step '{}' (model: {}, messages: {})",
             step.name, self.model(), messages.len());
-        
+
         // Execute LLM call with enhanced span instrumentation and real-time events
         let prompt_tokens = Self::estimate_tokens(&messages.iter().map(|m| m.content.clone()).collect::<Vec<_>>().join("\n"));
-        
+
         // Create span with all business attributes upfront
-        let llm_span = tracing::info_span!("llm_inference", 
+        let llm_span = tracing::info_span!("llm_inference",
             step_id = %step.id,
             step_name = %step.name,
             "llm.provider" = "ollama",
@@ -252,42 +250,42 @@ pub trait TypedAgent: Send + Sync {
             "llm.latency_per_token" = tracing::field::Empty,
             message_count = messages.len()
         );
-        
+
         let response = async {
             // Record request start event with details
-            info!(target: "llm_inference", "llm_request_started: model={}, prompt_tokens={}, message_count={}, execution_mode=oneshot", 
+            info!(target: "llm_inference", "llm_request_started: model={}, prompt_tokens={}, message_count={}, execution_mode=oneshot",
                 self.model(), prompt_tokens, messages.len());
-            
+
             let start_time = std::time::Instant::now();
-            info!("Starting LLM inference for OneShot step '{}' (model: {}, prompt tokens: {})", 
+            info!("Starting LLM inference for OneShot step '{}' (model: {}, prompt tokens: {})",
                 step.name, self.model(), prompt_tokens);
-                
+
             // Execute the actual LLM call
             let response = self.client().send_chat_messages(request).await?;
             let duration = start_time.elapsed();
-            
+
             // Calculate completion metrics immediately
             let completion_tokens = Self::estimate_tokens(&response.message.content);
             let latency_per_token = if completion_tokens > 0 {
                 duration.as_millis() / completion_tokens as u128
             } else { 0 };
-            
+
             // Record response received event with details
-            info!(target: "llm_inference", "llm_response_received: completion_tokens={}, total_latency_ms={}, latency_per_token_ms={}, response_length={}", 
+            info!(target: "llm_inference", "llm_response_received: completion_tokens={}, total_latency_ms={}, latency_per_token_ms={}, response_length={}",
                 completion_tokens, duration.as_millis(), latency_per_token, response.message.content.len());
-            
+
             // Record completion metrics in span
             let current_span = tracing::Span::current();
             current_span.record("llm.token_count.completion", &completion_tokens);
             current_span.record("llm.latency_per_token", &format!("{}ms", latency_per_token));
-            
-            info!("LLM inference completed for OneShot step '{}' (response: {} chars, completion tokens: {}, latency: {}ms)", 
+
+            info!("LLM inference completed for OneShot step '{}' (response: {} chars, completion tokens: {}, latency: {}ms)",
                 step.name, response.message.content.len(), completion_tokens, duration.as_millis());
-                
+
             Ok::<_, anyhow::Error>(response)
         }.instrument(llm_span).await?;
-        
-        debug!("LLM call completed for OneShot step '{}' (response length: {} chars)", 
+
+        debug!("LLM call completed for OneShot step '{}' (response length: {} chars)",
             step.name, response.message.content.len());
 
         // Parse response
@@ -326,11 +324,6 @@ pub trait TypedAgent: Send + Sync {
             ))
         ];
 
-        // Add context (similar to oneshot but will be extended in ReAct loop)
-        if let Some(rag_context) = &context.rag_context {
-            messages.push(ChatMessage::user(format!("# RAG CONTEXT:\n{}", rag_context)));
-        }
-
         if !context.dependency_outputs.is_empty() {
             let dependency_msg = serde_json::to_string_pretty(&context.dependency_outputs)
                 .unwrap_or_else(|_| "Failed to serialize dependency outputs".to_string());
@@ -362,11 +355,11 @@ pub trait TypedAgent: Send + Sync {
         let mut completed_iterations = 0;
 
         info!("Starting ReAct loop for step '{}' with max {} iterations", step.name, max_iter);
-        
+
         for iteration in 0..max_iter {
             completed_iterations = iteration + 1;
-            let iteration_span = tracing::info_span!("react_iteration", 
-                iteration = iteration, 
+            let iteration_span = tracing::info_span!("react_iteration",
+                iteration = iteration,
                 step_id = %step.id,
                 "agent.name" = %self.agent_type(),
                 "agent.iteration" = iteration + 1,
@@ -374,22 +367,25 @@ pub trait TypedAgent: Send + Sync {
                 "agent.stop_reason" = tracing::field::Empty
             );
             let _enter = iteration_span.enter();
-            
+
             debug!("ReAct iteration {}/{} starting", iteration + 1, max_iter);
             // Build request with tools
             let json_structure = JsonStructure::new::<Self::Output>();
-            let request = ChatMessageRequest::new(self.model().to_string(), messages.clone())
-                .format(FormatType::StructuredJson(Box::new(json_structure)))
+            let mut request = ChatMessageRequest::new(self.model().to_string(), messages.clone())
                 .tools(tools_info.clone());
 
-            debug!("Starting LLM call for iteration {} (model: {}, messages: {}, tools: {})", 
+            if step.formatted{
+                request = request.format(FormatType::StructuredJson(Box::new(json_structure)));
+            }
+
+            debug!("Starting LLM call for iteration {} (model: {}, messages: {}, tools: {})",
                 iteration + 1, self.model(), messages.len(), tools_info.len());
-            
+
             // Execute LLM call with enhanced span instrumentation and real-time events
             let prompt_tokens = Self::estimate_tokens(&messages.iter().map(|m| m.content.clone()).collect::<Vec<_>>().join("\n"));
-            
+
             // Create span with all business attributes upfront
-            let llm_span = tracing::info_span!("llm_inference", 
+            let llm_span = tracing::info_span!("llm_inference",
                 iteration = iteration,
                 "llm.provider" = "ollama",
                 "llm.model" = %self.model(),
@@ -399,44 +395,44 @@ pub trait TypedAgent: Send + Sync {
                 message_count = messages.len(),
                 tool_count = tools_info.len()
             );
-            
+
             let response = async {
                 // Record request start event with details
-                info!(target: "llm_inference", "llm_request_started: model={}, prompt_tokens={}, message_count={}, tool_count={}, iteration={}, execution_mode=react", 
+                info!(target: "llm_inference", "llm_request_started: model={}, prompt_tokens={}, message_count={}, tool_count={}, iteration={}, execution_mode=react",
                     self.model(), prompt_tokens, messages.len(), tools_info.len(), iteration + 1);
-                
+
                 let start_time = std::time::Instant::now();
-                info!("Starting LLM inference for ReAct iteration {} (model: {}, prompt tokens: {}, tools: {})", 
+                info!("Starting LLM inference for ReAct iteration {} (model: {}, prompt tokens: {}, tools: {})",
                     iteration + 1, self.model(), prompt_tokens, tools_info.len());
-                    
+
                 // Execute the actual LLM call
                 let response = self.client().send_chat_messages(request).await?;
                 let duration = start_time.elapsed();
-                
+
                 // Calculate completion metrics immediately
                 let completion_tokens = Self::estimate_tokens(&response.message.content);
                 let latency_per_token = if completion_tokens > 0 {
                     duration.as_millis() / completion_tokens as u128
                 } else { 0 };
-                
+
                 // Record response received event with details
-                info!(target: "llm_inference", "llm_response_received: completion_tokens={}, total_latency_ms={}, latency_per_token_ms={}, response_length={}, tool_calls_count={}, iteration={}", 
+                info!(target: "llm_inference", "llm_response_received: completion_tokens={}, total_latency_ms={}, latency_per_token_ms={}, response_length={}, tool_calls_count={}, iteration={}",
                     completion_tokens, duration.as_millis(), latency_per_token, response.message.content.len(), response.message.tool_calls.len(), iteration + 1);
-                
+
                 // Record completion metrics in span
                 let current_span = tracing::Span::current();
                 current_span.record("llm.token_count.completion", &completion_tokens);
                 current_span.record("llm.latency_per_token", &format!("{}ms", latency_per_token));
-                
-                info!("LLM inference completed for ReAct iteration {} (response: {} chars, completion tokens: {}, tool calls: {}, latency: {}ms)", 
+
+                info!("LLM inference completed for ReAct iteration {} (response: {} chars, completion tokens: {}, tool calls: {}, latency: {}ms)",
                     iteration + 1, response.message.content.len(), completion_tokens, response.message.tool_calls.len(), duration.as_millis());
-                    
+
                 Ok::<_, anyhow::Error>(response)
             }.instrument(llm_span).await?;
-                
+
             latest_response = Some(response.message.content.clone());
-            
-            debug!("LLM call completed for iteration {} (response length: {} chars, tool calls: {})", 
+
+            debug!("LLM call completed for iteration {} (response length: {} chars, tool calls: {})",
                 iteration + 1, response.message.content.len(), response.message.tool_calls.len());
             if response.message.tool_calls.is_empty() {
                 debug!("No tool calls in response - iteration may be complete");
@@ -454,10 +450,10 @@ pub trait TypedAgent: Send + Sync {
                 iteration_span.record("agent.state", "tool_use");
                 let tool_calls = response.message.tool_calls;
                 for (tool_idx, tool_call) in tool_calls.into_iter().enumerate() {
-                    
+
                     let tool_execution_future = async {
                         let mut execution = ToolExecution::new(&tool_call.function.name, &tool_call.function.arguments);
-                        
+
                         debug!("Executing tool '{}' with args: {}", tool_call.function.name, tool_call.function.arguments);
 
                         // Execute tool
@@ -477,13 +473,13 @@ pub trait TypedAgent: Send + Sync {
                                 messages.push(ChatMessage::user(format!("Tool Error: {}", error_msg)));
                             }
                         }
-                        
+
                         execution
                     };
-                    
+
                     // Execute tool with proper span instrumentation
                     let execution = tool_execution_future
-                        .instrument(tracing::info_span!("tool_execution", 
+                        .instrument(tracing::info_span!("tool_execution",
                             tool_name = %tool_call.function.name,
                             tool_idx = tool_idx,
                             iteration = iteration,
@@ -496,7 +492,7 @@ pub trait TypedAgent: Send + Sync {
             } else {
                 // No tool calls - check for semantic completion
                 iteration_span.record("agent.state", "done");
-                
+
                 // Try to parse response for semantic stop conditions
                 if let Ok(step_output) = serde_json::from_str::<ReactStepOutput>(&response.message.content) {
                     if step_output.status.to_lowercase() == "done" ||
@@ -554,9 +550,6 @@ pub trait Agent: Send + Sync {
 
     // Execute with type-erased result
     async fn execute(&self, context: AgentContext, tool_registry: Arc<ToolRegistry>) -> Result<AgentResult>;
-
-
-    async fn execute_single_shot(&self, context: AgentContext) -> Result<AgentResult> ;
 }
 
 // Blanket implementation: any TypedAgent automatically becomes an Agent
@@ -628,19 +621,6 @@ impl<T: TypedAgent> Agent for T {
         // All agents use workflow execution
         let workflow_steps = self.define_workflow_steps(&context);
         self.execute_workflow(context, workflow_steps, tool_registry).await
-    }
-
-    #[instrument(skip(self, context), fields(agent_id = %self.id()))]
-    async fn execute_single_shot(&self, context: AgentContext) -> Result<AgentResult> {
-        let messages = self.build_initial_messages(&context);
-
-        let json_structure = self.output_schema();
-        let request = ChatMessageRequest::new(self.model().to_string(), messages)
-            .format(FormatType::StructuredJson(Box::new(json_structure)));
-
-        let response = self.client().send_chat_messages(request).await?;
-        AgentResult::from_response(self.id(),response)
-            .context("Failed to create agent result")
     }
 }
 
