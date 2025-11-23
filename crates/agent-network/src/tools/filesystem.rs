@@ -126,7 +126,7 @@ impl ToolExecutor for FilesystemTool {
         }
     }
 
-    async fn call(&mut self, parameters: Value) -> Result<String> {
+    async fn call(&self, parameters: Value) -> Result<String> {
         // Extract command and params from JSON
         let command = parameters.get("command")
             .and_then(Value::as_str)

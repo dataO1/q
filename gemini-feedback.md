@@ -105,19 +105,19 @@ Given your suspicion around ReAct/tool usage, these are the most impactful, targ
 
         Push each assistant response into messages as ChatMessage::assistant so the model sees its own prior reasoning.
 
-        Add an explicit “done” flag or status field in the structured output schema and break the loop when the model sets status = "done" instead of relying solely on “no tool calls”.
+        Add an explicit "done" flag or status field in the structured output schema and break the loop when the model sets status = "done" instead of relying solely on "no tool calls".
 
         Lower max_iterations for the planning ReAct step (e.g. 2–3) and any simple tools‑only analysis steps; your filesystem‑based project scan rarely needs 10 rounds.
 
     Reduce prompt bloat from tools.
 
-        Keep .tools(tools_info) on the request, but remove or drastically shorten the human‑readable # AVAILABLE TOOLS message. At minimum, don’t inline the full FilesystemTool::description(); provide a one‑paragraph summary and let the formal tool schema do the rest.
+        Keep .tools(tools_info) on the request, but remove or drastically shorten the human‑readable # AVAILABLE TOOLS message. At minimum, don't inline the full FilesystemTool::description(); provide a one‑paragraph summary and let the formal tool schema do the rest.
 
     ​
 
 Make tools concurrent and reduce contention.
 
-    Change ToolExecutor::call(&mut self, ...) to &self for stateless tools like filesystem, and update ToolRegistry so it doesn’t hold a global Mutex across async I/O; use per‑tool Arc<dyn ToolExecutor + Send + Sync> and, if needed, internal Mutex only around truly mutable state.
+    Change ToolExecutor::call(&mut self, ...) to &self for stateless tools like filesystem, and update ToolRegistry so it doesn't hold a global Mutex across async I/O; use per‑tool Arc<dyn ToolExecutor + Send + Sync> and, if needed, internal Mutex only around truly mutable state.
 
     ​
 
@@ -130,3 +130,74 @@ Measure per‑iteration and per‑tool timings.
 Ensure orchestrator and RAG are singletons.
 
     Verify that Orchestrator::new is called once on server startup and reused, so the expensive ORT initialisation is not repeated per request.
+
+---
+
+## IMPLEMENTATION TODO LIST
+
+### Phase 1: ReAct Loop Core Fixes ✅ PRIORITY
+- [x] **Fix Assistant Message History** (base.rs:300-335)
+  - Add `messages.push(ChatMessage::assistant(response.message.content.clone()))` after LLM response
+  - Ensure model sees its own reasoning between iterations
+  - Location: `execute_step_react()` method in base.rs
+
+- [x] **Add Semantic Stop Conditions**
+  - Define step-specific structured outputs with `status: "done" | "continue" | "error"`
+  - Break ReAct loop when `status = "done"` instead of just no tool calls
+  - Implement per-step output schemas instead of single agent schema
+
+- [x] **Reduce Tool Description Injection**
+  - Move tool descriptions to initial system prompt only (lines 285-290)
+  - Remove repeated `# AVAILABLE TOOLS:` injection in each iteration
+  - Keep `.tools(tools_info)` for function calling but remove human-readable descriptions
+
+### Phase 2: Tool Concurrency ✅ PRIORITY
+- [x] **Fix ToolExecutor Signature** (tools/mod.rs:73-76)
+  - Change `async fn call(&mut self, parameters: Value)` to `&self`
+  - Update FilesystemTool and other stateless tools to use `&self`
+  - Location: ToolExecutor trait definition
+
+- [x] **Replace Global Tool Mutex** (tools/mod.rs:115-122)
+  - Change `tools: HashMap<String, Box<dyn ToolExecutor>>` to `HashMap<String, Arc<dyn ToolExecutor + Send + Sync>>`
+  - Remove global mutex from ToolRegistry::execute
+  - Enable concurrent tool calls across parallel agents
+
+- [x] **Update Tool Registry Execute Method**
+  - Remove `.lock().await` from tool execution path
+  - Allow multiple agents to call tools simultaneously
+  - Keep per-tool synchronization only if needed for mutable state
+
+### Phase 3: Context & Structure Optimization
+- [x] **Implement Step-Specific Output Schemas**
+  - Define different structured outputs per workflow step type
+  - Remove irrelevant structure requirements for simple analysis steps
+  - Use lighter schemas for tool-only steps vs final output steps
+
+- [x] **Optimize Context Injection**
+  - Move static tool info to system prompt instead of per-iteration user messages
+  - Reduce token count per ReAct iteration by 200-500 tokens
+  - Preserve essential context while eliminating bloat
+
+### Phase 4: Performance Monitoring & Validation
+- [ ] **Add ReAct Loop Instrumentation**
+  - Log iteration count, tool call count, and timing per step
+  - Add spans for `send_chat_messages` and `tool.execute()` calls
+  - Detect max_iteration hits and tool contention
+
+- [ ] **Validate Performance Improvements**
+  - Measure before/after execution times for sample queries
+  - Confirm tool concurrency with parallel agent execution
+  - Verify token usage reduction in logs
+
+- [ ] **Add Structured Logging**
+  - Track per-iteration metrics in ReAct loops
+  - Monitor tool execution queue depth
+  - Alert on performance regressions
+
+### Progress Log:
+- [2025-11-23] Analysis completed - identified 5 critical performance bottlenecks
+- [2025-11-23] Implementation plan created and approved
+- [ ] Phase 1 implementation started
+- [ ] Phase 2 implementation started
+- [ ] Phase 3 implementation started
+- [ ] Phase 4 validation completed

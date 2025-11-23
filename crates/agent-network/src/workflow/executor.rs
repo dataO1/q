@@ -172,7 +172,7 @@ impl WorkflowExecutor {
             audit_logger: Arc<AuditLogger>,
             project_scope: ProjectScope,
             conversation_id: ConversationId,
-            tool_registry: Arc<Mutex<ToolRegistry>>
+            tool_registry: Arc<ToolRegistry>
         ) -> AgentNetworkResult<Vec<TaskResult>> {
         let start_time = Instant::now();
         info!("Starting workflow execution: {} tasks", graph.node_count());
@@ -247,7 +247,7 @@ impl WorkflowExecutor {
         audit_logger: Arc<AuditLogger>,
         project_scope: ProjectScope,
         conversation_id: ConversationId,
-        tool_registry: Arc<Mutex<ToolRegistry>>
+        tool_registry: Arc<ToolRegistry>
     ) -> AgentNetworkResult<Vec<TaskResult>> {
         debug!("Executing wave {}: {} parallel tasks", wave.wave_index, wave.task_indices.len());
         // Add OTel attributes
@@ -408,7 +408,7 @@ async fn execute_single_task(
     file_locks: Arc<FileLockManager>,
     project_scope: ProjectScope,
     conversation_id: ConversationId,
-    tool_registry: Arc<Mutex<ToolRegistry>>,
+    tool_registry: Arc<ToolRegistry>,
     previous_results: &HashMap<String, TaskResult>
 ) -> AgentNetworkResult<TaskResult> {
     // Get agent
@@ -516,7 +516,7 @@ async fn execute_task_with_retry(
     wave_index: usize,
     project_scope: ProjectScope,
     conversation_id: ConversationId,
-    tool_registry: Arc<Mutex<ToolRegistry>>,
+    tool_registry: Arc<ToolRegistry>,
     previous_results: &HashMap<String, TaskResult>
 ) -> AgentNetworkResult<TaskResult> {
 

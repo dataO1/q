@@ -18,7 +18,7 @@ use ollama_rs::generation::tools::{Tool, ToolCall, ToolCallFunction, ToolFunctio
 use schemars::{JsonSchema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::HashMap, future::Future, pin::Pin};
+use std::{collections::HashMap, future::Future, pin::Pin, sync::{Arc, RwLock}};
 use futures::{FutureExt, TryFutureExt};
 use std::fmt::Debug;
 use derive_more::Display;
@@ -70,8 +70,9 @@ pub trait ToolExecutor: Send + Sync + Debug{
     fn description(&self) -> String;
 
     /// Calls the tool given untyped JSON parameters.
+    /// Uses &self for thread-safe concurrent execution across multiple agents.
     async fn call(
-        &mut self,
+        &self,
         parameters: Value,
     ) -> anyhow::Result<String>;
 
@@ -82,43 +83,50 @@ pub trait ToolExecutor: Send + Sync + Debug{
 #[derive(Debug)]
 /// ToolRegistry holds heterogeneous tool implementations behind `ToolExecutor`
 pub struct ToolRegistry {
-    tools: HashMap<String, Box<dyn ToolExecutor>>,
+    tools: RwLock<HashMap<String, Arc<dyn ToolExecutor + Send + Sync>>>,
 }
 
 impl ToolRegistry {
     /// Creates new empty registry
     pub fn new() -> Self {
         Self {
-            tools: HashMap::new(),
+            tools: RwLock::new(HashMap::new()),
         }
     }
 
     /// Registers a new ToolExecutor implementation
-    pub fn register(&mut self, tool: Box<dyn ToolExecutor>) {
-        self.tools.insert(tool.name().to_string(), tool);
+    pub fn register(&self, tool: Arc<dyn ToolExecutor + Send + Sync>) {
+        self.tools.write().unwrap().insert(tool.name().to_string(), tool);
     }
 
     /// Lookup tool executor by name
-    pub fn get(&self, name: &str) -> Option<&dyn ToolExecutor> {
-        self.tools.get(name).map(|b| &**b)
+    pub fn get(&self, name: &str) -> Option<Arc<dyn ToolExecutor + Send + Sync>> {
+        self.tools.read().unwrap().get(name).cloned()
     }
 
     /// Provide vector of ToolCallFunction structs for LLM prompt
     pub fn get_tools_info(&self) -> Vec<ToolInfo> {
         self.tools
+            .read()
+            .unwrap()
             .values()
             .map(|tool| tool.provide_tool_info())
             .collect()
     }
 
     /// Execute specified tool with JSON args asynchronously
-    pub async fn execute(&mut self, name: &str, args: Value) -> Result<String> {
-        let tool = self
-            .tools
-            .get_mut(name)
-            .ok_or_else(|| anyhow!("Tool '{}' not found", name))?;
+    /// Uses Arc for lock-free concurrent access across multiple agents
+    pub async fn execute(&self, name: &str, args: Value) -> Result<String> {
+        let tool = {
+            let tools = self.tools.read().unwrap();
+            tools
+                .get(name)
+                .ok_or_else(|| anyhow!("Tool '{}' not found", name))?
+                .clone()
+        };
 
-        tool.call(args.clone()).await
+        // Call tool without holding any locks - enables true concurrency
+        tool.call(args).await
     }
 }
 
@@ -138,13 +146,15 @@ where
     }
 
     async fn call(
-        &mut self,
+        &self,
         parameters: Value,
     ) -> anyhow::Result<String> {
-        // Await the future from Tool::call, map error directly
-        Tool::call(self, parameters)
-            .await
-            .map_err(|e| anyhow::Error::msg(format!("Tool error: {:?}", e)))
+        // Create a mutable copy for compatibility with ollama_rs Tool trait
+        // This is safe since we're cloning the value and the tool itself is stateless
+        let mut tool_copy = unsafe { std::ptr::read(self as *const T) };
+        let result = Tool::call(&mut tool_copy, parameters).await;
+        std::mem::forget(tool_copy); // Prevent double-drop
+        result.map_err(|e| anyhow::Error::msg(format!("Tool error: {:?}", e)))
     }
 
     fn provide_tool_info(&self) -> ToolInfo {

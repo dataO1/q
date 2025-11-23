@@ -17,6 +17,14 @@ use anyhow::{Context, Result, anyhow};
 
 use crate::{agents::AgentResult, error::AgentNetworkResult, tools::{ToolExecution, ToolRegistry}};
 
+/// ReAct step output for semantic stop conditions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReactStepOutput {
+    pub status: String,
+    pub reasoning: String,
+    pub result: Option<Value>,
+}
+
 /// Workflow step execution mode
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StepExecutionMode {
@@ -107,7 +115,7 @@ pub trait TypedAgent: Send + Sync {
         &self,
         context: AgentContext,
         workflow_steps: Vec<WorkflowStep>,
-        tool_registry: Arc<Mutex<ToolRegistry>>
+        tool_registry: Arc<ToolRegistry>
     ) -> Result<AgentResult> {
         let mut workflow_state = WorkflowState::new();
         let mut final_result = None;
@@ -246,7 +254,7 @@ pub trait TypedAgent: Send + Sync {
         &self,
         context: &AgentContext,
         step: &WorkflowStep,
-        tool_registry: Arc<Mutex<ToolRegistry>>,
+        tool_registry: Arc<ToolRegistry>,
         max_iterations: Option<usize>
     ) -> Result<StepResult> {
         // Build initial messages for this step
@@ -281,13 +289,8 @@ pub trait TypedAgent: Send + Sync {
                 serde_json::to_string_pretty(&step.parameters).unwrap_or_default())));
         }
 
-        // Add available tools
-        let tools_info = tool_registry.lock().await.get_tools_info();
-        if !tools_info.is_empty() {
-            if let Ok(available_tools) = serde_json::to_string_pretty(&tools_info) {
-                messages.push(ChatMessage::user(format!("# AVAILABLE TOOLS:\n{}", available_tools)));
-            }
-        }
+        // Get tools info for function calling schema only (not for message injection)
+        let tools_info = tool_registry.get_tools_info();
 
         // Add main user prompt
         messages.push(ChatMessage::user(format!("# USER PROMPT:\n{}", context.description)));
@@ -306,6 +309,10 @@ pub trait TypedAgent: Send + Sync {
 
             let response = self.client().send_chat_messages(request).await?;
             latest_response = Some(response.message.content.clone());
+            
+            // Add assistant response to message history to maintain conversation context
+            // This ensures the model can build on its previous reasoning in subsequent iterations
+            messages.push(ChatMessage::assistant(response.message.content.clone()));
 
             // Process tool calls if any
             if !response.message.tool_calls.is_empty() {
@@ -314,7 +321,7 @@ pub trait TypedAgent: Send + Sync {
                     let mut execution = ToolExecution::new(&tool_call.function.name, &tool_call.function.arguments);
 
                     // Execute tool
-                    match tool_registry.lock().await.execute(&tool_call.function.name, tool_call.function.arguments).await {
+                    match tool_registry.execute(&tool_call.function.name, tool_call.function.arguments).await {
                         Ok(result) => {
                             execution.result = Some(result.clone());
                             messages.push(ChatMessage::user(format!("Tool Result: {}", result)));
@@ -329,7 +336,18 @@ pub trait TypedAgent: Send + Sync {
                     tool_executions.push(execution);
                 }
             } else {
-                // No tool calls - step is complete
+                // No tool calls - check for semantic completion
+                // Try to parse response for semantic stop conditions
+                if let Ok(step_output) = serde_json::from_str::<ReactStepOutput>(&response.message.content) {
+                    if step_output.status.to_lowercase() == "done" || 
+                       step_output.status.to_lowercase() == "complete" ||
+                       step_output.status.to_lowercase() == "finished" {
+                        debug!("ReAct step completed with semantic stop condition: {}", step_output.status);
+                        break;
+                    }
+                }
+                // If no valid semantic output but no tool calls, step is complete
+                debug!("ReAct step completed - no tool calls and no explicit continuation signal");
                 break;
             }
         }
@@ -368,7 +386,7 @@ pub trait Agent: Send + Sync {
     fn output_schema(&self) -> JsonStructure;
 
     // Execute with type-erased result
-    async fn execute(&self, context: AgentContext, tool_registry: Arc<Mutex<ToolRegistry>>) -> Result<AgentResult>;
+    async fn execute(&self, context: AgentContext, tool_registry: Arc<ToolRegistry>) -> Result<AgentResult>;
 
 
     async fn execute_single_shot(&self, context: AgentContext) -> Result<AgentResult> ;
@@ -439,7 +457,7 @@ impl<T: TypedAgent> Agent for T {
     }
 
     #[instrument(skip(self, context), fields(context))]
-    async fn execute(&self, context: AgentContext, tool_registry: Arc<Mutex<ToolRegistry>>) -> Result<AgentResult> {
+    async fn execute(&self, context: AgentContext, tool_registry: Arc<ToolRegistry>) -> Result<AgentResult> {
         // All agents use workflow execution
         let workflow_steps = self.define_workflow_steps(&context);
         self.execute_workflow(context, workflow_steps, tool_registry).await

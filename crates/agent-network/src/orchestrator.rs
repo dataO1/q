@@ -61,7 +61,7 @@ pub struct Orchestrator {
     rag: Arc<SmartMultiSourceRag>,
     history_manager: Arc<RwLock<HistoryManager>>,
     embedding_client: Arc<EmbeddingClient>,
-    tool_registry: Arc<Mutex<ToolRegistry>>
+    tool_registry: Arc<ToolRegistry>
 }
 
 // Context for the decomposition step to be  better
@@ -188,7 +188,7 @@ impl Orchestrator {
         let rag = SmartMultiSourceRag::new(&config,embedding_client.clone()).await?;
     // Initialize HistoryManager (if Postgres configured)
         let history_manager = Arc::new(RwLock::new(HistoryManager::new(&config.storage.postgres_url, &config.rag).await?));
-        let tool_registry = Arc::new(Mutex::new(ToolRegistry::new()));
+        let tool_registry = Arc::new(ToolRegistry::new());
 
         info!("Orchestrator initialized successfully");
         Ok(Self {
@@ -419,10 +419,10 @@ Return only the agent type name (e.g., "Coding", "Writing", "Evaluator")."#,
 
         //TODO: populate with tools
         let fs_tool = FilesystemTool::new(&project_scope.root);
-        self.tool_registry.lock().await.register(Box::new(fs_tool));
+        self.tool_registry.register(Arc::new(fs_tool));
 
         // Get the tools info after registration
-        let tools_info = self.tool_registry.lock().await.get_tools_info();
+        let tools_info = self.tool_registry.get_tools_info();
 
         // Build agent context for planning with tools included
         let planning_context = AgentContext::new(

@@ -72,7 +72,7 @@ impl crate::tools::ToolExecutor for LspTool {
         }
     }
 
-    async fn call(&mut self, parameters: Value) -> Result<String> {
+    async fn call(&self, parameters: Value) -> Result<String> {
         let command = parameters.get("command")
             .and_then(Value::as_str)
             .ok_or_else(|| anyhow!("Missing 'command' field"))?;
@@ -116,7 +116,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lsp_tool_call() {
-        let mut tool = LspTool::new("rust".to_string());
+        let tool = LspTool::new("rust".to_string());
         let params = json!({ "command": "completions", "context": "fn main() { pri" });
         let result = tool.call(params).await.unwrap();
         assert!(result.contains("Completions"));
