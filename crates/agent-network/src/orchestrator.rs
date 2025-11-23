@@ -18,7 +18,7 @@ use crate::tools::{FilesystemTool, ToolRegistry};
 use crate::workflow::{
     DependencyType, TaskNode, TaskResult, WorkflowBuilder, WorkflowExecutor, WorkflowGraph,
 };
-use crate::agents::{AgentContext, AgentPool, Agent};
+use crate::agents::{AgentContext, AgentPool};
 use crate::status_stream::StatusStream;
 use crate::sharedcontext::SharedContext;
 use crate::coordination::CoordinationManager;

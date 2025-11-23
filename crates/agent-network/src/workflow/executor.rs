@@ -3,7 +3,7 @@
 //! Implements efficient parallel task execution using topological sorting
 //! to organize tasks into waves, ensuring proper dependency satisfaction
 //! while maximizing parallelism through concurrent task spawning.
-use tracing::{info, debug, warn, error, instrument, span, Level};
+use tracing::{info, debug, warn, error, instrument, span, Level, Instrument};
 use crate::error::{AgentNetworkError, AgentNetworkResult};
 use crate::hitl::{ApprovalRequest, AuditEvent, AuditLogger, DefaultApprovalQueue, RiskAssessment};
 use crate::tools::ToolRegistry;
@@ -13,7 +13,6 @@ use crate::status_stream::StatusStream;
 use crate::coordination::CoordinationManager;
 use crate::filelocks::FileLockManager;
 use ai_agent_common::{ConversationId, ProjectScope};
-use ai_agent_rag::context_providers::ContextProvider;
 use petgraph::algo::toposort;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
@@ -277,26 +276,38 @@ impl WorkflowExecutor {
 
 
             let previous_results_clone = previous_results.clone();
-            let handle = tokio::spawn(async move {
-                execute_task_with_retry(
-                    task.clone(),
-                    agent_pool,
-                    status_stream,
-                    coordination,
-                    file_locks,
-                    approval_queue,  // ADD
-                    audit_logger,    // ADD
-                    context_provider,
-                    timeout,
-                    max_retries,
-                    wave_index,
-                    project_scope,
-                    conversation_id,
-                    tool_registry,
-                    &previous_results_clone
-                )
-                .await
-            });
+            
+            // Create a task-specific span that will be the parent for this task execution
+            let task_span = tracing::info_span!(
+                "task_execution",
+                task_id = %task.task_id,
+                agent_id = %task.agent_id,
+                wave_index = wave_index
+            );
+            
+            let handle = tokio::spawn(
+                async move {
+                    execute_task_with_retry(
+                        task.clone(),
+                        agent_pool,
+                        status_stream,
+                        coordination,
+                        file_locks,
+                        approval_queue,
+                        audit_logger,
+                        context_provider,
+                        timeout,
+                        max_retries,
+                        wave_index,
+                        project_scope,
+                        conversation_id,
+                        tool_registry,
+                        &previous_results_clone
+                    )
+                    .await
+                }
+                .instrument(task_span) // Propagate the span context to the spawned task
+            );
 
             handles.push(handle);
         }
@@ -400,6 +411,11 @@ impl WorkflowExecutor {
 
 
 /// Execute a single task
+#[instrument(skip(agent_pool, context_provider, file_locks, tool_registry, previous_results), fields(
+    task_id = %task.task_id,
+    agent_id = %task.agent_id,
+    description = %task.description
+))]
 async fn execute_single_task(
     task: TaskNode,
     agent_pool: Arc<AgentPool>,
@@ -414,6 +430,10 @@ async fn execute_single_task(
     let agent = agent_pool
         .get_agent(&task.agent_id)
         .ok_or_else(|| AgentNetworkError::Agent(format!("Agent not found: {}", task.agent_id)))?;
+        
+    // Add agent type to current span
+    let current_span = tracing::Span::current();
+    current_span.record("agent_type", &format!("{:?}", agent.agent_type()));
 
     let mut agent_context = AgentContext::new(
         agent.id().to_string(),
@@ -454,24 +474,44 @@ async fn execute_single_task(
 
     // Retrieve and inject context if provider available
     if let Some(provider) = context_provider.as_ref() {
-        // Use task.description as refined query for RAG/History
-        match provider.retrieve_context(task.description.clone(), project_scope, conversation_id.clone()).await {
-            Ok(context) => {
-                if !context.is_empty() {
-                    agent_context = agent_context.with_rag_context(context);
-                    debug!("Injected RAG+History context into agent");
+        let context_retrieval_future = async {
+            // Use task.description as refined query for RAG/History
+            match provider.retrieve_context(task.description.clone(), project_scope, conversation_id.clone()).await {
+                Ok(context) => {
+                    if !context.is_empty() {
+                        let context_length = context.len();
+                        info!("Retrieved RAG+History context (length: {} chars)", context_length);
+                        Some(context)
+                    } else {
+                        debug!("No RAG+History context retrieved");
+                        None
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to retrieve context: {}", e);
+                    // Continue without context
+                    None
                 }
             }
-            Err(e) => {
-                warn!("Failed to retrieve context: {}", e);
-                // Continue without context
-            }
+        };
+        
+        // Execute context retrieval with proper span instrumentation and apply result
+        let context_result = context_retrieval_future
+            .instrument(tracing::info_span!("context_retrieval", query = %task.description))
+            .await;
+            
+        if let Some(context) = context_result {
+            agent_context = agent_context.with_rag_context(context);
+            info!("Injected RAG+History context into agent");
         }
     }
 
     // Execute agent
+    info!("Starting agent execution");
     match agent.execute(agent_context, tool_registry).await {
         Ok(result) => {
+            info!("Agent execution completed successfully (tool executions: {})", result.tool_executions.len());
+            
             // Store exchange in history if provider available
             if let Some(provider) = context_provider.as_ref() {
                 if let Err(e) = provider.store_exchange(

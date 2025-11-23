@@ -4,9 +4,9 @@
 //! suitable for agent context injection.
 
 use ai_agent_common::{ContextFragment, ConversationId};
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, FutureExt};
 use std::pin::Pin;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, Instrument};
 
 use crate::error::AgentNetworkResult;
 
@@ -106,29 +106,45 @@ impl ContextBuilder {
         let mut formatted = String::new();
         let mut fragment_count = 0;
         let mut token_count = 0;
-        let mut source_tiers = std::collections::HashSet::new();
+        let source_tiers = std::collections::HashSet::new();
 
         let mut stream = std::pin::pin!(stream);
+        
+        // Capture current span context for stream processing
+        let current_span = tracing::Span::current();
 
         while let Some(Ok(fragment)) = stream.next().await {
+            let fragment_span = tracing::info_span!(
+                parent: &current_span,
+                "rag_fragment", 
+                source_tier = ?fragment.metadata.location,
+                content_length = fragment.content.len(),
+                fragment_count = fragment_count + 1
+            );
+            let _enter = fragment_span.enter();
 
             // Check token budget
             let fragment_tokens = Self::estimate_tokens(&fragment.content);
             if token_count + fragment_tokens > max_tokens {
-                debug!("Token budget exceeded, stopping fragment collection");
+                debug!("Token budget exceeded, stopping fragment collection (current: {}, needed: {}, max: {})", 
+                    token_count, fragment_tokens, max_tokens);
                 break;
             }
+            
+            debug!("Processing RAG fragment (tokens: {}, content preview: {}...)", 
+                fragment_tokens, 
+                fragment.content.chars().take(100).collect::<String>()
+            );
 
             // Format fragment with location info
-            if let location = fragment.metadata.location {
-                // let tier_name = format!("{:?}", location.tier);
-                // source_tiers.insert(tier_name);
+            let location = fragment.metadata.location;
+            // let tier_name = format!("{:?}", location.tier);
+            // source_tiers.insert(tier_name);
 
-                formatted.push_str(&format!(
-                    "## {}\n",
-                    serde_json::to_string(&location)?
-                ));
-            }
+            formatted.push_str(&format!(
+                "## {}\n",
+                serde_json::to_string(&location)?
+            ));
 
             // Add content
             formatted.push_str(&fragment.content);
@@ -146,8 +162,8 @@ impl ContextBuilder {
         let source_tiers_vec: Vec<String> = source_tiers.into_iter().collect();
 
         info!(
-            "RAG context built: {} fragments, ~{} tokens",
-            fragment_count, token_count
+            "RAG context built: {} fragments, ~{} tokens, source tiers: {:?}",
+            fragment_count, token_count, source_tiers_vec
         );
 
         Ok(FormattedRagContext {
@@ -212,8 +228,8 @@ impl ContextBuilder {
         }
 
         info!(
-            "History context built: ~{} tokens",
-            token_count
+            "History context built: {} short-term messages, {} relevant past messages, {} topics, ~{} tokens",
+            short_term_vec.len(), relevant_past_vec.len(), history_result.topics.len(), token_count
         );
 
         Ok(FormattedHistoryContext {

@@ -12,7 +12,7 @@ use ai_agent_rag::SmartMultiSourceRag;
 use ai_agent_history::manager::HistoryManager;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, Instrument};
 
 use crate::error::AgentNetworkResult;
 
@@ -61,11 +61,15 @@ impl ContextProvider {
         ) -> AgentNetworkResult<String> {
         info!("Retrieving context for task query: {}", task_query);
 
-        // Retrieve RAG context via stream
-        let rag_context = self.retrieve_rag_context(task_query.clone(), project_scope, conversation_id.clone()).await?;
+        // Retrieve RAG context via stream with proper span instrumentation
+        let rag_future = self.retrieve_rag_context(task_query.clone(), project_scope, conversation_id.clone())
+            .instrument(tracing::info_span!("rag_retrieval", query = %task_query));
+        let rag_context = rag_future.await?;
 
-        // Retrieve history context
-        let history_context = self.retrieve_history_context(task_query, conversation_id).await?;
+        // Retrieve history context with proper span instrumentation  
+        let history_future = self.retrieve_history_context(task_query, conversation_id)
+            .instrument(tracing::info_span!("history_retrieval"));
+        let history_context = history_future.await?;
 
         // Combine contexts with token budget
         let combined = ContextBuilder::combine_contexts(

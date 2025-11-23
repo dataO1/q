@@ -6,11 +6,11 @@
 use ai_agent_common::{AgentType, ConversationId, ProjectScope};
 use async_trait::async_trait;
 use derive_more::Display;
-use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, ChatMessageResponse, MessageRole}, parameters::{FormatType, JsonStructure}, tools::{Tool, ToolInfo}}, Ollama};
+use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, ChatMessageResponse, MessageRole}, parameters::{FormatType, JsonStructure}, tools::{ToolInfo}}, Ollama};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
-use tracing::{debug, info, error, instrument};
+use tracing::{debug, info, error, instrument, Instrument};
 use std::{collections::HashMap, sync::Arc};
 use schemars::JsonSchema;
 use anyhow::{Context, Result, anyhow};
@@ -188,6 +188,7 @@ pub trait TypedAgent: Send + Sync {
     }
 
     /// Execute a single OneShot workflow step
+    #[instrument(skip(self, context), fields(step_id = %step.id, step_name = %step.name, agent_id = %self.id()))]
     async fn execute_step_oneshot(&self, context: &AgentContext, step: &WorkflowStep) -> Result<StepResult> {
         // Build messages for this specific step
         let mut messages = vec![
@@ -250,6 +251,7 @@ pub trait TypedAgent: Send + Sync {
     }
 
     /// Execute a single ReAct workflow step
+    #[instrument(skip(self, context, tool_registry), fields(step_id = %step.id, step_name = %step.name, agent_id = %self.id(), max_iterations = ?max_iterations))]
     async fn execute_step_react(
         &self,
         context: &AgentContext,
@@ -300,7 +302,13 @@ pub trait TypedAgent: Send + Sync {
         let max_iter = max_iterations.unwrap_or(10);
         let mut latest_response = None;
 
-        for _iteration in 0..max_iter {
+        info!("Starting ReAct loop for step '{}' with max {} iterations", step.name, max_iter);
+        
+        for iteration in 0..max_iter {
+            let iteration_span = tracing::info_span!("react_iteration", iteration = iteration, step_id = %step.id);
+            let _enter = iteration_span.enter();
+            
+            debug!("ReAct iteration {}/{} starting", iteration + 1, max_iter);
             // Build request with tools
             let json_structure = JsonStructure::new::<Self::Output>();
             let request = ChatMessageRequest::new(self.model().to_string(), messages.clone())
@@ -309,6 +317,13 @@ pub trait TypedAgent: Send + Sync {
 
             let response = self.client().send_chat_messages(request).await?;
             latest_response = Some(response.message.content.clone());
+            
+            debug!("LLM response received (length: {} chars)", response.message.content.len());
+            if response.message.tool_calls.is_empty() {
+                debug!("No tool calls in response - iteration may be complete");
+            } else {
+                debug!("Response contains {} tool calls", response.message.tool_calls.len());
+            }
 
             // Add assistant response to message history to maintain conversation context
             // This ensures the model can build on its previous reasoning in subsequent iterations
@@ -317,21 +332,39 @@ pub trait TypedAgent: Send + Sync {
             // Process tool calls if any
             if !response.message.tool_calls.is_empty() {
                 let tool_calls = response.message.tool_calls;
-                for tool_call in tool_calls {
-                    let mut execution = ToolExecution::new(&tool_call.function.name, &tool_call.function.arguments);
+                for (tool_idx, tool_call) in tool_calls.into_iter().enumerate() {
+                    let tool_execution_future = async {
+                        let mut execution = ToolExecution::new(&tool_call.function.name, &tool_call.function.arguments);
+                        
+                        debug!("Executing tool '{}' with args: {}", tool_call.function.name, tool_call.function.arguments);
 
-                    // Execute tool
-                    match tool_registry.execute(&tool_call.function.name, tool_call.function.arguments).await {
-                        Ok(result) => {
-                            execution.result = Some(result.clone());
-                            messages.push(ChatMessage::user(format!("Tool Result: {}", result)));
+                        // Execute tool
+                        match tool_registry.execute(&tool_call.function.name, tool_call.function.arguments).await {
+                            Ok(result) => {
+                                debug!("Tool '{}' succeeded (result length: {} chars)", tool_call.function.name, result.len());
+                                execution.result = Some(result.clone());
+                                messages.push(ChatMessage::user(format!("Tool Result: {}", result)));
+                            }
+                            Err(e) => {
+                                let error_msg = e.to_string();
+                                debug!("Tool '{}' failed: {}", tool_call.function.name, error_msg);
+                                execution.error = Some(error_msg.clone());
+                                messages.push(ChatMessage::user(format!("Tool Error: {}", error_msg)));
+                            }
                         }
-                        Err(e) => {
-                            let error_msg = e.to_string();
-                            execution.error = Some(error_msg.clone());
-                            messages.push(ChatMessage::user(format!("Tool Error: {}", error_msg)));
-                        }
-                    }
+                        
+                        execution
+                    };
+                    
+                    // Execute tool with proper span instrumentation
+                    let execution = tool_execution_future
+                        .instrument(tracing::info_span!("tool_execution", 
+                            tool_name = %tool_call.function.name,
+                            tool_idx = tool_idx,
+                            iteration = iteration,
+                            agent_id = %self.id()
+                        ))
+                        .await;
 
                     tool_executions.push(execution);
                 }
@@ -347,7 +380,7 @@ pub trait TypedAgent: Send + Sync {
                     }
                 }
                 // If no valid semantic output but no tool calls, step is complete
-                debug!("ReAct step completed - no tool calls and no explicit continuation signal");
+                info!("ReAct step completed - no tool calls and no explicit continuation signal (iteration {})", iteration + 1);
                 break;
             }
         }

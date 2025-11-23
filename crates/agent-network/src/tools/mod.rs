@@ -18,10 +18,10 @@ use ollama_rs::generation::tools::{Tool, ToolCall, ToolCallFunction, ToolFunctio
 use schemars::{JsonSchema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::HashMap, future::Future, pin::Pin, sync::{Arc, RwLock}};
-use futures::{FutureExt, TryFutureExt};
+use std::{collections::HashMap, sync::{Arc, RwLock}};
 use std::fmt::Debug;
 use derive_more::Display;
+use tracing::{debug, info, error, instrument};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Display)]
 #[display("Name: {}, Params: {}, Result: {:?}, Error: {:?}, timestamp: {}", tool_name, parameters, result, error, timestamp)]
@@ -116,6 +116,7 @@ impl ToolRegistry {
 
     /// Execute specified tool with JSON args asynchronously
     /// Uses Arc for lock-free concurrent access across multiple agents
+    #[instrument(skip(self), fields(tool_name = %tool_name, args = %args))]
     pub async fn execute(&self, tool_name: &str, args: serde_json::Value) -> Result<String> {
         let tool = {
             // Acquire read lock, get the tool, and DROP the lock immediately
@@ -124,10 +125,25 @@ impl ToolRegistry {
         };
 
         if let Some(tool) = tool {
+            debug!("Executing tool '{}'", tool_name);
+            
             // Execute without holding the registry lock
             // Note: ToolExecutor::call should take &self, not &mut self
-            tool.call(args).await
+            let result = tool.call(args).await;
+            
+            match &result {
+                Ok(output) => {
+                    info!("Tool '{}' completed successfully (output length: {} chars)", 
+                        tool_name, output.len());
+                }
+                Err(e) => {
+                    error!("Tool '{}' failed: {}", tool_name, e);
+                }
+            }
+            
+            result
         } else {
+            error!("Tool not found: {}", tool_name);
             Err(anyhow::anyhow!("Tool not found: {}", tool_name))
         }
     }
