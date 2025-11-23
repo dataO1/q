@@ -61,10 +61,8 @@ impl ContextProvider {
         ) -> AgentNetworkResult<String> {
         info!("Retrieving context for task query: {}", task_query);
 
-        // Retrieve RAG context via stream with proper span instrumentation
-        let rag_future = self.retrieve_rag_context(task_query.clone(), project_scope, conversation_id.clone())
-            .instrument(tracing::info_span!("rag_retrieval", query = %task_query));
-        let rag_context = rag_future.await?;
+        // Retrieve RAG context - RetrieverSource-level spans are created within the RAG system
+        let rag_context = self.retrieve_rag_context(task_query.clone(), project_scope, conversation_id.clone()).await?;
 
         // Retrieve history context with proper span instrumentation  
         let history_future = self.retrieve_history_context(task_query, conversation_id)

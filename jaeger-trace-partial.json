@@ -1,0 +1,421 @@
+{
+    "data": [
+        {
+            "traceID": "fe49bb4da960bcc66ca07875b71eff6f",
+            "spans": [
+                {
+                    "traceID": "fe49bb4da960bcc66ca07875b71eff6f",
+                    "spanID": "e21e551681d3eb41",
+                    "operationName": "analyze_query",
+                    "references": [
+                        {
+                            "refType": "CHILD_OF",
+                            "traceID": "fe49bb4da960bcc66ca07875b71eff6f",
+                            "spanID": "8694997dcaff12e2"
+                        }
+                    ],
+                    "startTime": 1763906518456464,
+                    "duration": 245,
+                    "tags": [
+                        {
+                            "key": "busy_ns",
+                            "type": "int64",
+                            "value": 136819
+                        },
+                        {
+                            "key": "code.file.path",
+                            "type": "string",
+                            "value": "crates/agent-network/src/orchestrator.rs"
+                        },
+                        {
+                            "key": "code.line.number",
+                            "type": "int64",
+                            "value": 251
+                        },
+                        {
+                            "key": "code.module.name",
+                            "type": "string",
+                            "value": "ai_agent_network::orchestrator"
+                        },
+                        {
+                            "key": "idle_ns",
+                            "type": "int64",
+                            "value": 126135
+                        },
+                        {
+                            "key": "otel.scope.name",
+                            "type": "string",
+                            "value": "agent-network"
+                        },
+                        {
+                            "key": "query",
+                            "type": "string",
+                            "value": "Write a binary search function in python with a main method to execute from the cli"
+                        },
+                        {
+                            "key": "span.kind",
+                            "type": "string",
+                            "value": "internal"
+                        },
+                        {
+                            "key": "target",
+                            "type": "string",
+                            "value": "ai_agent_network::orchestrator"
+                        },
+                        {
+                            "key": "thread.id",
+                            "type": "int64",
+                            "value": 15
+                        },
+                        {
+                            "key": "thread.name",
+                            "type": "string",
+                            "value": "tokio-runtime-worker"
+                        }
+                    ],
+                    "logs": [],
+                    "processID": "p1",
+                    "warnings": [
+                        "invalid parent span IDs=8694997dcaff12e2; skipping clock skew adjustment"
+                    ]
+                },
+                {
+                    "traceID": "fe49bb4da960bcc66ca07875b71eff6f",
+                    "spanID": "41007be176b75a93",
+                    "operationName": "get_agent_by_type",
+                    "references": [
+                        {
+                            "refType": "CHILD_OF",
+                            "traceID": "fe49bb4da960bcc66ca07875b71eff6f",
+                            "spanID": "0a8a5d1c784158a0"
+                        }
+                    ],
+                    "startTime": 1763906518457404,
+                    "duration": 129,
+                    "tags": [
+                        {
+                            "key": "agent_type",
+                            "type": "string",
+                            "value": "Planning"
+                        },
+                        {
+                            "key": "busy_ns",
+                            "type": "int64",
+                            "value": 80667
+                        },
+                        {
+                            "key": "code.file.path",
+                            "type": "string",
+                            "value": "crates/agent-network/src/agents/pool.rs"
+                        },
+                        {
+                            "key": "code.line.number",
+                            "type": "int64",
+                            "value": 126
+                        },
+                        {
+                            "key": "code.module.name",
+                            "type": "string",
+                            "value": "ai_agent_network::agents::pool"
+                        },
+                        {
+                            "key": "idle_ns",
+                            "type": "int64",
+                            "value": 70470
+                        },
+                        {
+                            "key": "otel.scope.name",
+                            "type": "string",
+                            "value": "agent-network"
+                        },
+                        {
+                            "key": "span.kind",
+                            "type": "string",
+                            "value": "internal"
+                        },
+                        {
+                            "key": "target",
+                            "type": "string",
+                            "value": "ai_agent_network::agents::pool"
+                        },
+                        {
+                            "key": "thread.id",
+                            "type": "int64",
+                            "value": 15
+                        },
+                        {
+                            "key": "thread.name",
+                            "type": "string",
+                            "value": "tokio-runtime-worker"
+                        }
+                    ],
+                    "logs": [],
+                    "processID": "p1",
+                    "warnings": [
+                        "invalid parent span IDs=0a8a5d1c784158a0; skipping clock skew adjustment"
+                    ]
+                },
+                {
+                    "traceID": "fe49bb4da960bcc66ca07875b71eff6f",
+                    "spanID": "5c5cb0fe761a290f",
+                    "operationName": "get_agent",
+                    "references": [
+                        {
+                            "refType": "CHILD_OF",
+                            "traceID": "fe49bb4da960bcc66ca07875b71eff6f",
+                            "spanID": "0a8a5d1c784158a0"
+                        }
+                    ],
+                    "startTime": 1763906518457726,
+                    "duration": 73,
+                    "tags": [
+                        {
+                            "key": "agent_id",
+                            "type": "string",
+                            "value": "coding-1"
+                        },
+                        {
+                            "key": "busy_ns",
+                            "type": "int64",
+                            "value": 31918
+                        },
+                        {
+                            "key": "code.file.path",
+                            "type": "string",
+                            "value": "crates/agent-network/src/agents/pool.rs"
+                        },
+                        {
+                            "key": "code.line.number",
+                            "type": "int64",
+                            "value": 108
+                        },
+                        {
+                            "key": "code.module.name",
+                            "type": "string",
+                            "value": "ai_agent_network::agents::pool"
+                        },
+                        {
+                            "key": "idle_ns",
+                            "type": "int64",
+                            "value": 58457
+                        },
+                        {
+                            "key": "otel.scope.name",
+                            "type": "string",
+                            "value": "agent-network"
+                        },
+                        {
+                            "key": "span.kind",
+                            "type": "string",
+                            "value": "internal"
+                        },
+                        {
+                            "key": "target",
+                            "type": "string",
+                            "value": "ai_agent_network::agents::pool"
+                        },
+                        {
+                            "key": "thread.id",
+                            "type": "int64",
+                            "value": 15
+                        },
+                        {
+                            "key": "thread.name",
+                            "type": "string",
+                            "value": "tokio-runtime-worker"
+                        }
+                    ],
+                    "logs": [],
+                    "processID": "p1",
+                    "warnings": [
+                        "invalid parent span IDs=0a8a5d1c784158a0; skipping clock skew adjustment"
+                    ]
+                },
+                {
+                    "traceID": "fe49bb4da960bcc66ca07875b71eff6f",
+                    "spanID": "84c51a98b77fddf0",
+                    "operationName": "get_agent",
+                    "references": [
+                        {
+                            "refType": "CHILD_OF",
+                            "traceID": "fe49bb4da960bcc66ca07875b71eff6f",
+                            "spanID": "0a8a5d1c784158a0"
+                        }
+                    ],
+                    "startTime": 1763906518457925,
+                    "duration": 65,
+                    "tags": [
+                        {
+                            "key": "agent_id",
+                            "type": "string",
+                            "value": "planning-1"
+                        },
+                        {
+                            "key": "busy_ns",
+                            "type": "int64",
+                            "value": 28914
+                        },
+                        {
+                            "key": "code.file.path",
+                            "type": "string",
+                            "value": "crates/agent-network/src/agents/pool.rs"
+                        },
+                        {
+                            "key": "code.line.number",
+                            "type": "int64",
+                            "value": 108
+                        },
+                        {
+                            "key": "code.module.name",
+                            "type": "string",
+                            "value": "ai_agent_network::agents::pool"
+                        },
+                        {
+                            "key": "idle_ns",
+                            "type": "int64",
+                            "value": 52381
+                        },
+                        {
+                            "key": "otel.scope.name",
+                            "type": "string",
+                            "value": "agent-network"
+                        },
+                        {
+                            "key": "span.kind",
+                            "type": "string",
+                            "value": "internal"
+                        },
+                        {
+                            "key": "target",
+                            "type": "string",
+                            "value": "ai_agent_network::agents::pool"
+                        },
+                        {
+                            "key": "thread.id",
+                            "type": "int64",
+                            "value": 15
+                        },
+                        {
+                            "key": "thread.name",
+                            "type": "string",
+                            "value": "tokio-runtime-worker"
+                        }
+                    ],
+                    "logs": [],
+                    "processID": "p1",
+                    "warnings": [
+                        "invalid parent span IDs=0a8a5d1c784158a0; skipping clock skew adjustment"
+                    ]
+                },
+                {
+                    "traceID": "fe49bb4da960bcc66ca07875b71eff6f",
+                    "spanID": "659baf73ae41ed6a",
+                    "operationName": "get_agent",
+                    "references": [
+                        {
+                            "refType": "CHILD_OF",
+                            "traceID": "fe49bb4da960bcc66ca07875b71eff6f",
+                            "spanID": "0a8a5d1c784158a0"
+                        }
+                    ],
+                    "startTime": 1763906518458122,
+                    "duration": 318,
+                    "tags": [
+                        {
+                            "key": "agent_id",
+                            "type": "string",
+                            "value": "evaluator-1"
+                        },
+                        {
+                            "key": "busy_ns",
+                            "type": "int64",
+                            "value": 286212
+                        },
+                        {
+                            "key": "code.file.path",
+                            "type": "string",
+                            "value": "crates/agent-network/src/agents/pool.rs"
+                        },
+                        {
+                            "key": "code.line.number",
+                            "type": "int64",
+                            "value": 108
+                        },
+                        {
+                            "key": "code.module.name",
+                            "type": "string",
+                            "value": "ai_agent_network::agents::pool"
+                        },
+                        {
+                            "key": "idle_ns",
+                            "type": "int64",
+                            "value": 52870
+                        },
+                        {
+                            "key": "otel.scope.name",
+                            "type": "string",
+                            "value": "agent-network"
+                        },
+                        {
+                            "key": "span.kind",
+                            "type": "string",
+                            "value": "internal"
+                        },
+                        {
+                            "key": "target",
+                            "type": "string",
+                            "value": "ai_agent_network::agents::pool"
+                        },
+                        {
+                            "key": "thread.id",
+                            "type": "int64",
+                            "value": 15
+                        },
+                        {
+                            "key": "thread.name",
+                            "type": "string",
+                            "value": "tokio-runtime-worker"
+                        }
+                    ],
+                    "logs": [],
+                    "processID": "p1",
+                    "warnings": [
+                        "invalid parent span IDs=0a8a5d1c784158a0; skipping clock skew adjustment"
+                    ]
+                }
+            ],
+            "processes": {
+                "p1": {
+                    "serviceName": "agent-network",
+                    "tags": [
+                        {
+                            "key": "service.version",
+                            "type": "string",
+                            "value": "0.1.0"
+                        },
+                        {
+                            "key": "telemetry.sdk.language",
+                            "type": "string",
+                            "value": "rust"
+                        },
+                        {
+                            "key": "telemetry.sdk.name",
+                            "type": "string",
+                            "value": "opentelemetry"
+                        },
+                        {
+                            "key": "telemetry.sdk.version",
+                            "type": "string",
+                            "value": "0.31.0"
+                        }
+                    ]
+                }
+            },
+            "warnings": null
+        }
+    ],
+    "total": 0,
+    "limit": 0,
+    "offset": 0,
+    "errors": null
+}

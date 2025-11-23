@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use futures::stream::StreamExt;
 use swiftide::{SparseEmbedding};
-use tracing::{debug, instrument};
+use tracing::{debug, info, instrument};
 
 use ai_agent_common::{llm::EmbeddingClient, CollectionTier, ContextFragment, ProjectScope};
 
@@ -26,12 +26,41 @@ pub trait RetrieverSource: std::fmt::Debug + Send + Sync + 'static {
     ) -> Result<Vec<ContextFragment>>;
 }
 
-// Helper function to create a retriever stream from any RetrieverSource
+// Helper function to create a retriever stream from any RetrieverSource with proper span instrumentation
+#[instrument(name = "retriever_source", skip(source, queries, project_scope), fields(
+    source_name = tracing::field::Empty,
+    source_priority = source.priority(),
+    query_tiers = queries.len(),
+    total_queries = tracing::field::Empty,
+    fragments_found = tracing::field::Empty,
+    retrieval_latency_ms = tracing::field::Empty
+))]
 pub fn create_retriever_stream(
     source: Arc<dyn RetrieverSource>,
     queries: HashMap<CollectionTier, Vec<String>>,
     project_scope: ProjectScope,
 ) -> RetrieverSourcePrioStream {
+    let total_queries: usize = queries.values().map(|v| v.len()).sum();
+    let query_tiers_vec: Vec<String> = queries.keys().map(|tier| format!("{:?}", tier)).collect();
+    
+    // Get source name for debugging (using Debug trait)
+    let source_name = format!("{:?}", source);
+    let source_type = if source_name.contains("QdrantRetriever") {
+        "qdrant_retriever"
+    } else {
+        "unknown_retriever"
+    };
+    
+    // Record business attributes in span
+    let current_span = tracing::Span::current();
+    current_span.record("source_name", source_type);
+    current_span.record("total_queries", &total_queries);
+    
+    debug!("Starting retrieval from {} (priority: {}, tiers: {:?}, total queries: {})", 
+        source_type, source.priority(), query_tiers_vec, total_queries);
+    
+    let start_time = std::time::Instant::now();
+    
     // Map each (tier, queries) to an async future that retrieves vectors & converts to Vec<Result<ContextFragment>>
     let fetch_futures = queries.into_iter().map(|(tier, q_list)| {
         let tier = tier.clone();
@@ -39,14 +68,18 @@ pub fn create_retriever_stream(
         let project_scope = project_scope.clone();
         let s_self = Arc::clone(&source); // Arc clone, 'static safe
         async move {
+            debug!("Querying {:?} tier with {} queries", tier, q_list.len());
+            
             // Retrieve results: Vec<ContextFragment>
             let results = s_self
                 .retrieve(
-                    q_list.into_iter().map(|q| (tier, q)).collect(),
+                    q_list.into_iter().map(|q| (tier.clone(), q)).collect(),
                     project_scope.clone(),
                 )
                 .await?;
 
+            debug!("Retrieved {} fragments from {:?} tier", results.len(), tier);
+            
             // Map to Vec<Result<ContextFragment>>
             let fragments = results.into_iter().map(|frag| Ok(frag)).collect::<Vec<_>>();
 
@@ -65,7 +98,20 @@ pub fn create_retriever_stream(
                 Err(e) => Some(futures::stream::once(async { Err(e) }).boxed()),
             }
         })
-        .flatten();
+        .flatten()
+        .map(move |result| {
+            // Count successful fragments for metrics
+            if let Ok(_fragment) = &result {
+                // We could track per-fragment metrics here if needed
+            }
+            result
+        });
+
+    // Record completion metrics
+    let duration = start_time.elapsed();
+    current_span.record("retrieval_latency_ms", &duration.as_millis());
+    
+    info!("RetrieverSource stream created for {} (latency: {}ms)", source_type, duration.as_millis());
 
     RetrieverSourcePrioStream {
         stream: Box::pin(stream),

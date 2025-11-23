@@ -238,38 +238,54 @@ pub trait TypedAgent: Send + Sync {
         debug!("Starting LLM call for OneShot step '{}' (model: {}, messages: {})", 
             step.name, self.model(), messages.len());
         
-        // Execute LLM call with dedicated span instrumentation
+        // Execute LLM call with enhanced span instrumentation and real-time events
         let prompt_tokens = Self::estimate_tokens(&messages.iter().map(|m| m.content.clone()).collect::<Vec<_>>().join("\n"));
-        let start_time = std::time::Instant::now();
         
-        let llm_call_future = async {
-            self.client().send_chat_messages(request).await
-        };
+        // Create span with all business attributes upfront
+        let llm_span = tracing::info_span!("llm_inference", 
+            step_id = %step.id,
+            step_name = %step.name,
+            "llm.provider" = "ollama",
+            "llm.model" = %self.model(),
+            "llm.token_count.prompt" = prompt_tokens,
+            "llm.token_count.completion" = tracing::field::Empty,
+            "llm.latency_per_token" = tracing::field::Empty,
+            message_count = messages.len()
+        );
         
-        let response = llm_call_future
-            .instrument(tracing::info_span!("llm_inference", 
-                step_id = %step.id,
-                step_name = %step.name,
-                "llm.provider" = "ollama",
-                "llm.model" = %self.model(),
-                "llm.token_count.prompt" = prompt_tokens,
-                "llm.token_count.completion" = tracing::field::Empty,
-                "llm.latency_per_token" = tracing::field::Empty,
-                message_count = messages.len()
-            ))
-            .await?;
+        let response = async {
+            // Record request start event with details
+            info!(target: "llm_inference", "llm_request_started: model={}, prompt_tokens={}, message_count={}, execution_mode=oneshot", 
+                self.model(), prompt_tokens, messages.len());
             
-        // Calculate and record completion metrics
-        let completion_tokens = Self::estimate_tokens(&response.message.content);
-        let duration = start_time.elapsed();
-        let latency_per_token = if completion_tokens > 0 {
-            duration.as_millis() / completion_tokens as u128
-        } else { 0 };
-        
-        // Record completion metrics in span
-        let current_span = tracing::Span::current();
-        current_span.record("llm.token_count.completion", &completion_tokens);
-        current_span.record("llm.latency_per_token", &format!("{}ms", latency_per_token));
+            let start_time = std::time::Instant::now();
+            info!("Starting LLM inference for OneShot step '{}' (model: {}, prompt tokens: {})", 
+                step.name, self.model(), prompt_tokens);
+                
+            // Execute the actual LLM call
+            let response = self.client().send_chat_messages(request).await?;
+            let duration = start_time.elapsed();
+            
+            // Calculate completion metrics immediately
+            let completion_tokens = Self::estimate_tokens(&response.message.content);
+            let latency_per_token = if completion_tokens > 0 {
+                duration.as_millis() / completion_tokens as u128
+            } else { 0 };
+            
+            // Record response received event with details
+            info!(target: "llm_inference", "llm_response_received: completion_tokens={}, total_latency_ms={}, latency_per_token_ms={}, response_length={}", 
+                completion_tokens, duration.as_millis(), latency_per_token, response.message.content.len());
+            
+            // Record completion metrics in span
+            let current_span = tracing::Span::current();
+            current_span.record("llm.token_count.completion", &completion_tokens);
+            current_span.record("llm.latency_per_token", &format!("{}ms", latency_per_token));
+            
+            info!("LLM inference completed for OneShot step '{}' (response: {} chars, completion tokens: {}, latency: {}ms)", 
+                step.name, response.message.content.len(), completion_tokens, duration.as_millis());
+                
+            Ok::<_, anyhow::Error>(response)
+        }.instrument(llm_span).await?;
         
         debug!("LLM call completed for OneShot step '{}' (response length: {} chars)", 
             step.name, response.message.content.len());
@@ -369,38 +385,54 @@ pub trait TypedAgent: Send + Sync {
             debug!("Starting LLM call for iteration {} (model: {}, messages: {}, tools: {})", 
                 iteration + 1, self.model(), messages.len(), tools_info.len());
             
-            // Execute LLM call with dedicated span instrumentation
+            // Execute LLM call with enhanced span instrumentation and real-time events
             let prompt_tokens = Self::estimate_tokens(&messages.iter().map(|m| m.content.clone()).collect::<Vec<_>>().join("\n"));
-            let start_time = std::time::Instant::now();
             
-            let llm_call_future = async {
-                self.client().send_chat_messages(request).await
-            };
+            // Create span with all business attributes upfront
+            let llm_span = tracing::info_span!("llm_inference", 
+                iteration = iteration,
+                "llm.provider" = "ollama",
+                "llm.model" = %self.model(),
+                "llm.token_count.prompt" = prompt_tokens,
+                "llm.token_count.completion" = tracing::field::Empty,
+                "llm.latency_per_token" = tracing::field::Empty,
+                message_count = messages.len(),
+                tool_count = tools_info.len()
+            );
             
-            let response = llm_call_future
-                .instrument(tracing::info_span!("llm_inference", 
-                    iteration = iteration,
-                    "llm.provider" = "ollama",
-                    "llm.model" = %self.model(),
-                    "llm.token_count.prompt" = prompt_tokens,
-                    "llm.token_count.completion" = tracing::field::Empty,
-                    "llm.latency_per_token" = tracing::field::Empty,
-                    message_count = messages.len(),
-                    tool_count = tools_info.len()
-                ))
-                .await?;
+            let response = async {
+                // Record request start event with details
+                info!(target: "llm_inference", "llm_request_started: model={}, prompt_tokens={}, message_count={}, tool_count={}, iteration={}, execution_mode=react", 
+                    self.model(), prompt_tokens, messages.len(), tools_info.len(), iteration + 1);
                 
-            // Calculate and record completion metrics
-            let completion_tokens = Self::estimate_tokens(&response.message.content);
-            let duration = start_time.elapsed();
-            let latency_per_token = if completion_tokens > 0 {
-                duration.as_millis() / completion_tokens as u128
-            } else { 0 };
-            
-            // Record completion metrics in span
-            let current_span = tracing::Span::current();
-            current_span.record("llm.token_count.completion", &completion_tokens);
-            current_span.record("llm.latency_per_token", &format!("{}ms", latency_per_token));
+                let start_time = std::time::Instant::now();
+                info!("Starting LLM inference for ReAct iteration {} (model: {}, prompt tokens: {}, tools: {})", 
+                    iteration + 1, self.model(), prompt_tokens, tools_info.len());
+                    
+                // Execute the actual LLM call
+                let response = self.client().send_chat_messages(request).await?;
+                let duration = start_time.elapsed();
+                
+                // Calculate completion metrics immediately
+                let completion_tokens = Self::estimate_tokens(&response.message.content);
+                let latency_per_token = if completion_tokens > 0 {
+                    duration.as_millis() / completion_tokens as u128
+                } else { 0 };
+                
+                // Record response received event with details
+                info!(target: "llm_inference", "llm_response_received: completion_tokens={}, total_latency_ms={}, latency_per_token_ms={}, response_length={}, tool_calls_count={}, iteration={}", 
+                    completion_tokens, duration.as_millis(), latency_per_token, response.message.content.len(), response.message.tool_calls.len(), iteration + 1);
+                
+                // Record completion metrics in span
+                let current_span = tracing::Span::current();
+                current_span.record("llm.token_count.completion", &completion_tokens);
+                current_span.record("llm.latency_per_token", &format!("{}ms", latency_per_token));
+                
+                info!("LLM inference completed for ReAct iteration {} (response: {} chars, completion tokens: {}, tool calls: {}, latency: {}ms)", 
+                    iteration + 1, response.message.content.len(), completion_tokens, response.message.tool_calls.len(), duration.as_millis());
+                    
+                Ok::<_, anyhow::Error>(response)
+            }.instrument(llm_span).await?;
                 
             latest_response = Some(response.message.content.clone());
             
