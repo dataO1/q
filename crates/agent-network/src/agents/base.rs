@@ -336,13 +336,8 @@ pub trait TypedAgent: Send + Sync {
 
         // Parse final response
         let final_content = latest_response.unwrap_or_default();
-        let parsed_output = final_content
-            .strip_prefix("```json")
-            .unwrap_or(&final_content)
-            .strip_suffix("```")
-            .unwrap_or(&final_content);
 
-        let output = serde_json::from_str::<Value>(parsed_output)
+        let output = serde_json::from_str(&final_content)
             .unwrap_or_else(|_| Value::String(final_content));
 
         Ok(StepResult {
