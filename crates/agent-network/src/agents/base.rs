@@ -227,10 +227,28 @@ pub trait TypedAgent: Send + Sync {
 
         // Execute LLM call
         let json_structure = JsonStructure::new::<Self::Output>();
-        let request = ChatMessageRequest::new(self.model().to_string(), messages)
+        let request = ChatMessageRequest::new(self.model().to_string(), messages.clone())
             .format(FormatType::StructuredJson(Box::new(json_structure)));
 
-        let response = self.client().send_chat_messages(request).await?;
+        debug!("Starting LLM call for OneShot step '{}' (model: {}, messages: {})", 
+            step.name, self.model(), messages.len());
+        
+        // Execute LLM call with dedicated span instrumentation
+        let llm_call_future = async {
+            self.client().send_chat_messages(request).await
+        };
+        
+        let response = llm_call_future
+            .instrument(tracing::info_span!("llm_call", 
+                step_id = %step.id,
+                step_name = %step.name,
+                model = %self.model(),
+                message_count = messages.len()
+            ))
+            .await?;
+        
+        debug!("LLM call completed for OneShot step '{}' (response length: {} chars)", 
+            step.name, response.message.content.len());
 
         // Parse response
         let parsed_output = response.message.content
@@ -315,10 +333,27 @@ pub trait TypedAgent: Send + Sync {
                 .format(FormatType::StructuredJson(Box::new(json_structure)))
                 .tools(tools_info.clone());
 
-            let response = self.client().send_chat_messages(request).await?;
+            debug!("Starting LLM call for iteration {} (model: {}, messages: {}, tools: {})", 
+                iteration + 1, self.model(), messages.len(), tools_info.len());
+            
+            // Execute LLM call with dedicated span instrumentation
+            let llm_call_future = async {
+                self.client().send_chat_messages(request).await
+            };
+            
+            let response = llm_call_future
+                .instrument(tracing::info_span!("llm_call", 
+                    iteration = iteration,
+                    model = %self.model(),
+                    message_count = messages.len(),
+                    tool_count = tools_info.len()
+                ))
+                .await?;
+                
             latest_response = Some(response.message.content.clone());
             
-            debug!("LLM response received (length: {} chars)", response.message.content.len());
+            debug!("LLM call completed for iteration {} (response length: {} chars, tool calls: {})", 
+                iteration + 1, response.message.content.len(), response.message.tool_calls.len());
             if response.message.tool_calls.is_empty() {
                 debug!("No tool calls in response - iteration may be complete");
             } else {
