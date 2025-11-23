@@ -5,7 +5,7 @@
 
 use ai_agent_common::{AgentNetworkConfig, SystemConfig};
 use ai_agent_network::{
-    tracing_setup, Orchestrator, VERSION,
+    Orchestrator, VERSION,
 };
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -78,7 +78,7 @@ async fn main() -> Result<()> {
 
     // Initialize tracing with OpenTelemetry
     let log_level = cli.log_level.as_deref().unwrap_or("info");
-    tracing_setup::init_tracing_with_level(log_level)?;
+    ai_agent_common::init_tracing_with_level(log_level)?;
 
     info!("Agent-Network v{} starting", VERSION);
 
@@ -120,7 +120,7 @@ async fn main() -> Result<()> {
             start_server(config).await
         }
     };
-    tracing_setup::shutdown_tracer();
+    ai_agent_common::shutdown_tracer();
     result
 }
 

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use futures::stream::StreamExt;
 use swiftide::{SparseEmbedding};
+use tracing::{debug, instrument};
 
 use ai_agent_common::{llm::EmbeddingClient, CollectionTier, ContextFragment, ProjectScope};
 
@@ -23,51 +24,52 @@ pub trait RetrieverSource: std::fmt::Debug + Send + Sync + 'static {
         queries: Vec<(CollectionTier, String)>,
         project_scope: ProjectScope,
     ) -> Result<Vec<ContextFragment>>;
+}
 
+// Helper function to create a retriever stream from any RetrieverSource
+pub fn create_retriever_stream(
+    source: Arc<dyn RetrieverSource>,
+    queries: HashMap<CollectionTier, Vec<String>>,
+    project_scope: ProjectScope,
+) -> RetrieverSourcePrioStream {
+    // Map each (tier, queries) to an async future that retrieves vectors & converts to Vec<Result<ContextFragment>>
+    let fetch_futures = queries.into_iter().map(|(tier, q_list)| {
+        let tier = tier.clone();
+        let q_list = q_list.clone();
+        let project_scope = project_scope.clone();
+        let s_self = Arc::clone(&source); // Arc clone, 'static safe
+        async move {
+            // Retrieve results: Vec<ContextFragment>
+            let results = s_self
+                .retrieve(
+                    q_list.into_iter().map(|q| (tier, q)).collect(),
+                    project_scope.clone(),
+                )
+                .await?;
 
-    fn retrieve_stream(
-        self: Arc<Self>,
-        queries: HashMap<CollectionTier, Vec<String>>,
-        project_scope: ProjectScope,
-    ) -> RetrieverSourcePrioStream
-    {
+            // Map to Vec<Result<ContextFragment>>
+            let fragments = results.into_iter().map(|frag| Ok(frag)).collect::<Vec<_>>();
 
-        // Map each (tier, queries) to an async future that retrieves vectors & converts to Vec<Result<ContextFragment>>
-        let fetch_futures = queries.into_iter().map(|(tier, q_list)| {
-            let tier = tier.clone();
-            let q_list = q_list.clone();
-            let project_scope = project_scope.clone();
-            let s_self = Arc::clone(&self); // Arc clone, 'static safe
-            async move {
-                // Retrieve results: Vec<(ContextFragment, SparseEmbedding)>
-                let results = s_self
-                    .retrieve(
-                        q_list.into_iter().map(|q| (tier, q)).collect(),
-                        project_scope.clone(),
-                    )
-                    .await?;
+            Ok::<_, anyhow::Error>(fragments)
+        }
+    });
 
-                // Map to Vec<Result<ContextFragment>>
-                let fragments = results.into_iter().map(|frag| Ok(frag)).collect::<Vec<_>>();
+    // Run all retrieval futures concurrently
+    let fut_unordered = FuturesUnordered::from_iter(fetch_futures);
 
-                Ok::<_, anyhow::Error>(fragments)
+    // Turn each Vec<Result<ContextFragment>> into a stream; on error, stream yields single Err
+    let stream = fut_unordered
+        .filter_map(|res| async {
+            match res {
+                Ok(vec) => Some(iter(vec).boxed()),
+                Err(e) => Some(futures::stream::once(async { Err(e) }).boxed()),
             }
-        });
+        })
+        .flatten();
 
-        // Run all retrieval futures concurrently
-        let fut_unordered = FuturesUnordered::from_iter(fetch_futures);
-
-        // Turn each Vec<Result<ContextFragment>> into a stream; on error, stream yields single Err
-        let stream = fut_unordered
-            .filter_map(|res| async {
-                match res {
-                    Ok(vec) => Some(iter(vec).boxed()),
-                    Err(e) => Some(futures::stream::once(async { Err(e) }).boxed()),
-                }
-            })
-            .flatten();
-
-        RetrieverSourcePrioStream{stream:Box::pin(stream),priority:self.priority()}
+    RetrieverSourcePrioStream {
+        stream: Box::pin(stream),
+        priority: source.priority(),
     }
 }
 
@@ -101,7 +103,7 @@ impl RetrieverSource for QdrantRetriever {
 
 #[derive(Debug)]
 pub struct MultiSourceRetriever {
-    sources: Vec<Arc<dyn RetrieverSource + Send + Sync + >>,
+    sources: Vec<Arc<dyn RetrieverSource>>,
     embedder: Arc<EmbeddingClient>,
 }
 
@@ -123,6 +125,7 @@ impl MultiSourceRetriever {
     }
 
     /// Retrieve all sources, then rerank and deduplicate combined results before streaming out in batches
+    #[instrument(skip(self), fields(raw_query, query_tiers = queries.len(), sources = self.sources.len()))]
     pub fn retrieve_stream(
         self:Arc<Self>,
         raw_query: String,
@@ -141,7 +144,7 @@ impl MultiSourceRetriever {
             //     source.retrieve_stream(queries.clone(), &project_scope.clone())
             // }).collect();
             for source in sources.iter() {
-                let partial_results = source.clone().retrieve_stream(queries.clone(), project_scope.clone());
+                let partial_results = create_retriever_stream(source.clone(), queries.clone(), project_scope.clone());
                 all_streams.push(partial_results);
             }
             // let query_embeddings = self.embedder.embedder_sparse.embed(vec![raw_query.to_string()]).await?;

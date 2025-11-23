@@ -116,17 +116,20 @@ impl ToolRegistry {
 
     /// Execute specified tool with JSON args asynchronously
     /// Uses Arc for lock-free concurrent access across multiple agents
-    pub async fn execute(&self, name: &str, args: Value) -> Result<String> {
+    pub async fn execute(&self, tool_name: &str, args: serde_json::Value) -> Result<String> {
         let tool = {
+            // Acquire read lock, get the tool, and DROP the lock immediately
             let tools = self.tools.read().unwrap();
-            tools
-                .get(name)
-                .ok_or_else(|| anyhow!("Tool '{}' not found", name))?
-                .clone()
+            tools.get(tool_name).cloned()
         };
 
-        // Call tool without holding any locks - enables true concurrency
-        tool.call(args).await
+        if let Some(tool) = tool {
+            // Execute without holding the registry lock
+            // Note: ToolExecutor::call should take &self, not &mut self
+            tool.call(args).await
+        } else {
+            Err(anyhow::anyhow!("Tool not found: {}", tool_name))
+        }
     }
 }
 
@@ -135,10 +138,12 @@ impl ToolRegistry {
 #[async_trait]
 impl<T> ToolExecutor for T
 where
-    T: Tool<Params = Value> + Send + Sync + Debug,
+    T: Tool<Params = Value> + Send + Sync + Debug + Clone,
 {
     fn name(&self) -> &'static str {
-        T::name()
+        // T::name() returns String, but we need &'static str
+        // We leak the string to create a static reference
+        Box::leak(T::name().into())
     }
 
     fn description(&self) -> String {
@@ -149,11 +154,10 @@ where
         &self,
         parameters: Value,
     ) -> anyhow::Result<String> {
-        // Create a mutable copy for compatibility with ollama_rs Tool trait
-        // This is safe since we're cloning the value and the tool itself is stateless
-        let mut tool_copy = unsafe { std::ptr::read(self as *const T) };
+        // Use Clone trait instead of unsafe pointer manipulation
+        // This requires T to implement Clone, which is safer
+        let mut tool_copy = self.clone();
         let result = Tool::call(&mut tool_copy, parameters).await;
-        std::mem::forget(tool_copy); // Prevent double-drop
         result.map_err(|e| anyhow::Error::msg(format!("Tool error: {:?}", e)))
     }
 

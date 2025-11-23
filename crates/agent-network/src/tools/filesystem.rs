@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use anyhow::Result;
 use std::collections::HashMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tracing::debug;
+use tracing::{debug, instrument};
 use anyhow::anyhow;
 
 #[derive(Debug)]
@@ -126,6 +126,7 @@ impl ToolExecutor for FilesystemTool {
         }
     }
 
+    #[instrument(skip(self, parameters), fields(tool = "filesystem"))]
     async fn call(&self, parameters: Value) -> Result<String> {
         // Extract command and params from JSON
         let command = parameters.get("command")

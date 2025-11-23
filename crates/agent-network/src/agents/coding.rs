@@ -92,12 +92,12 @@ impl TypedAgent for CodingAgent {
     fn temperature(&self) -> f32 { self.temperature }
     fn client(&self) -> &Ollama { &self.client }
     type Output = CodingOutput;
-    
+
     /// Define coding workflow steps
     fn define_workflow_steps(&self, context: &crate::agents::AgentContext) -> Vec<crate::agents::base::WorkflowStep> {
         use crate::agents::base::{WorkflowStep, StepExecutionMode};
         use std::collections::HashMap;
-        
+
         // Multi-step workflow for coding: analysis, implementation, validation
         vec![
             WorkflowStep {
@@ -112,7 +112,7 @@ impl TypedAgent for CodingAgent {
                 id: "implement_code".to_string(),
                 name: "Code Implementation".to_string(),
                 description: "Generate and write the actual code based on requirements and existing codebase analysis".to_string(),
-                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(15) }, // Needs filesystem tool for writing
+                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(3) }, // Needs filesystem tool for writing
                 required_tools: vec!["filesystem".to_string()],
                 parameters: HashMap::new(),
             }

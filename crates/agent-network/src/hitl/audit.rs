@@ -1,7 +1,6 @@
 //! Structured Audit Logger with OpenTelemetry integration
 
-use opentelemetry::trace::{TraceContextExt, Tracer};
-use opentelemetry::{global, KeyValue};
+// OpenTelemetry moved to common crate
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{error, info, span, warn, Level};
@@ -36,21 +35,15 @@ impl AuditLogger {
 
         let _enter = span.enter();
 
-        // Get current OpenTelemetry context and add event
-        let cx = opentelemetry::Context::current();
-        let span = cx.span();
-
-        span.add_event(
-            "audit_event",
-            vec![
-                KeyValue::new("event.id", event.event_id.clone()),
-                KeyValue::new("event.action", event.action.clone()),
-                KeyValue::new("event.risk_level", event.risk_level.clone()),
-                KeyValue::new("event.decision", event.decision.clone()),
-            ],
+        // Log audit event with structured fields
+        info!(
+            target: "audit", 
+            event_id = %event.event_id,
+            action = %event.action,
+            risk_level = %event.risk_level,
+            decision = %event.decision,
+            "Audit Event: {:?}", event
         );
-
-        info!(target: "audit", "Audit Event: {:?}", event);
     }
 
     /// Log warning audit event

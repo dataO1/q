@@ -54,18 +54,9 @@ git2 = "*"
 
 clap = { version = "*", features = ["derive", "env"] }
 
-# OpenTelemetry Core (0.23+ for 2024-2025)
-# Matching major/minor versions to avoid multiple versions conflict
-opentelemetry = { version = "*", features = ["trace", "metrics"] }
-opentelemetry_sdk = { version = "*", features = ["rt-tokio", "trace", "metrics"] }
-tracing-opentelemetry = { version = "*" }
-opentelemetry-otlp = { version = "*", features = ["tonic", "trace", "metrics"] }
-opentelemetry-semantic-conventions = "*"
-once_cell = "*"
 derive_more = {version = "*", features = ["display"]}
 schemars = { version = "*", features = ["chrono04"] }
 
-# opentelemetry-jaeger = "0.17.0"
 
 
 [dev-dependencies]

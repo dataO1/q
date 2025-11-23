@@ -113,6 +113,7 @@ impl crate::tools::ToolExecutor for LspTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tools::ToolExecutor;
 
     #[tokio::test]
     async fn test_lsp_tool_call() {

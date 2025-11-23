@@ -6,7 +6,7 @@
 use ai_agent_common::{ContextFragment, ConversationId};
 use futures::{Stream, StreamExt};
 use std::pin::Pin;
-use tracing::{debug, info};
+use tracing::{debug, info, instrument};
 
 use crate::error::AgentNetworkResult;
 
@@ -96,6 +96,7 @@ impl ContextBuilder {
     ///
     /// # Returns
     /// FormattedRagContext with combined content and metadata
+    #[instrument(skip(stream), fields(max_tokens))]
     pub async fn build_rag_context(
         stream: Pin<Box<dyn Stream<Item = anyhow::Result<ContextFragment>> + Send>>,
         max_tokens: usize,
@@ -158,6 +159,7 @@ impl ContextBuilder {
     }
 
     /// Format history context from HistoryManager result
+    #[instrument(skip(history_result))]
     pub async fn build_history_context(
         history_result: ai_agent_history::manager::HistoryContext,
     ) -> AgentNetworkResult<FormattedHistoryContext> {

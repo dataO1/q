@@ -1,4 +1,4 @@
-use ai_agent_common::{llm::EmbeddingClient, *};
+use ai_agent_common::{llm::EmbeddingClient, types::*, config::{IndexingConfig, SystemConfig}};
 use ai_agent_storage::QdrantClient;
 use anyhow::{Context, Result, anyhow};
 use repo_root::{projects::GitProject, RepoRoot};
@@ -17,7 +17,7 @@ use swiftide::integrations::{
     redis::Redis,
 };
 
-use tracing::{info, warn};
+use tracing::{info, warn, debug, error};
 
 /// Indexing pipeline using Swiftide
 pub struct IndexingPipeline {
@@ -31,10 +31,10 @@ impl IndexingPipeline {
     /// Create a new indexing pipeline from configuration
     /// Create a new indexing pipeline with hybrid search support
     pub fn new(config: &SystemConfig, embedder: Arc<EmbeddingClient>) -> Result<Self> {
-        tracing::debug!("Creating IndexingPipeline");
+        debug!("Creating IndexingPipeline");
 
 
-        tracing::debug!("Creating Redis cache...");
+        debug!("Creating Redis cache...");
         let redis_cache = Redis::try_from_url(
             &config.storage.redis_url
                 .clone()
@@ -42,7 +42,7 @@ impl IndexingPipeline {
             "swiftide-indexing"
         ).context("Failed to create Redis cache")?;
 
-        tracing::debug!("Initializing Qdrant client...");
+        debug!("Initializing Qdrant client...");
         let qdrant_client = Arc::new(QdrantClient::new(&config.storage.qdrant_url.to_string(),embedder.clone())
             .context("Failed to create Qdrant client")?);
 
@@ -68,7 +68,7 @@ impl IndexingPipeline {
 
         let pipeline = self.create_pipeline(file_path,extensions)
             .map_err(|err| {
-                tracing::error!("Failed to create pipeline: {:?}", err);
+                error!("Failed to create pipeline: {:?}", err);
                 err
             })?;
 
@@ -117,7 +117,7 @@ impl IndexingPipeline {
 
         // Example custom transformer to add useful metadata
         let dense_embedding_model = self.embedder.embedder_dense.clone();
-        tracing::debug!("Initializing FastEmbed sparse...");
+        debug!("Initializing FastEmbed sparse...");
         let sparse_embedding_model = self.embedder.embedder_sparse.clone();
 
         let mut file_loader = FileLoader::new(path);
@@ -196,14 +196,14 @@ pub struct IndexingCoordinator {
 
 impl IndexingCoordinator {
     pub fn new(config: SystemConfig, embedder: Arc<EmbeddingClient>) -> Result<Self> {
-        tracing::debug!("Creating IndexingCoordinator");
-        tracing::debug!("Qdrant URL: {}", config.storage.qdrant_url);
+        debug!("Creating IndexingCoordinator");
+        debug!("Qdrant URL: {}", config.storage.qdrant_url);
 
-        tracing::debug!("Creating IndexingPipeline...");
+        debug!("Creating IndexingPipeline...");
         let pipeline = IndexingPipeline::new(&config, embedder)
             .context("Failed to create indexing pipeline")?;
 
-        tracing::debug!("IndexingCoordinator created successfully");
+        debug!("IndexingCoordinator created successfully");
         Ok(Self { config, pipeline })
     }
 

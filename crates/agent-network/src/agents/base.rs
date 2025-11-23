@@ -309,7 +309,7 @@ pub trait TypedAgent: Send + Sync {
 
             let response = self.client().send_chat_messages(request).await?;
             latest_response = Some(response.message.content.clone());
-            
+
             // Add assistant response to message history to maintain conversation context
             // This ensures the model can build on its previous reasoning in subsequent iterations
             messages.push(ChatMessage::assistant(response.message.content.clone()));
@@ -339,7 +339,7 @@ pub trait TypedAgent: Send + Sync {
                 // No tool calls - check for semantic completion
                 // Try to parse response for semantic stop conditions
                 if let Ok(step_output) = serde_json::from_str::<ReactStepOutput>(&response.message.content) {
-                    if step_output.status.to_lowercase() == "done" || 
+                    if step_output.status.to_lowercase() == "done" ||
                        step_output.status.to_lowercase() == "complete" ||
                        step_output.status.to_lowercase() == "finished" {
                         debug!("ReAct step completed with semantic stop condition: {}", step_output.status);
@@ -430,13 +430,13 @@ impl<T: TypedAgent> Agent for T {
             )));
         }
 
-        // 4. Optionally add Tools context as additional user or system message
-        if let Ok(available_tools)= serde_json::to_string_pretty(&context.available_tools) {
-            messages.push(ChatMessage::user(format!(
-                "# AVAILABLE TOOLS:\n{}",
-                available_tools
-            )));
-        }
+        // // 4. Optionally add Tools context as additional user or system message
+        // if let Ok(available_tools)= serde_json::to_string_pretty(&context.available_tools) {
+        //     messages.push(ChatMessage::user(format!(
+        //         "# AVAILABLE TOOLS:\n{}",
+        //         available_tools
+        //     )));
+        // }
 
         // 4.5. Add dependency outputs from previous tasks (includes tool executions!)
         if !context.dependency_outputs.is_empty() {

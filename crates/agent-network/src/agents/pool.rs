@@ -11,7 +11,7 @@ use crate::error::{AgentNetworkError, AgentNetworkResult};
 use std::collections::HashMap;
 use std::sync::Arc;
 use ai_agent_common::{AgentConfig, AgentType, QualityStrategy};
-use tracing::{debug, info};
+use tracing::{debug, info, instrument};
 
 /// Agent pool managing all available agents
 pub struct AgentPool {
@@ -105,7 +105,9 @@ impl AgentPool {
     }
 
     /// Get agent by ID
+    #[instrument(skip(self))]
     pub fn get_agent(&self, agent_id: &str) -> Option<Arc<dyn Agent>> {
+        debug!("Retrieving agent by ID: {}", agent_id);
         self.agents.get(agent_id).cloned()
     }
 
@@ -121,7 +123,9 @@ impl AgentPool {
     }
 
     /// Get first agent of a specific type
+    #[instrument(skip(self), fields(agent_type = ?agent_type))]
     pub fn get_agent_by_type(&self, agent_type: AgentType) -> Option<Arc<dyn Agent>> {
+        debug!("Retrieving agent by type: {:?}", agent_type);
         self.get_agents_by_type(agent_type).into_iter().next()
     }
 
@@ -186,6 +190,8 @@ mod tests {
                 context_window: 8192,
                 enable_streaming: true,
                 capabilities: vec![],
+                required_tools: vec![],
+                available_tools: vec![],
             },
         ];
 
@@ -212,6 +218,8 @@ mod tests {
                 context_window: 8192,
                 enable_streaming: true,
                 capabilities: vec![],
+                required_tools: vec![],
+                available_tools: vec![],
             },
         ];
 

@@ -1,10 +1,11 @@
-use ai_agent_common::*;
+use ai_agent_common::{IndexingFilters, types::*};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher, Config};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 use anyhow::{Context, Result};
+use tracing::{error, warn, info, debug};
 
 /// File system watcher with .gitignore and configurable filtering support
 pub struct FileWatcher {
@@ -23,7 +24,7 @@ impl FileWatcher {
         let watcher = RecommendedWatcher::new(
             move |res: notify::Result<Event>| {
                 if let Err(e) = tx.send(res) {
-                    tracing::error!("Failed to send file event: {}", e);
+                    error!("Failed to send file event: {}", e);
                 }
             },
             Config::default()
@@ -52,7 +53,7 @@ impl FileWatcher {
         for path in paths {
             if let Ok(gitignore) = self.build_gitignore(path) {
                 self.gitignore_matchers.insert(path.clone(), gitignore);
-                tracing::info!("Loaded .gitignore for: {}", path.display());
+                info!("Loaded .gitignore for: {}", path.display());
             }
         }
         Ok(())
@@ -83,9 +84,9 @@ impl FileWatcher {
                 self.watcher
                     .watch(path, RecursiveMode::Recursive)
                     .context(format!("Failed to watch path: {}", path.display()))?;
-                tracing::info!("Watching path: {}", path.display());
+                info!("Watching path: {}", path.display());
             } else {
-                tracing::warn!("Path does not exist, skipping: {}", path.display());
+                warn!("Path does not exist, skipping: {}", path.display());
             }
         }
         Ok(())
@@ -106,7 +107,7 @@ impl FileWatcher {
         }
 
         self.watched_paths.push(path.to_path_buf());
-        tracing::info!("Added watch for: {}", path.display());
+        info!("Added watch for: {}", path.display());
         Ok(())
     }
 
@@ -119,7 +120,7 @@ impl FileWatcher {
 
         self.watched_paths.retain(|p| p != path);
         self.gitignore_matchers.remove(path);
-        tracing::info!("Removed watch for: {}", path.display());
+        info!("Removed watch for: {}", path.display());
         Ok(())
     }
 
@@ -133,7 +134,7 @@ impl FileWatcher {
                     }
                 }
                 Some(Err(e)) => {
-                    tracing::error!("File watcher error: {}", e);
+                    error!("File watcher error: {}", e);
                 }
                 None => {
                     anyhow::bail!("File watcher channel closed unexpectedly");
@@ -145,7 +146,7 @@ impl FileWatcher {
     /// Process raw notify event into FileEvent
     fn process_event(&self, event: Event) -> Option<FileEvent> {
         use notify::EventKind;
-        tracing::error!("File watcher got event: {:?}", event);
+        error!("File watcher got event: {:?}", event);
 
         match event.kind {
             EventKind::Create(_) => {
@@ -186,7 +187,7 @@ impl FileWatcher {
         if let Some(max_size) = self.filters.max_file_size {
             if let Ok(metadata) = std::fs::metadata(path) {
                 if metadata.len() > max_size {
-                    tracing::debug!("Skipping file (too large): {}", path.display());
+                    debug!("Skipping file (too large): {}", path.display());
                     return false;
                 }
             }
@@ -236,7 +237,7 @@ impl FileWatcher {
                 if let Ok(relative) = path.strip_prefix(root) {
                     let matched = gitignore.matched(relative, path.is_dir());
                     if matched.is_ignore() {
-                        tracing::debug!("Ignored by .gitignore: {}", path.display());
+                        debug!("Ignored by .gitignore: {}", path.display());
                         return true;
                     }
                 }

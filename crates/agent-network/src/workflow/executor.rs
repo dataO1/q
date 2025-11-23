@@ -4,8 +4,6 @@
 //! to organize tasks into waves, ensuring proper dependency satisfaction
 //! while maximizing parallelism through concurrent task spawning.
 use tracing::{info, debug, warn, error, instrument, span, Level};
-use opentelemetry::trace::{TraceContextExt, Span as OtelSpan};
-use opentelemetry::{global, KeyValue};
 use crate::error::{AgentNetworkError, AgentNetworkResult};
 use crate::hitl::{ApprovalRequest, AuditEvent, AuditLogger, DefaultApprovalQueue, RiskAssessment};
 use crate::tools::ToolRegistry;
@@ -250,11 +248,12 @@ impl WorkflowExecutor {
         tool_registry: Arc<ToolRegistry>
     ) -> AgentNetworkResult<Vec<TaskResult>> {
         debug!("Executing wave {}: {} parallel tasks", wave.wave_index, wave.task_indices.len());
-        // Add OTel attributes
-        let cx = opentelemetry::Context::current();
-        let span = cx.span();
-        span.set_attribute(KeyValue::new("wave.index", wave.wave_index as i64));
-        span.set_attribute(KeyValue::new("wave.tasks", wave.task_indices.len() as i64));
+        // Log wave information with structured fields
+        debug!(
+            wave_index = wave.wave_index,
+            task_count = wave.task_indices.len(),
+            "Starting wave execution"
+        );
 
         let mut handles: Vec<JoinHandle<AgentNetworkResult<TaskResult>>> = vec![];
 
@@ -520,14 +519,11 @@ async fn execute_task_with_retry(
     previous_results: &HashMap<String, TaskResult>
 ) -> AgentNetworkResult<TaskResult> {
 
-    let cx = opentelemetry::Context::current();
-    let span = cx.span();
-    span.add_event(
-        "task.start",
-        vec![
-            KeyValue::new("task.id", task.task_id.clone()),
-            KeyValue::new("agent.id", task.agent_id.clone()),
-        ],
+    // Log task start with structured fields
+    info!(
+        task_id = %task.task_id,
+        agent_id = %task.agent_id,
+        "Task starting"
     );
 
     let task_id = task.task_id.clone();
@@ -659,7 +655,7 @@ async fn execute_task_with_retry(
         agent_id.clone(),
         format!("Task failed after {} retries: {}", retries, error_msg),
     );
-    span.add_event("task.complete", vec![]);
+    debug!("Task completed successfully");
     Ok(TaskResult {
         task_id,
         success: false,

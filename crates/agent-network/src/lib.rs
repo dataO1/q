@@ -21,10 +21,8 @@ pub mod coordination;
 pub mod sharedcontext;
 pub mod status_stream;
 pub mod token_budget;
-pub mod tracing_setup;
 pub mod acp;
 pub mod rag;
-pub use tracing_setup::{init_tracing_with_level, shutdown_tracer};
 
 // ... existing exports ...
 
