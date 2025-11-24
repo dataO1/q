@@ -14,6 +14,7 @@ use tracing::{debug, info, error, instrument, Instrument};
 use std::{collections::HashMap, sync::Arc};
 use schemars::JsonSchema;
 use anyhow::{Context, Result, anyhow};
+use ollama_rs::coordinator::Coordinator;
 
 use crate::{agents::AgentResult, error::AgentNetworkResult, tools::{ToolExecution, ToolRegistry}};
 
@@ -51,7 +52,7 @@ pub struct WorkflowStep {
 pub struct StepResult {
     pub step_id: String,
     pub success: bool,
-    pub output: Option<Value>,
+    pub output: Option<String>,
     pub error: Option<String>,
     pub tool_executions: Vec<ToolExecution>,
 }
@@ -60,7 +61,7 @@ pub struct StepResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowState {
     pub step_results: Vec<StepResult>, // Sequential results
-    pub shared_context: HashMap<String, Value>, // Data shared between steps
+    pub shared_context: HashMap<String, String>, // Data shared between steps
 }
 
 impl WorkflowState {
@@ -177,6 +178,7 @@ pub trait TypedAgent: Send + Sync {
                 }
             }
         }
+        let final_result = serde_json::from_str(&final_result.unwrap_or_default());
 
         // Create final agent result combining all workflow steps
         Ok(AgentResult {
@@ -194,8 +196,56 @@ pub trait TypedAgent: Send + Sync {
     }
 
     /// Execute a single OneShot workflow step
-    #[instrument(skip(self, context), fields(step_id = %step.id, step_name = %step.name, agent_id = %self.id()))]
+    #[instrument(name = "agent_oneshot_step", skip(self, context), fields(
+        step_id = %step.id,
+        step_name = %step.name,
+        agent_id = %self.id(),
+        step.description = tracing::field::Empty,
+        step.parameters = tracing::field::Empty,
+        context.description = tracing::field::Empty,
+        context.dependencies = tracing::field::Empty,
+        context.dependency_outputs = tracing::field::Empty,
+        rag_context.length = tracing::field::Empty,
+        rag_context.content = tracing::field::Empty,
+        history_context.length = tracing::field::Empty,
+        history_context.content = tracing::field::Empty,
+        workflow_state = tracing::field::Empty,
+        llm.messages_sent = tracing::field::Empty,
+        llm.messages_json = tracing::field::Empty,
+        llm.response_content = tracing::field::Empty,
+        result.success = tracing::field::Empty,
+        result.output_length = tracing::field::Empty
+    ))]
     async fn execute_step_oneshot(&self, context: &AgentContext, step: &WorkflowStep) -> Result<StepResult> {
+        // Record comprehensive input details as span attributes for Jaeger visibility
+        let current_span = tracing::Span::current();
+        current_span.record("step.description", step.description.as_str());
+        current_span.record("step.parameters", serde_json::to_string(&step.parameters).unwrap_or_default().as_str());
+        current_span.record("context.description", context.description.as_str());
+        current_span.record("context.dependencies", format!("{:?}", context.dependencies).as_str());
+        current_span.record("context.dependency_outputs", serde_json::to_string(&context.dependency_outputs).unwrap_or_default().as_str());
+
+        if let Some(rag_context) = &context.rag_context {
+            current_span.record("rag_context.length", rag_context.len());
+            current_span.record("rag_context.content", rag_context.as_str());
+        }
+        if let Some(history_context) = &context.history_context {
+            current_span.record("history_context.length", history_context.len());
+            current_span.record("history_context.content", history_context.as_str());
+        }
+        if let Some(workflow_state) = context.metadata.get("workflow_state") {
+            current_span.record("workflow_state", serde_json::to_string(workflow_state).unwrap_or_default().as_str());
+        }
+
+        // Also log for console debugging
+        debug!(target: "agent_execution", step_id = %step.id, step_name = %step.name, "OneShot step starting with context");
+        debug!(target: "agent_execution", "Step description: {}", step.description);
+        if let Some(rag_context) = &context.rag_context {
+            debug!(target: "agent_execution", "RAG context: {} chars", rag_context.len());
+        }
+        if let Some(history_context) = &context.history_context {
+            debug!(target: "agent_execution", "History context: {} chars", history_context.len());
+        }
         // Build messages for this specific step
         let mut messages = vec![
             ChatMessage::system(format!("# STEP: {}\n{}\n\n# INSTRUCTIONS:\n{}",
@@ -226,6 +276,19 @@ pub trait TypedAgent: Send + Sync {
         // Add main user prompt
         messages.push(ChatMessage::user(format!("# USER PROMPT:\n{}", context.description)));
 
+        // Record LLM messages as span attributes for Jaeger visibility
+        current_span.record("llm.messages_sent", messages.len());
+        let messages_json = serde_json::to_string(&messages.iter().map(|m| {
+            serde_json::json!({"role": format!("{:?}", m.role), "content": m.content})
+        }).collect::<Vec<_>>()).unwrap_or_default();
+        current_span.record("llm.messages_json", messages_json.as_str());
+
+        // Also log for console debugging
+        debug!(target: "agent_execution", "Sending {} messages to LLM", messages.len());
+        for (i, msg) in messages.iter().enumerate() {
+            debug!(target: "agent_execution", "Message {}: Role={:?}, Content length: {}", i + 1, msg.role, msg.content.len());
+        }
+
         // Execute LLM call
         let json_structure = JsonStructure::new::<Self::Output>();
         let mut request = ChatMessageRequest::new(self.model().to_string(), messages.clone());
@@ -233,14 +296,18 @@ pub trait TypedAgent: Send + Sync {
             request = request.format(FormatType::StructuredJson(Box::new(json_structure)));
         }
 
-        debug!("Starting LLM call for OneShot step '{}' (model: {}, messages: {})",
-            step.name, self.model(), messages.len());
+        debug!(target: "agent_execution", "Starting LLM call for OneShot step '{}' (model: {}, messages: {}, formatted: {})",
+            step.name, self.model(), messages.len(), step.formatted);
 
         // Execute LLM call with enhanced span instrumentation and real-time events
         let prompt_tokens = Self::estimate_tokens(&messages.iter().map(|m| m.content.clone()).collect::<Vec<_>>().join("\n"));
 
-        // Create span with all business attributes upfront
-        let llm_span = tracing::info_span!("llm_inference",
+        // Create span with all business attributes upfront - agent info in fields
+        let agent_name = format!("{}", self.agent_type());
+        let llm_span = tracing::info_span!(
+            "llm_inference",
+            agent_name = %agent_name,
+            execution_mode = "oneshot",
             step_id = %step.id,
             step_name = %step.name,
             "llm.provider" = "ollama",
@@ -261,6 +328,7 @@ pub trait TypedAgent: Send + Sync {
                 step.name, self.model(), prompt_tokens);
 
             // Execute the actual LLM call
+            // let response = self.client().send_chat_messages(request).await?;
             let response = self.client().send_chat_messages(request).await?;
             let duration = start_time.elapsed();
 
@@ -285,29 +353,52 @@ pub trait TypedAgent: Send + Sync {
             Ok::<_, anyhow::Error>(response)
         }.instrument(llm_span).await?;
 
-        debug!("LLM call completed for OneShot step '{}' (response length: {} chars)",
+        // Record LLM response and results as span attributes for Jaeger visibility
+        current_span.record("llm.response_content", response.message.content.as_str());
+        current_span.record("result.success", true);
+        current_span.record("result.output_length", response.message.content.len());
+
+        debug!(target: "agent_execution", "LLM call completed for OneShot step '{}' (response length: {} chars)",
             step.name, response.message.content.len());
+        debug!(target: "agent_execution", "Response preview: {}",
+            response.message.content.chars().take(200).collect::<String>());
 
         // Parse response
-        let parsed_output = response.message.content
-            .strip_prefix("```json")
-            .unwrap_or(&response.message.content)
-            .strip_suffix("```")
-            .unwrap_or(&response.message.content);
+        // let parsed_output = response.message.content
+        //     .strip_prefix("```json")
+        //     .unwrap_or(&response.message.content)
+        //     .strip_suffix("```")
+        //     .unwrap_or(&response.message.content);
+        //
+        // let output = serde_json::from_str::<Value>(parsed_output)?;
 
-        let output = serde_json::from_str::<Value>(parsed_output)?;
-
-        Ok(StepResult {
+        let step_result = StepResult {
             step_id: step.id.clone(),
             success: true,
-            output: Some(output),
+            output: Some(response.message.content.clone()),
             error: None,
             tool_executions: vec![], // OneShot doesn't use tools
-        })
+        };
+
+        debug!(target: "agent_execution", "OneShot step '{}' completed successfully", step.name);
+
+        Ok(step_result)
     }
 
     /// Execute a single ReAct workflow step
-    #[instrument(skip(self, context, tool_registry), fields(step_id = %step.id, step_name = %step.name, agent_id = %self.id(), max_iterations = ?max_iterations))]
+    #[instrument(name = "agent_react_step", skip(self, context, tool_registry), fields(
+        step_id = %step.id,
+        step_name = %step.name,
+        agent_id = %self.id(),
+        max_iterations = ?max_iterations,
+        step.description = tracing::field::Empty,
+        context.description = tracing::field::Empty,
+        rag_context.length = tracing::field::Empty,
+        history_context.length = tracing::field::Empty,
+        total_iterations = tracing::field::Empty,
+        total_tool_executions = tracing::field::Empty,
+        final_response_length = tracing::field::Empty
+    ))]
     async fn execute_step_react(
         &self,
         context: &AgentContext,
@@ -315,6 +406,28 @@ pub trait TypedAgent: Send + Sync {
         tool_registry: Arc<ToolRegistry>,
         max_iterations: Option<usize>
     ) -> Result<StepResult> {
+        // Record comprehensive input details as span attributes for Jaeger visibility
+        let current_span = tracing::Span::current();
+        current_span.record("step.description", step.description.as_str());
+        current_span.record("context.description", context.description.as_str());
+
+        if let Some(rag_context) = &context.rag_context {
+            current_span.record("rag_context.length", rag_context.len());
+        }
+        if let Some(history_context) = &context.history_context {
+            current_span.record("history_context.length", history_context.len());
+        }
+
+        // Also log for console debugging
+        debug!(target: "agent_execution", step_id = %step.id, step_name = %step.name, "ReAct step starting");
+        debug!(target: "agent_execution", "Step description: {}", step.description);
+        debug!(target: "agent_execution", "Required tools: {:?}", step.required_tools);
+        if let Some(rag_context) = &context.rag_context {
+            debug!(target: "agent_execution", "RAG context: {} chars", rag_context.len());
+        }
+        if let Some(history_context) = &context.history_context {
+            debug!(target: "agent_execution", "History context: {} chars", history_context.len());
+        }
         // Build initial messages for this step
         let mut messages = vec![
             ChatMessage::system(format!("# STEP: {}\n{}\n\n# INSTRUCTIONS:\n{}",
@@ -348,13 +461,20 @@ pub trait TypedAgent: Send + Sync {
         // Add main user prompt
         messages.push(ChatMessage::user(format!("# USER PROMPT:\n{}", context.description)));
 
+        // Log initial message setup for debugging visibility
+        debug!(target: "agent_execution", "=== INITIAL LLM MESSAGES ({} total) ===", messages.len());
+        for (i, msg) in messages.iter().enumerate() {
+            debug!(target: "agent_execution", "Initial Message {}: Role={:?}, Content:\n{}", i + 1, msg.role, msg.content);
+        }
+        debug!(target: "agent_execution", "Available tools: {:?}", tools_info.iter().map(|t| &t.function.name).collect::<Vec<_>>());
+
         // Execute ReAct loop for this step
         let mut tool_executions = Vec::new();
         let max_iter = max_iterations.unwrap_or(10);
         let mut latest_response = None;
         let mut completed_iterations = 0;
 
-        info!("Starting ReAct loop for step '{}' with max {} iterations", step.name, max_iter);
+        info!(target: "agent_execution", "Starting ReAct loop for step '{}' with max {} iterations", step.name, max_iter);
 
         for iteration in 0..max_iter {
             completed_iterations = iteration + 1;
@@ -368,7 +488,12 @@ pub trait TypedAgent: Send + Sync {
             );
             let _enter = iteration_span.enter();
 
-            debug!("ReAct iteration {}/{} starting", iteration + 1, max_iter);
+            debug!(target: "agent_execution", "=== REACT ITERATION {}/{} INPUT ===", iteration + 1, max_iter);
+            debug!(target: "agent_execution", "Current message history ({} messages):", messages.len());
+            for (i, msg) in messages.iter().enumerate() {
+                debug!(target: "agent_execution", "Message {}: Role={:?}, Content:\n{}", i + 1, msg.role, msg.content);
+            }
+
             // Build request with tools
             let json_structure = JsonStructure::new::<Self::Output>();
             let mut request = ChatMessageRequest::new(self.model().to_string(), messages.clone())
@@ -378,15 +503,20 @@ pub trait TypedAgent: Send + Sync {
                 request = request.format(FormatType::StructuredJson(Box::new(json_structure)));
             }
 
-            debug!("Starting LLM call for iteration {} (model: {}, messages: {}, tools: {})",
-                iteration + 1, self.model(), messages.len(), tools_info.len());
+            debug!(target: "agent_execution", "Starting LLM call for iteration {} (model: {}, messages: {}, tools: {}, formatted: {})",
+                iteration + 1, self.model(), messages.len(), tools_info.len(), step.formatted);
 
             // Execute LLM call with enhanced span instrumentation and real-time events
             let prompt_tokens = Self::estimate_tokens(&messages.iter().map(|m| m.content.clone()).collect::<Vec<_>>().join("\n"));
 
-            // Create span with all business attributes upfront
-            let llm_span = tracing::info_span!("llm_inference",
-                iteration = iteration,
+            // Create span with all business attributes upfront - agent info in fields
+            let agent_name = format!("{}", self.agent_type());
+            let llm_span = tracing::info_span!(
+                "llm_inference",
+                agent_name = %agent_name,
+                execution_mode = "react",
+                step_current = iteration + 1,
+                step_total = max_iter,
                 "llm.provider" = "ollama",
                 "llm.model" = %self.model(),
                 "llm.token_count.prompt" = prompt_tokens,
@@ -432,17 +562,30 @@ pub trait TypedAgent: Send + Sync {
 
             latest_response = Some(response.message.content.clone());
 
-            debug!("LLM call completed for iteration {} (response length: {} chars, tool calls: {})",
+            debug!(target: "agent_execution", "=== REACT ITERATION {}/{} OUTPUT ===", iteration + 1, max_iter);
+            debug!(target: "agent_execution", "LLM response content:\n{}", response.message.content);
+            debug!(target: "agent_execution", "LLM call completed for iteration {} (response length: {} chars, tool calls: {})",
                 iteration + 1, response.message.content.len(), response.message.tool_calls.len());
+
             if response.message.tool_calls.is_empty() {
-                debug!("No tool calls in response - iteration may be complete");
+                debug!(target: "agent_execution", "No tool calls in response - iteration may be complete");
             } else {
-                debug!("Response contains {} tool calls", response.message.tool_calls.len());
+                debug!(target: "agent_execution", "Response contains {} tool calls:", response.message.tool_calls.len());
+                for (i, tool_call) in response.message.tool_calls.iter().enumerate() {
+                    debug!(target: "agent_execution", "Tool call {}: name={}, args={}",
+                        i + 1, tool_call.function.name, tool_call.function.arguments);
+                }
             }
 
             // Add assistant response to message history to maintain conversation context
             // This ensures the model can build on its previous reasoning in subsequent iterations
             messages.push(ChatMessage::assistant(response.message.content.clone()));
+
+            // check if required tools are indeed executed
+            if !response.message.tool_calls.iter().any(|item| step.required_tools.contains(&item.function.name)){
+                messages.push(ChatMessage::user(format!("Required tools {:?} not used! You must use the required tools!", step.required_tools)));
+                continue;
+            }
 
             // Process tool calls if any
             if !response.message.tool_calls.is_empty() {
@@ -454,26 +597,30 @@ pub trait TypedAgent: Send + Sync {
                     let tool_execution_future = async {
                         let mut execution = ToolExecution::new(&tool_call.function.name, &tool_call.function.arguments);
 
-                        debug!("Executing tool '{}' with args: {}", tool_call.function.name, tool_call.function.arguments);
+                        debug!(target: "agent_execution", "=== TOOL EXECUTION {} ===", tool_idx + 1);
+                        debug!(target: "agent_execution", "Tool name: {}", tool_call.function.name);
+                        debug!(target: "agent_execution", "Tool args: {}", tool_call.function.arguments);
 
                         // Execute tool
                         let tool_name = &tool_call.function.name;
-                        let tool_args = tool_call.function.arguments;
+                        let tool_args = tool_call.function.arguments.clone();
                         let result = (*tool_registry).execute_tool(tool_name, tool_args).await;
                         match result {
                             Ok(result) => {
-                                debug!("Tool '{}' succeeded (result length: {} chars)", tool_call.function.name, result.len());
+                                debug!(target: "agent_execution", "Tool '{}' succeeded (result length: {} chars)", tool_call.function.name, result.len());
+                                debug!(target: "agent_execution", "Tool '{}' result:\n{}", tool_call.function.name, result);
                                 execution.result = Some(result.clone());
                                 messages.push(ChatMessage::user(format!("Tool Result: {}", result)));
                             }
                             Err(e) => {
                                 let error_msg = e.to_string();
-                                debug!("Tool '{}' failed: {}", tool_call.function.name, error_msg);
+                                debug!(target: "agent_execution", "Tool '{}' failed: {}", tool_call.function.name, error_msg);
                                 execution.error = Some(error_msg.clone());
                                 messages.push(ChatMessage::user(format!("Tool Error: {}", error_msg)));
                             }
                         }
 
+                        debug!(target: "agent_execution", "Tool execution complete: {}", serde_json::to_string_pretty(&execution).unwrap_or_default());
                         execution
                     };
 
@@ -512,22 +659,45 @@ pub trait TypedAgent: Send + Sync {
 
         // Check if we exited due to max iterations
         if completed_iterations >= max_iter {
-            info!("ReAct loop completed due to max iterations reached ({}/{})", completed_iterations, max_iter);
+            info!(target: "agent_execution", "ReAct loop completed due to max iterations reached ({}/{})", completed_iterations, max_iter);
+        }
+
+        // Record final results as span attributes for Jaeger visibility
+        current_span.record("total_iterations", completed_iterations);
+        current_span.record("total_tool_executions", tool_executions.len());
+        if let Some(ref final_response) = latest_response {
+            current_span.record("final_response_length", final_response.len());
+        }
+
+        // Log summary for console debugging
+        debug!(target: "agent_execution", "ReAct step '{}' completed: {}/{} iterations, {} tool executions",
+            step.name, completed_iterations, max_iter, tool_executions.len());
+        if let Some(ref final_response) = latest_response {
+            debug!(target: "agent_execution", "Final response length: {} chars", final_response.len());
+        }
+        for (i, tool_exec) in tool_executions.iter().enumerate() {
+            debug!(target: "agent_execution", "Tool {}: {} - Success: {}",
+                i + 1, tool_exec.tool_name, tool_exec.error.is_none());
         }
 
         // Parse final response
-        let final_content = latest_response.unwrap_or_default();
+        // let final_content = latest_response.unwrap_or_default();
+        //
+        // let output = serde_json::from_str(&final_content)
+        //     .unwrap_or_else(|_| Value::String(final_content));
 
-        let output = serde_json::from_str(&final_content)
-            .unwrap_or_else(|_| Value::String(final_content));
-
-        Ok(StepResult {
+        let step_result = StepResult {
             step_id: step.id.clone(),
             success: true,
-            output: Some(output),
+            output: latest_response.clone(),
             error: None,
-            tool_executions,
-        })
+            tool_executions: tool_executions.clone(),
+        };
+
+        debug!(target: "agent_execution", "Final step result: {}", serde_json::to_string_pretty(&step_result).unwrap_or_default());
+        debug!(target: "agent_execution", "=== REACT STEP COMPLETE ===");
+
+        Ok(step_result)
     }
 
     // async fn execute_typed(&self, context: AgentContext) -> Result<Self::Output>{}
@@ -616,7 +786,7 @@ impl<T: TypedAgent> Agent for T {
         messages
     }
 
-    #[instrument(skip(self, context), fields(context))]
+    #[instrument(name = "agent_workflow_execution", skip(self, context), fields(agent_id = %self.id(), agent_type = %self.agent_type()))]
     async fn execute(&self, context: AgentContext, tool_registry: Arc<ToolRegistry>) -> Result<AgentResult> {
         // All agents use workflow execution
         let workflow_steps = self.define_workflow_steps(&context);

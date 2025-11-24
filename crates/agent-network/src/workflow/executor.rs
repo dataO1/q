@@ -64,7 +64,7 @@ impl Default for ExecutorConfig {
     fn default() -> Self {
         Self {
             max_concurrent_tasks: 16,
-            task_timeout: Duration::from_secs(300),
+            task_timeout: Duration::from_secs(500),
             collect_metrics: true,
             max_retries: 3,
         }
@@ -162,7 +162,7 @@ impl WorkflowExecutor {
     }
 
     /// Execute workflow with wave-based parallel execution
-    #[instrument(skip(self, graph), fields(task_count = %graph.node_count()))]
+    #[instrument(name = "workflow_execution", skip(self, graph), fields(task_count = %graph.node_count()))]
     pub async fn execute_with_hitl(&self,
             graph: WorkflowGraph,
             approval_queue: Arc<DefaultApprovalQueue>,
@@ -231,7 +231,7 @@ impl WorkflowExecutor {
     }
 
     /// Execute a single wave of tasks in parallel
-    #[instrument(skip(self, graph, wave, previous_results), fields(
+    #[instrument(name = "wave_execution", skip(self, graph, wave, previous_results), fields(
         wave_index = wave.wave_index,
         tasks = wave.task_indices.len()
     ))]
@@ -276,7 +276,7 @@ impl WorkflowExecutor {
 
 
             let previous_results_clone = previous_results.clone();
-            
+
             // Create a task-specific span that will be the parent for this task execution
             let task_span = tracing::info_span!(
                 "task_execution",
@@ -284,7 +284,7 @@ impl WorkflowExecutor {
                 agent_id = %task.agent_id,
                 wave_index = wave_index
             );
-            
+
             let handle = tokio::spawn(
                 async move {
                     execute_task_with_retry(
@@ -411,7 +411,7 @@ impl WorkflowExecutor {
 
 
 /// Execute a single task
-#[instrument(skip(agent_pool, context_provider, file_locks, tool_registry, previous_results), fields(
+#[instrument(name = "task_execution", skip(agent_pool, context_provider, file_locks, tool_registry, previous_results), fields(
     task_id = %task.task_id,
     agent_id = %task.agent_id,
     description = %task.description
@@ -430,7 +430,7 @@ async fn execute_single_task(
     let agent = agent_pool
         .get_agent(&task.agent_id)
         .ok_or_else(|| AgentNetworkError::Agent(format!("Agent not found: {}", task.agent_id)))?;
-        
+
     // Add agent type to current span
     let current_span = tracing::Span::current();
     current_span.record("agent_type", &format!("{:?}", agent.agent_type()));
@@ -450,18 +450,18 @@ async fn execute_single_task(
         if task_result.success {
             // Create a structured dependency output including both the agent output and tool executions
             let mut dep_output = serde_json::Map::new();
-            
+
             // Add the agent's structured output
             if let Some(output) = &task_result.output {
                 if let Ok(parsed_output) = serde_json::from_str::<serde_json::Value>(output) {
                     dep_output.insert("agent_output".to_string(), parsed_output);
                 }
             }
-            
+
             // Add tool executions (this is the key missing piece!)
             let tool_executions_json = serde_json::to_value(&task_result.tool_executions)?;
             dep_output.insert("tool_executions".to_string(), tool_executions_json);
-            
+
             dependency_outputs.insert(task_id.clone(), serde_json::Value::Object(dep_output));
         }
     }
@@ -494,12 +494,12 @@ async fn execute_single_task(
                 }
             }
         };
-        
+
         // Execute context retrieval with proper span instrumentation and apply result
         let context_result = context_retrieval_future
-            .instrument(tracing::info_span!("context_retrieval", query = %task.description))
+            .instrument(tracing::info_span!("rag_retrieval", query_length = task.description.len()))
             .await;
-            
+
         if let Some(context) = context_result {
             agent_context = agent_context.with_rag_context(context);
             info!("Injected RAG+History context into agent");
@@ -511,7 +511,7 @@ async fn execute_single_task(
     match agent.execute(agent_context, tool_registry).await {
         Ok(result) => {
             info!("Agent execution completed successfully (tool executions: {})", result.tool_executions.len());
-            
+
             // Store exchange in history if provider available
             if let Some(provider) = context_provider.as_ref() {
                 if let Err(e) = provider.store_exchange(
@@ -536,7 +536,7 @@ async fn execute_single_task(
     }
 }
 
-#[instrument(skip(task, agent_pool, status_stream, coordination, file_locks), fields(
+#[instrument(name = "task_retry_execution", skip(task, agent_pool, status_stream, coordination, file_locks), fields(
     task_id = %task.task_id,
     agent_id = %task.agent_id,
 ))]

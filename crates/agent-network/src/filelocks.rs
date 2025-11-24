@@ -71,7 +71,7 @@ impl FileLockManager {
     }
 
     /// Acquire a read lock on a file
-    #[instrument(skip(self))]
+    #[instrument(name = "file_read_lock_acquire", skip(self))]
     pub async fn acquire_read_lock(&self, path: PathBuf, agent_id: String) -> AgentNetworkResult<FileLockGuard> {
         let start = Instant::now();
 
@@ -133,7 +133,7 @@ impl FileLockManager {
     }
 
     /// Acquire a write lock on a file
-    #[instrument(skip(self))]
+    #[instrument(name = "file_write_lock_acquire", skip(self))]
     pub async fn acquire_write_lock(&self, path: PathBuf, agent_id: String) -> AgentNetworkResult<FileLockGuard> {
         let start = Instant::now();
 

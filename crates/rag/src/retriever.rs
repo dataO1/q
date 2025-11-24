@@ -26,22 +26,13 @@ pub trait RetrieverSource: std::fmt::Debug + Send + Sync + 'static {
     ) -> Result<Vec<ContextFragment>>;
 }
 
-// Helper function to create a retriever stream from any RetrieverSource with proper span instrumentation
-#[instrument(name = "retriever_source", skip(source, queries, project_scope), fields(
-    source_name = tracing::field::Empty,
-    source_priority = source.priority(),
-    query_tiers = queries.len(),
-    total_queries = tracing::field::Empty,
-    fragments_found = tracing::field::Empty,
-    retrieval_latency_ms = tracing::field::Empty
-))]
+// Helper function to create a retriever stream from any RetrieverSource with simplified span instrumentation
 pub fn create_retriever_stream(
     source: Arc<dyn RetrieverSource>,
     queries: HashMap<CollectionTier, Vec<String>>,
     project_scope: ProjectScope,
 ) -> RetrieverSourcePrioStream {
     let total_queries: usize = queries.values().map(|v| v.len()).sum();
-    let query_tiers_vec: Vec<String> = queries.keys().map(|tier| format!("{:?}", tier)).collect();
     
     // Get source name for debugging (using Debug trait)
     let source_name = format!("{:?}", source);
@@ -51,13 +42,8 @@ pub fn create_retriever_stream(
         "unknown_retriever"
     };
     
-    // Record business attributes in span
-    let current_span = tracing::Span::current();
-    current_span.record("source_name", source_type);
-    current_span.record("total_queries", &total_queries);
-    
-    debug!("Starting retrieval from {} (priority: {}, tiers: {:?}, total queries: {})", 
-        source_type, source.priority(), query_tiers_vec, total_queries);
+    debug!("Starting retrieval from {} (priority: {}, total queries: {})", 
+        source_type, source.priority(), total_queries);
     
     let start_time = std::time::Instant::now();
     
@@ -109,9 +95,8 @@ pub fn create_retriever_stream(
 
     // Record completion metrics
     let duration = start_time.elapsed();
-    current_span.record("retrieval_latency_ms", &duration.as_millis());
     
-    info!("RetrieverSource stream created for {} (latency: {}ms)", source_type, duration.as_millis());
+    debug!("RetrieverSource stream created for {} (latency: {}ms)", source_type, duration.as_millis());
 
     RetrieverSourcePrioStream {
         stream: Box::pin(stream),
@@ -171,7 +156,6 @@ impl MultiSourceRetriever {
     }
 
     /// Retrieve all sources, then rerank and deduplicate combined results before streaming out in batches
-    #[instrument(skip(self), fields(raw_query, query_tiers = queries.len(), sources = self.sources.len()))]
     pub fn retrieve_stream(
         self:Arc<Self>,
         raw_query: String,
@@ -190,7 +174,24 @@ impl MultiSourceRetriever {
             //     source.retrieve_stream(queries.clone(), &project_scope.clone())
             // }).collect();
             for source in sources.iter() {
-                let partial_results = create_retriever_stream(source.clone(), queries.clone(), project_scope.clone());
+                let source_name = format!("{:?}", source);
+                let source_type = if source_name.contains("QdrantRetriever") {
+                    "qdrant"
+                } else {
+                    "unknown"
+                };
+                
+                let retrieval_span = tracing::info_span!(
+                    "retrieval_source", 
+                    source_type = source_type,
+                    priority = source.priority(),
+                    query_count = queries.values().map(|v| v.len()).sum::<usize>()
+                );
+                
+                let partial_results = retrieval_span.in_scope(|| {
+                    create_retriever_stream(source.clone(), queries.clone(), project_scope.clone())
+                });
+                
                 all_streams.push(partial_results);
             }
             // let query_embeddings = self.embedder.embedder_sparse.embed(vec![raw_query.to_string()]).await?;

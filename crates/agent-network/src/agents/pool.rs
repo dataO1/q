@@ -105,9 +105,7 @@ impl AgentPool {
     }
 
     /// Get agent by ID
-    #[instrument(skip(self))]
     pub fn get_agent(&self, agent_id: &str) -> Option<Arc<dyn Agent>> {
-        debug!("Retrieving agent by ID: {}", agent_id);
         self.agents.get(agent_id).cloned()
     }
 
@@ -123,9 +121,7 @@ impl AgentPool {
     }
 
     /// Get first agent of a specific type
-    #[instrument(skip(self), fields(agent_type = ?agent_type))]
     pub fn get_agent_by_type(&self, agent_type: AgentType) -> Option<Arc<dyn Agent>> {
-        debug!("Retrieving agent by type: {:?}", agent_type);
         self.get_agents_by_type(agent_type).into_iter().next()
     }
 

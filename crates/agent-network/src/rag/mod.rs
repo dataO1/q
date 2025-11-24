@@ -53,7 +53,7 @@ impl ContextProvider {
     ///
     /// # Returns
     /// Combined formatted context string ready for AgentContext injection
-    #[instrument(skip(self), fields(query_len = %task_query.len(), token_budget = self.token_budget))]
+    #[instrument(name = "context_retrieval", skip(self), fields(query_len = %task_query.len(), token_budget = self.token_budget))]
     pub async fn retrieve_context(&self,
         task_query: String,
         project_scope: ProjectScope,
@@ -89,7 +89,7 @@ impl ContextProvider {
     }
 
     /// Retrieve RAG context from SmartMultiSourceRag
-    #[instrument(skip(self), fields(
+    #[instrument(name = "rag_context_retrieval", skip(self), fields(
         rag.query = %query,
         token_budget = self.token_budget / 2
     ))]
@@ -117,7 +117,7 @@ impl ContextProvider {
     }
 
     /// Retrieve history context from HistoryManager
-    #[instrument(skip(self))]
+    #[instrument(name = "history_context_retrieval", skip(self))]
     async fn retrieve_history_context(&self, query: String, conversation_id: ConversationId) -> AgentNetworkResult<FormattedHistoryContext> {
         debug!("Querying history manager");
 

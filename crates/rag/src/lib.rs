@@ -39,7 +39,7 @@ impl SmartMultiSourceRag {
         }))
     }
 
-    #[instrument(skip(self), fields(source_queries))]
+    #[instrument(name = "rag_query_enhancement", skip(self), fields(source_queries))]
     async fn enhance_queries(
         &self,
         source_queries: &HashMap<CollectionTier, String>,
@@ -61,7 +61,7 @@ impl SmartMultiSourceRag {
         Ok(enhanced_queries)
     }
 
-    #[instrument(skip(self), fields(raw_query, project_scope, conversation_id))]
+    #[instrument(name = "rag_streaming_retrieval", skip(self), fields(raw_query, project_scope, conversation_id))]
     /// Runs the multi-stage priority batched streaming retrieval pipeline
     pub async fn retrieve_stream(
         self:Arc<Self>,

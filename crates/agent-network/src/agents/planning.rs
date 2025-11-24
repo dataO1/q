@@ -81,11 +81,6 @@ impl PlanningAgent {
 
     fn build_system_prompt(system_prompt: &str) -> String {
         let usage = r#"
-        ## WORKFLOW:
-            1. Analyse your given context (RAG, History, user prompt) and understand which files of the working_directory are important for the task
-            2. Get a list of files via the filesystem tool and generate a mental model of the underlying structure.
-            3. Assess the complexity level from the provided analysis and determine appropriate task count
-            4. Decompose the task into relevant subtasks ONLY if necessary, assign dependencies and give detailed descriptions
 
         ## COMPLEXITY-BASED TASK GUIDELINES:
         You will receive a complexity analysis. Use it to determine task decomposition:

@@ -155,7 +155,7 @@ pub enum Complexity {
 }
 
 impl Orchestrator {
-    #[instrument(skip(config), fields(agents = config.agent_network.agents.len()))]
+    #[instrument(name = "orchestrator_initialization", skip(config), fields(agents = config.agent_network.agents.len()))]
     /// Create a new Orchestrator
     pub async fn new(config: SystemConfig) -> Result<Self> {
         let span = span!(Level::INFO, "orchestrator.init");
@@ -208,7 +208,7 @@ impl Orchestrator {
     }
 
     /// Execute a user query end-to-end
-    #[instrument(skip(self), fields(query_id = %Uuid::new_v4()))]
+    #[instrument(name = "query_execution", skip(self), fields(query_id = %Uuid::new_v4()))]
     pub async fn execute_query(&self,
         query: &str,
         project_scope: ProjectScope,
@@ -248,7 +248,7 @@ impl Orchestrator {
     }
 
     /// Analyze query complexity and requirements
-    #[instrument(skip(self))]
+    #[instrument(name = "query_analysis", skip(self))]
     async fn analyze_query(&self, query: &str) -> Result<QueryAnalysis> {
         debug!("Analyzing query: {}", query);
 
@@ -281,7 +281,7 @@ impl Orchestrator {
     }
 
     /// Route simple tasks directly to appropriate agent without planning
-    #[instrument(skip(self, analysis, project_scope, conversation_id))]
+    #[instrument(name = "single_agent_routing", skip(self, analysis, project_scope, conversation_id))]
     async fn route_to_single_agent(&self,
         analysis: &QueryAnalysis,
         project_scope: &ProjectScope,
@@ -375,7 +375,7 @@ Return only the agent type name (e.g., "Coding", "Writing", "Evaluator")."#,
 
 
     /// LLM-driven task decomposition using Planning Agent
-    #[instrument(skip(self, analysis, project_scope, conversation_id))]
+    #[instrument(name = "query_decomposition", skip(self, analysis, project_scope, conversation_id))]
     async fn decompose_query(&self,
         project_scope: &ProjectScope,
         conversation_id: &ConversationId,
@@ -528,7 +528,7 @@ Return only the agent type name (e.g., "Coding", "Writing", "Evaluator")."#,
     }
 
     /// Build workflow DAG from decomposed tasks
-    #[instrument(skip(self, tasks))]
+    #[instrument(name = "workflow_construction", skip(self, tasks))]
     async fn build_workflow(&self, tasks: &[DecomposedTask]) -> Result<WorkflowGraph> {
         debug!("Building workflow from {} tasks", tasks.len());
 
@@ -574,7 +574,7 @@ Return only the agent type name (e.g., "Coding", "Writing", "Evaluator")."#,
     }
 
     /// Execute workflow graph
-    #[instrument(skip(self, graph), fields(nodes = graph.node_count()))]
+    #[instrument(name = "workflow_orchestration", skip(self, graph), fields(nodes = graph.node_count()))]
     pub async fn execute_workflow(&self,
         graph: WorkflowGraph,
         project_scope: ProjectScope,
@@ -605,7 +605,7 @@ Return only the agent type name (e.g., "Coding", "Writing", "Evaluator")."#,
     }
 
     /// Synthesize task results into final output
-    #[instrument(skip(self, results))]
+    #[instrument(name = "result_synthesis", skip(self, results))]
     async fn synthesize_results(&self, results: &[TaskResult]) -> Result<String> {
         debug!("Synthesizing {} results", results.len());
 

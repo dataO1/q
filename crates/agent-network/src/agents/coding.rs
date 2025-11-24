@@ -70,13 +70,6 @@ impl CodingAgent {
             - DO NOT return code in your message - always write it using tools
             - DO NOT write the change_log as a file output, just as a resulting message
 
-            ## YOUR WORKFLOW:
-            1. Analyze which code files are relevant for your coding task, given your information (RAG Context, History, Available Tools and user prompts).
-            2. If youre unsure, check if code files already exist and if so then read them.
-            3. Based on the current status of existing code, mentally generate the new code file based on the prompts by the user.
-            4. Call filesystem tool to write the generated code to the corresponding files.
-            5. Output a detailed change_log of the changes you made to any file.
-
             NEVER output code directly in your response."
             }"#;
         format!("##{}\n{}", prompt, tools_usage)
@@ -113,7 +106,7 @@ impl TypedAgent for CodingAgent {
                 id: "implement_code".to_string(),
                 name: "Code Implementation".to_string(),
                 description: "Generate and write the actual code based on requirements and existing codebase analysis".to_string(),
-                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(1) }, // Needs filesystem tool for writing
+                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(2) }, // Needs filesystem tool for writing
                 required_tools: vec!["filesystem".to_string()],
                 parameters: HashMap::new(),
                 formatted: false,

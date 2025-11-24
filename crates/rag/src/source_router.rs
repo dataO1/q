@@ -23,7 +23,7 @@ impl SourceRouter {
 
     /// Fast heuristic keyword intent detection
 
-    #[instrument(skip(self), fields(query))]
+    #[instrument(name = "intent_classification_llm", skip(self), fields(query))]
     /// Fallback async Ollama LLM call for intent classification,
     /// returns vector of CollectionTiers or empty vec for unknown
     pub async fn classify_intent_llm(&self, query: &str) -> anyhow::Result<Vec<CollectionTier>> {
@@ -81,7 +81,7 @@ impl SourceRouter {
         Ok(classification_output)
     }
 
-    #[instrument(skip(self), fields(user_query))]
+    #[instrument(name = "query_routing", skip(self), fields(user_query))]
     /// Main routing function - calls fast heuristic first,
     /// falls back to LLM classification if unsure, returns queries vec.
     pub async fn route_query(

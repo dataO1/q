@@ -126,7 +126,7 @@ impl ToolExecutor for FilesystemTool {
         }
     }
 
-    #[instrument(skip(self, parameters), fields(tool = "filesystem"))]
+    #[instrument(name = "filesystem_tool", skip(self, parameters), fields(tool = "filesystem"))]
     async fn call(&self, parameters: Value) -> Result<String> {
         // Extract command and params from JSON
         let command = parameters.get("command")

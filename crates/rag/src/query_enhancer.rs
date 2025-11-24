@@ -58,7 +58,7 @@ impl QueryEnhancer {
     }
 
 
-    #[instrument(skip(self), fields(raw_query))]
+    #[instrument(name = "query_heuristic_expansion", skip(self), fields(raw_query))]
     /// Apply simple heuristics: synonym expansions, normalization, token filtering
     fn heuristic_expand(&self, query: &str) -> anyhow::Result<Vec<String>> {
         let mut results = Vec::new();
@@ -119,7 +119,7 @@ impl QueryEnhancer {
         hex::encode(Sha256::digest(key_str.as_bytes()))
     }
 
-    #[instrument(skip(self), fields(raw_query))]
+    #[instrument(name = "query_enhancement_full", skip(self), fields(raw_query))]
     /// Fully enhanced multi-source per-source query generator with layered cache including heuristics and LLM enhancement
     pub async fn enhance(
         &self,

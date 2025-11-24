@@ -116,7 +116,7 @@ impl ToolRegistry {
 
     /// Execute specified tool with JSON args asynchronously
     /// Uses Arc for lock-free concurrent access across multiple agents
-    #[instrument(skip(self), fields(
+    #[instrument(name = "tool_execution", skip(self), fields(
         tool_name = %tool_name,
         tool_action = tracing::field::Empty,
         tool_target = tracing::field::Empty,
