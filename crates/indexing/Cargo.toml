@@ -24,6 +24,7 @@ tracing-subscriber = { version = "*", features = ["env-filter"] }
 ignore = "*"
 mime_guess = "*"
 dirs = "*"
+walkdir = "*"
 # Swiftide with correct features
 swiftide = { version = "*", features = ["ollama", "qdrant", "tree-sitter", "fastembed", "redis"] }
 fastembed = "*"

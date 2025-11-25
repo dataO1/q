@@ -3,7 +3,8 @@ use ai_agent_storage::QdrantClient;
 use anyhow::{Context, Result, anyhow};
 use repo_root::{projects::GitProject, RepoRoot};
 use serde_json::json;
-use std::{fs, path::Path, sync::Arc};
+use std::{fs, path::{Path, PathBuf}, sync::Arc};
+use walkdir::WalkDir;
 use crate::{chunk_adaptive::ChunkAdaptive, metadata_chunk_transformer::ExtractMetadataChunkTransformer, metadata_transformer::{ExtractMetadataTransformer}};
 // Add all the tree-sitter language crates you want to support
 use tree_sitter::{self, Parser, Tree};
@@ -56,17 +57,49 @@ impl IndexingPipeline {
         })
     }
 
-    /// Index a single file with Redis-based deduplication
-/// Index a file with automatic upsert (updates existing points by ID)
-    pub async fn index_directory(&self, file_path: &Path, tier: CollectionTier, extensions: Option<&Vec<&str>>) -> Result<()> {
+    /// Index a directory recursively with extension filtering
+    pub async fn index_directory(&self, directory_path: &Path, tier: CollectionTier, extensions: Option<&Vec<&str>>) -> Result<()> {
         let collection = tier.to_string();
 
-        info!("Indexing file: {} → {}", file_path.display(), collection);
+        info!("Indexing directory: {} → {}", directory_path.display(), collection);
+
+        // Check if path is a directory or file
+        if directory_path.is_file() {
+            // Handle single file case (for watched files)
+            info!("Processing single file: {}", directory_path.display());
+            return self.index_single_file(directory_path, tier, extensions).await;
+        }
+
+        // Collect all files recursively with extension filtering
+        let files = self.collect_files(directory_path, extensions)?;
+        if files.is_empty() {
+            info!("No matching files found in directory: {}", directory_path.display());
+            return Ok(());
+        }
+
+        // Process each file individually
+        for file_path in files {
+            info!("Processing file: {}", file_path.display());
+            if let Err(e) = self.index_single_file(&file_path, tier, None).await {
+                error!("Failed to index file {}: {}", file_path.display(), e);
+                // Continue with other files rather than failing the entire batch
+            }
+        }
+
+        info!("✓ Directory indexing complete: {}", directory_path.display());
+        Ok(())
+    }
+
+    /// Index a single file with automatic upsert (updates existing points by ID)
+    async fn index_single_file(&self, file_path: &Path, tier: CollectionTier, extensions: Option<&Vec<&str>>) -> Result<()> {
+        let collection = tier.to_string();
+
+        debug!("Indexing single file: {} → {}", file_path.display(), collection);
 
         // Qdrant builder with upsert enabled (default behavior)
         let qdrant = self.qdrant_client.indexing_client(&collection)?;
 
-        let pipeline = self.create_pipeline(file_path,extensions)
+        let pipeline = self.create_pipeline(file_path, extensions)
             .map_err(|err| {
                 error!("Failed to create pipeline: {:?}", err);
                 err
@@ -76,13 +109,8 @@ impl IndexingPipeline {
             .then_store_with(qdrant)
             .run()
             .await?;
-        // Explicitly unload Ollama
-        // let client = reqwest::Client::new();
-        // client.post("http://localhost:11434/api/generate")
-        //     .json(&json!({"model": "all-minilm", "keep_alive": 0}))
-        //     .send()
-        //     .await?;
-        info!("✓ Indexed/updated: {}", file_path.display());
+
+        debug!("✓ Indexed/updated single file: {}", file_path.display());
         Ok(())
     }
 
@@ -172,6 +200,43 @@ impl IndexingPipeline {
     //
     //     Ok(results)
     // }
+
+    /// Collect files recursively from directory with extension filtering
+    fn collect_files(&self, directory: &Path, extensions: Option<&Vec<&str>>) -> Result<Vec<PathBuf>> {
+        debug!("Collecting files from directory: {}", directory.display());
+        let mut files = Vec::new();
+        
+        let walker = WalkDir::new(directory)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|entry| entry.file_type().is_file());
+        
+        for entry in walker {
+            let path = entry.path();
+            
+            // Apply extension filtering if provided
+            if let Some(ext_list) = extensions {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if ext_list.contains(&ext) {
+                        debug!("Found matching file: {}", path.display());
+                        files.push(path.to_path_buf());
+                    } else {
+                        debug!("Skipping file (extension mismatch): {}", path.display());
+                    }
+                } else {
+                    debug!("Skipping file (no extension): {}", path.display());
+                }
+            } else {
+                // No extension filter, include all files
+                debug!("Found file (no filter): {}", path.display());
+                files.push(path.to_path_buf());
+            }
+        }
+        
+        info!("Collected {} files from directory: {}", files.len(), directory.display());
+        Ok(files)
+    }
 
     /// Check if file is a code file
     pub fn is_code_file(&self, path: &Path) -> bool {
