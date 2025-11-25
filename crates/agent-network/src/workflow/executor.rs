@@ -6,9 +6,9 @@
 use tracing::{info, debug, warn, error, instrument, span, Level, Instrument};
 use crate::error::{AgentNetworkError, AgentNetworkResult};
 use crate::hitl::{ApprovalRequest, AuditEvent, AuditLogger, DefaultApprovalQueue, RiskAssessment};
-use crate::tools::ToolRegistry;
 use crate::workflow::{TaskNode, TaskResult, WorkflowGraph, DependencyType};
 use crate::agents::{AgentPool, AgentContext};
+use crate::tools::ToolSet;
 use crate::status_stream::StatusStream;
 use crate::coordination::CoordinationManager;
 use crate::filelocks::FileLockManager;
@@ -169,7 +169,6 @@ impl WorkflowExecutor {
             audit_logger: Arc<AuditLogger>,
             project_scope: ProjectScope,
             conversation_id: ConversationId,
-            tool_registry: Arc<ToolRegistry>
         ) -> AgentNetworkResult<Vec<TaskResult>> {
         let start_time = Instant::now();
         info!("Starting workflow execution: {} tasks", graph.node_count());
@@ -202,7 +201,6 @@ impl WorkflowExecutor {
                 Arc::clone(&audit_logger),
                 project_scope.clone(),
                 conversation_id.clone(),
-                tool_registry.clone()
             ).await?;
 
             for result in wave_results {
@@ -244,7 +242,6 @@ impl WorkflowExecutor {
         audit_logger: Arc<AuditLogger>,
         project_scope: ProjectScope,
         conversation_id: ConversationId,
-        tool_registry: Arc<ToolRegistry>
     ) -> AgentNetworkResult<Vec<TaskResult>> {
         debug!("Executing wave {}: {} parallel tasks", wave.wave_index, wave.task_indices.len());
         // Log wave information with structured fields
@@ -272,7 +269,6 @@ impl WorkflowExecutor {
 
             let project_scope = project_scope.clone();
             let conversation_id = conversation_id.clone();
-            let tool_registry = tool_registry.clone();
 
 
             let previous_results_clone = previous_results.clone();
@@ -301,7 +297,6 @@ impl WorkflowExecutor {
                         wave_index,
                         project_scope,
                         conversation_id,
-                        tool_registry,
                         &previous_results_clone
                     )
                     .await
@@ -411,7 +406,7 @@ impl WorkflowExecutor {
 
 
 /// Execute a single task
-#[instrument(name = "task_execution", skip(agent_pool, context_provider, file_locks, tool_registry, previous_results), fields(
+#[instrument(name = "task_execution", skip(agent_pool, context_provider, file_locks, previous_results), fields(
     task_id = %task.task_id,
     agent_id = %task.agent_id,
     description = %task.description
@@ -423,7 +418,6 @@ async fn execute_single_task(
     file_locks: Arc<FileLockManager>,
     project_scope: ProjectScope,
     conversation_id: ConversationId,
-    tool_registry: Arc<ToolRegistry>,
     previous_results: &HashMap<String, TaskResult>
 ) -> AgentNetworkResult<TaskResult> {
     // Get agent
@@ -436,13 +430,9 @@ async fn execute_single_task(
     current_span.record("agent_type", &format!("{:?}", agent.agent_type()));
 
     let mut agent_context = AgentContext::new(
-        agent.id().to_string(),
-        agent.agent_type(),
-        task.task_id.clone(),
         task.description.clone(),
-        project_scope.clone(),
-        conversation_id.clone()
-    );
+        conversation_id.to_string()
+    ).with_project_scope(project_scope.clone());
 
     // Build dependency outputs from previous results
     let mut dependency_outputs = HashMap::new();
@@ -508,7 +498,7 @@ async fn execute_single_task(
 
     // Execute agent
     info!("Starting agent execution");
-    match agent.execute(agent_context, tool_registry).await {
+    match agent.execute(agent_context).await {
         Ok(result) => {
             info!("Agent execution completed successfully (tool executions: {})", result.tool_executions.len());
 
@@ -555,7 +545,6 @@ async fn execute_task_with_retry(
     wave_index: usize,
     project_scope: ProjectScope,
     conversation_id: ConversationId,
-    tool_registry: Arc<ToolRegistry>,
     previous_results: &HashMap<String, TaskResult>
 ) -> AgentNetworkResult<TaskResult> {
 
@@ -591,7 +580,6 @@ async fn execute_task_with_retry(
             Arc::clone(&file_locks),
             project_scope.clone(),
             conversation_id.clone(),
-            tool_registry.clone(),
             previous_results
         ))
         .await;

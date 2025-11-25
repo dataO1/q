@@ -9,7 +9,7 @@ pub mod planning;
 pub mod pool;
 pub mod writing;
 
-pub use base::{Agent, AgentContext, ToolResult, ConversationMessage};
+pub use base::{Agent, AgentContext, ConversationMessage};
 pub use coding::CodingAgent;
 pub use evaluator::EvaluatorAgent;
 use ollama_rs::generation::chat::ChatMessageResponse;
@@ -113,7 +113,7 @@ impl AgentResult {
         self
     }
 
-    pub fn with_tools_exectutions(mut self, executions: Vec<ToolExecution>) -> Self {
+    pub fn with_tools_executions(mut self, executions: Vec<ToolExecution>) -> Self {
         self.tool_executions.extend(executions);
         self
     }

@@ -14,7 +14,7 @@ use tracing::{debug, error, info, instrument, span, warn, Level};
 use crate::agents::planning::{SubtaskSpec, TaskDecompositionPlan};
 use crate::error::{AgentNetworkError, AgentNetworkResult};
 use crate::hitl::{AuditLogger, ConsoleApprovalHandler, DefaultApprovalQueue};
-use crate::tools::{FilesystemTool, ToolRegistry};
+use crate::tools::{LspTool, ToolSet, WriteFileTool};
 use crate::workflow::{
     DependencyType, TaskNode, TaskResult, WorkflowBuilder, WorkflowExecutor, WorkflowGraph,
 };
@@ -61,7 +61,6 @@ pub struct Orchestrator {
     rag: Arc<SmartMultiSourceRag>,
     history_manager: Arc<RwLock<HistoryManager>>,
     embedding_client: Arc<EmbeddingClient>,
-    tool_registry: Arc<ToolRegistry>
 }
 
 // Context for the decomposition step to be  better
@@ -188,7 +187,8 @@ impl Orchestrator {
         let rag = SmartMultiSourceRag::new(&config,embedding_client.clone()).await?;
     // Initialize HistoryManager (if Postgres configured)
         let history_manager = Arc::new(RwLock::new(HistoryManager::new(&config.storage.postgres_url, &config.rag).await?));
-        let tool_registry = Arc::new(ToolRegistry::new());
+
+        // Initialize tools
 
         info!("Orchestrator initialized successfully");
         Ok(Self {
@@ -203,7 +203,6 @@ impl Orchestrator {
             history_manager,
             rag,
             embedding_client,
-            tool_registry
         })
     }
 
@@ -286,7 +285,7 @@ impl Orchestrator {
         analysis: &QueryAnalysis,
         project_scope: &ProjectScope,
         conversation_id: &ConversationId) -> Result<Vec<DecomposedTask>> {
-        
+
         debug!("Routing simple task directly to agent");
 
         // Get available agent types and their capabilities
@@ -306,7 +305,7 @@ impl Orchestrator {
 
         // Use a small model to classify which agent should handle this task
         let selected_agent_type = self.classify_task_agent(&analysis.query, &available_agents).await?;
-        
+
         // Get the actual agent instance
         let agent = self.agent_pool
             .get_agent_by_type(selected_agent_type)
@@ -345,7 +344,7 @@ Available agents:
 
 Which single agent type should handle this task? Consider:
 - Coding tasks -> Coding
-- Writing/documentation tasks -> Writing  
+- Writing/documentation tasks -> Writing
 - Quality review/evaluation tasks -> Evaluator
 
 Return only the agent type name (e.g., "Coding", "Writing", "Evaluator")."#,
@@ -355,9 +354,9 @@ Return only the agent type name (e.g., "Coding", "Writing", "Evaluator")."#,
 
         // For now, use simple heuristics (can be enhanced with LLM later)
         let query_lower = query.to_lowercase();
-        
+
         // Simple keyword-based classification
-        if query_lower.contains("write") || query_lower.contains("implement") || 
+        if query_lower.contains("write") || query_lower.contains("implement") ||
            query_lower.contains("create") || query_lower.contains("function") ||
            query_lower.contains("code") || query_lower.contains("script") {
             Ok(AgentType::Coding)
@@ -417,27 +416,19 @@ Return only the agent type name (e.g., "Coding", "Writing", "Evaluator")."#,
                 serde_json::to_string_pretty(&decomposition_input)?
             );
 
-        //TODO: populate with tools
-        let fs_tool = FilesystemTool::new(&project_scope.root);
-        self.tool_registry.register(Arc::new(fs_tool));
+        // Tools are now managed by the ToolSet
+        // Note: Currently using static tools, could be made configurable per project
 
-        // Get the tools info after registration
-        let tools_info = self.tool_registry.get_tools_info();
-
-        // Build agent context for planning with tools included
+        // Build agent context for planning
         let planning_context = AgentContext::new(
-            planning_agent.id().into(),
-            AgentType::Planning,
-            format!("{}-{}",planning_agent.agent_type(), Uuid::new_v4()),
-            description,
-            project_scope.clone(),
-            conversation_id.clone()
-        ).with_tools(tools_info);
+            description.to_string(),
+            conversation_id.to_string()
+        ).with_project_scope(project_scope.clone());
 
         info!("Planning Context: {}",planning_context);
 
         // Execute planning agent with extractor for structured output
-        let result = planning_agent.execute(planning_context, self.tool_registry.clone()).await?;
+        let result = planning_agent.execute(planning_context).await?;
 
         // Extract the structured plan
         let plan: TaskDecompositionPlan = result.extract()?;
@@ -598,7 +589,7 @@ Return only the agent type name (e.g., "Coding", "Writing", "Evaluator")."#,
             Some(self.history_manager.clone()),
         );
 
-        let results = executor.execute_with_hitl(graph, self.approval_queue.clone(), self.audit_logger.clone(),project_scope, conversation_id, self.tool_registry.clone()).await?;
+        let results = executor.execute_with_hitl(graph, self.approval_queue.clone(), self.audit_logger.clone(),project_scope, conversation_id).await?;
 
         info!("Workflow execution completed with {} results", results.len());
         Ok(results)

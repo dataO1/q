@@ -1,17 +1,16 @@
-use async_trait::async_trait;
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use tracing::debug;
+use ollama_rs::generation::tools::Tool;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LspTool {
-    language: String,
 }
 
 impl LspTool {
-    pub fn new(language: String) -> Self {
-        debug!("LspTool initialized for language: {}", language);
-        Self { language }
+    pub fn new() -> Self {
+        debug!("LspTool initialized for language");
+        Self {}
     }
 
     // Placeholder implementations, replace with actual tower-lsp async client logic
@@ -37,42 +36,22 @@ impl LspTool {
     }
 }
 
-#[async_trait]
-impl crate::tools::ToolExecutor for LspTool {
-    fn name(&self) -> &'static str {
-        "lsp"
+impl Tool for LspTool {
+    type Params = Value;
+
+    fn name() -> String {
+        "lsp".to_string()
     }
 
-    fn description(&self) -> String {
+    fn description() -> String {
         "Language Server Protocol tool for code analysis and completion".to_string()
     }
 
-    fn provide_tool_info(&self) -> ollama_rs::generation::tools::ToolInfo {
-        let parameters = json!({
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "enum": ["completions", "diagnostics", "symbols", "type_info"]
-                },
-                "context": { "type": "string", "description": "Context for completions" },
-                "code": { "type": "string", "description": "Code to analyze" },
-                "position": { "type": "integer", "description": "Cursor position for type_info" }
-            },
-            "required": ["command"]
-        });
-
-        ollama_rs::generation::tools::ToolInfo {
-            tool_type: ollama_rs::generation::tools::ToolType::Function,
-            function: ollama_rs::generation::tools::ToolFunctionInfo {
-                name: self.name().to_string(),
-                description: self.description(),
-                parameters: serde_json::from_value(parameters).unwrap(),
-            },
-        }
-    }
-
-    async fn call(&self, parameters: Value) -> Result<String> {
+    fn call(
+        &mut self,
+        parameters: Self::Params
+    ) -> impl std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send + Sync {
+        async move {
         let command = parameters.get("command")
             .and_then(Value::as_str)
             .ok_or_else(|| anyhow!("Missing 'command' field"))?;
@@ -82,19 +61,19 @@ impl crate::tools::ToolExecutor for LspTool {
                 let context = parameters.get("context")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
-                self.completions(context).await
+                self.completions(context).await.map_err(|e| e.into())
             }
             "diagnostics" => {
                 let code = parameters.get("code")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
-                self.diagnostics(code).await
+                self.diagnostics(code).await.map_err(|e| e.into())
             }
             "symbols" => {
                 let code = parameters.get("code")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
-                self.symbols(code).await
+                self.symbols(code).await.map_err(|e| e.into())
             }
             "type_info" => {
                 let code = parameters.get("code")
@@ -103,9 +82,10 @@ impl crate::tools::ToolExecutor for LspTool {
                 let position = parameters.get("position")
                     .and_then(Value::as_u64)
                     .unwrap_or(0) as usize;
-                self.type_info(code, position).await
+                self.type_info(code, position).await.map_err(|e| e.into())
             }
-            _ => Err(anyhow!("Unknown LSP command: {}", command)),
+            _ => Err(anyhow!("Unknown LSP command: {}", command).into()),
+        }
         }
     }
 }
@@ -113,11 +93,10 @@ impl crate::tools::ToolExecutor for LspTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::ToolExecutor;
 
     #[tokio::test]
     async fn test_lsp_tool_call() {
-        let tool = LspTool::new("rust".to_string());
+        let mut tool = LspTool::new();
         let params = json!({ "command": "completions", "context": "fn main() { pri" });
         let result = tool.call(params).await.unwrap();
         assert!(result.contains("Completions"));

@@ -6,7 +6,7 @@
 use ai_agent_common::{AgentType, ConversationId, ProjectScope};
 use async_trait::async_trait;
 use derive_more::Display;
-use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, ChatMessageResponse, MessageRole}, parameters::{FormatType, JsonStructure}, tools::{ToolInfo}}, Ollama};
+use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, ChatMessageResponse, MessageRole}, parameters::{FormatType, JsonStructure}, tools::{Tool, ToolInfo}}, Ollama};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -16,7 +16,7 @@ use schemars::JsonSchema;
 use anyhow::{Context, Result, anyhow};
 use ollama_rs::coordinator::Coordinator;
 
-use crate::{agents::AgentResult, error::AgentNetworkResult, tools::{ToolExecution, ToolRegistry}};
+use crate::{agents::AgentResult, tools::{ToolExecution, ToolSet}};
 
 /// ReAct step output for semantic stop conditions
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,7 +122,7 @@ pub trait TypedAgent: Send + Sync {
         &self,
         context: AgentContext,
         workflow_steps: Vec<WorkflowStep>,
-        tool_registry: Arc<ToolRegistry>
+        tools: ToolSet
     ) -> Result<AgentResult> {
         let mut workflow_state = WorkflowState::new();
         let mut final_result = None;
@@ -142,7 +142,7 @@ pub trait TypedAgent: Send + Sync {
                     self.execute_step_oneshot(&updated_context, step).await
                 }
                 StepExecutionMode::ReAct { max_iterations } => {
-                    self.execute_step_react(&updated_context, step, tool_registry.clone(), *max_iterations).await
+                    self.execute_step_react(&updated_context, step, tools.clone(), *max_iterations).await
                 }
             };
 
@@ -386,7 +386,7 @@ pub trait TypedAgent: Send + Sync {
     }
 
     /// Execute a single ReAct workflow step
-    #[instrument(name = "agent_react_step", skip(self, context, tool_registry), fields(
+    #[instrument(name = "agent_react_step", skip(self, context, tools), fields(
         step_id = %step.id,
         step_name = %step.name,
         agent_id = %self.id(),
@@ -403,7 +403,7 @@ pub trait TypedAgent: Send + Sync {
         &self,
         context: &AgentContext,
         step: &WorkflowStep,
-        tool_registry: Arc<ToolRegistry>,
+        tools: ToolSet,
         max_iterations: Option<usize>
     ) -> Result<StepResult> {
         // Record comprehensive input details as span attributes for Jaeger visibility
@@ -418,285 +418,81 @@ pub trait TypedAgent: Send + Sync {
             current_span.record("history_context.length", history_context.len());
         }
 
-        // Also log for console debugging
-        debug!(target: "agent_execution", step_id = %step.id, step_name = %step.name, "ReAct step starting");
+        debug!(target: "agent_execution", step_id = %step.id, step_name = %step.name, "ReAct step starting with Coordinator");
         debug!(target: "agent_execution", "Step description: {}", step.description);
-        debug!(target: "agent_execution", "Required tools: {:?}", step.required_tools);
         if let Some(rag_context) = &context.rag_context {
             debug!(target: "agent_execution", "RAG context: {} chars", rag_context.len());
         }
         if let Some(history_context) = &context.history_context {
             debug!(target: "agent_execution", "History context: {} chars", history_context.len());
         }
-        // Build initial messages for this step
-        let mut messages = vec![
-            ChatMessage::system(format!("# STEP: {}\n{}\n\n# INSTRUCTIONS:\n{}",
-                step.name,
-                step.description,
-                self.system_prompt()
-            ))
-        ];
+        // Build the initial system message with all context
+        let mut initial_message = format!(
+            "# STEP: {}\n{}\n\n# INSTRUCTIONS:\n{}\n\n",
+            step.name,
+            step.description,
+            self.system_prompt()
+        );
 
+        // Add context information
         if !context.dependency_outputs.is_empty() {
             let dependency_msg = serde_json::to_string_pretty(&context.dependency_outputs)
                 .unwrap_or_else(|_| "Failed to serialize dependency outputs".to_string());
-            messages.push(ChatMessage::user(format!("# PREVIOUS TASK OUTPUTS:\n{}", dependency_msg)));
+            initial_message.push_str(&format!("# PREVIOUS TASK OUTPUTS:\n{}\n\n", dependency_msg));
         }
 
-        // Add workflow state
         if let Some(workflow_state) = context.metadata.get("workflow_state") {
-            messages.push(ChatMessage::user(format!("# WORKFLOW CONTEXT:\n{}",
-                serde_json::to_string_pretty(workflow_state).unwrap_or_default())));
+            initial_message.push_str(&format!("# WORKFLOW CONTEXT:\n{}\n\n",
+                serde_json::to_string_pretty(workflow_state).unwrap_or_default()));
         }
 
-        // Add step parameters
         if !step.parameters.is_empty() {
-            messages.push(ChatMessage::user(format!("# STEP PARAMETERS:\n{}",
-                serde_json::to_string_pretty(&step.parameters).unwrap_or_default())));
+            initial_message.push_str(&format!("# STEP PARAMETERS:\n{}\n\n",
+                serde_json::to_string_pretty(&step.parameters).unwrap_or_default()));
         }
 
-        // Get tools info for function calling schema only (not for message injection)
-        let tools_info = tool_registry.get_tools_info();
+        // Add the main user prompt
+        initial_message.push_str(&format!("# USER PROMPT:\n{}", context.description));
 
-        // Add main user prompt
-        messages.push(ChatMessage::user(format!("# USER PROMPT:\n{}", context.description)));
+        // Create Coordinator with tools
+        let mut coordinator = Coordinator::new(
+            self.client().clone(),
+            self.model().to_string(),
+            vec![] // Start with empty history
+        );
 
-        // Log initial message setup for debugging visibility
-        debug!(target: "agent_execution", "=== INITIAL LLM MESSAGES ({} total) ===", messages.len());
-        for (i, msg) in messages.iter().enumerate() {
-            debug!(target: "agent_execution", "Initial Message {}: Role={:?}, Content:\n{}", i + 1, msg.role, msg.content);
-        }
-        debug!(target: "agent_execution", "Available tools: {:?}", tools_info.iter().map(|t| &t.function.name).collect::<Vec<_>>());
+        // Add tools to the coordinator
+        coordinator = coordinator.add_tool(tools.write_file.as_ref().clone());
+        // coordinator = coordinator.add_tool(tools.lsp.as_ref().clone());
 
-        // Execute ReAct loop for this step
-        let mut tool_executions = Vec::new();
-        let max_iter = max_iterations.unwrap_or(10);
-        let mut latest_response = None;
-        let mut completed_iterations = 0;
-
-        info!(target: "agent_execution", "Starting ReAct loop for step '{}' with max {} iterations", step.name, max_iter);
-
-        for iteration in 0..max_iter {
-            completed_iterations = iteration + 1;
-            let iteration_span = tracing::info_span!("react_iteration",
-                iteration = iteration,
-                step_id = %step.id,
-                "agent.name" = %self.agent_type(),
-                "agent.iteration" = iteration + 1,
-                "agent.state" = "thinking",
-                "agent.stop_reason" = tracing::field::Empty
-            );
-            let _enter = iteration_span.enter();
-
-            debug!(target: "agent_execution", "=== REACT ITERATION {}/{} INPUT ===", iteration + 1, max_iter);
-            debug!(target: "agent_execution", "Current message history ({} messages):", messages.len());
-            for (i, msg) in messages.iter().enumerate() {
-                debug!(target: "agent_execution", "Message {}: Role={:?}, Content:\n{}", i + 1, msg.role, msg.content);
-            }
-
-            // Build request with tools
-            let json_structure = JsonStructure::new::<Self::Output>();
-            let mut request = ChatMessageRequest::new(self.model().to_string(), messages.clone())
-                .tools(tools_info.clone());
-
-            if step.formatted{
-                request = request.format(FormatType::StructuredJson(Box::new(json_structure)));
-            }
-
-            debug!(target: "agent_execution", "Starting LLM call for iteration {} (model: {}, messages: {}, tools: {}, formatted: {})",
-                iteration + 1, self.model(), messages.len(), tools_info.len(), step.formatted);
-
-            // Execute LLM call with enhanced span instrumentation and real-time events
-            let prompt_tokens = Self::estimate_tokens(&messages.iter().map(|m| m.content.clone()).collect::<Vec<_>>().join("\n"));
-
-            // Create span with all business attributes upfront - agent info in fields
-            let agent_name = format!("{}", self.agent_type());
-            let llm_span = tracing::info_span!(
-                "llm_inference",
-                agent_name = %agent_name,
-                execution_mode = "react",
-                step_current = iteration + 1,
-                step_total = max_iter,
-                "llm.provider" = "ollama",
-                "llm.model" = %self.model(),
-                "llm.token_count.prompt" = prompt_tokens,
-                "llm.token_count.completion" = tracing::field::Empty,
-                "llm.latency_per_token" = tracing::field::Empty,
-                message_count = messages.len(),
-                tool_count = tools_info.len()
-            );
-
-            let response = async {
-                // Record request start event with details
-                info!(target: "llm_inference", "llm_request_started: model={}, prompt_tokens={}, message_count={}, tool_count={}, iteration={}, execution_mode=react",
-                    self.model(), prompt_tokens, messages.len(), tools_info.len(), iteration + 1);
-
-                let start_time = std::time::Instant::now();
-                info!("Starting LLM inference for ReAct iteration {} (model: {}, prompt tokens: {}, tools: {})",
-                    iteration + 1, self.model(), prompt_tokens, tools_info.len());
-
-                // Execute the actual LLM call
-                let response = self.client().send_chat_messages(request).await?;
-                let duration = start_time.elapsed();
-
-                // Calculate completion metrics immediately
-                let completion_tokens = Self::estimate_tokens(&response.message.content);
-                let latency_per_token = if completion_tokens > 0 {
-                    duration.as_millis() / completion_tokens as u128
-                } else { 0 };
-
-                // Record response received event with details
-                info!(target: "llm_inference", "llm_response_received: completion_tokens={}, total_latency_ms={}, latency_per_token_ms={}, response_length={}, tool_calls_count={}, iteration={}",
-                    completion_tokens, duration.as_millis(), latency_per_token, response.message.content.len(), response.message.tool_calls.len(), iteration + 1);
-
-                // Record completion metrics in span
-                let current_span = tracing::Span::current();
-                current_span.record("llm.token_count.completion", &completion_tokens);
-                current_span.record("llm.latency_per_token", &format!("{}ms", latency_per_token));
-
-                info!("LLM inference completed for ReAct iteration {} (response: {} chars, completion tokens: {}, tool calls: {}, latency: {}ms)",
-                    iteration + 1, response.message.content.len(), completion_tokens, response.message.tool_calls.len(), duration.as_millis());
-
-                Ok::<_, anyhow::Error>(response)
-            }.instrument(llm_span).await?;
-
-            latest_response = Some(response.message.content.clone());
-
-            debug!(target: "agent_execution", "=== REACT ITERATION {}/{} OUTPUT ===", iteration + 1, max_iter);
-            debug!(target: "agent_execution", "LLM response content:\n{}", response.message.content);
-            debug!(target: "agent_execution", "LLM call completed for iteration {} (response length: {} chars, tool calls: {})",
-                iteration + 1, response.message.content.len(), response.message.tool_calls.len());
-
-            if response.message.tool_calls.is_empty() {
-                debug!(target: "agent_execution", "No tool calls in response - iteration may be complete");
-            } else {
-                debug!(target: "agent_execution", "Response contains {} tool calls:", response.message.tool_calls.len());
-                for (i, tool_call) in response.message.tool_calls.iter().enumerate() {
-                    debug!(target: "agent_execution", "Tool call {}: name={}, args={}",
-                        i + 1, tool_call.function.name, tool_call.function.arguments);
-                }
-            }
-
-            // Add assistant response to message history to maintain conversation context
-            // This ensures the model can build on its previous reasoning in subsequent iterations
-            messages.push(ChatMessage::assistant(response.message.content.clone()));
-
-            // check if required tools are indeed executed
-            if !response.message.tool_calls.iter().any(|item| step.required_tools.contains(&item.function.name)){
-                messages.push(ChatMessage::user(format!("Required tools {:?} not used! You must use the required tools!", step.required_tools)));
-                continue;
-            }
-
-            // Process tool calls if any
-            if !response.message.tool_calls.is_empty() {
-                // Update agent state to tool_use
-                iteration_span.record("agent.state", "tool_use");
-                let tool_calls = response.message.tool_calls;
-                for (tool_idx, tool_call) in tool_calls.into_iter().enumerate() {
-
-                    let tool_execution_future = async {
-                        let mut execution = ToolExecution::new(&tool_call.function.name, &tool_call.function.arguments);
-
-                        debug!(target: "agent_execution", "=== TOOL EXECUTION {} ===", tool_idx + 1);
-                        debug!(target: "agent_execution", "Tool name: {}", tool_call.function.name);
-                        debug!(target: "agent_execution", "Tool args: {}", tool_call.function.arguments);
-
-                        // Execute tool
-                        let tool_name = &tool_call.function.name;
-                        let tool_args = tool_call.function.arguments.clone();
-                        let result = (*tool_registry).execute_tool(tool_name, tool_args).await;
-                        match result {
-                            Ok(result) => {
-                                debug!(target: "agent_execution", "Tool '{}' succeeded (result length: {} chars)", tool_call.function.name, result.len());
-                                debug!(target: "agent_execution", "Tool '{}' result:\n{}", tool_call.function.name, result);
-                                execution.result = Some(result.clone());
-                                messages.push(ChatMessage::user(format!("Tool Result: {}", result)));
-                            }
-                            Err(e) => {
-                                let error_msg = e.to_string();
-                                debug!(target: "agent_execution", "Tool '{}' failed: {}", tool_call.function.name, error_msg);
-                                execution.error = Some(error_msg.clone());
-                                messages.push(ChatMessage::user(format!("Tool Error: {}", error_msg)));
-                            }
-                        }
-
-                        debug!(target: "agent_execution", "Tool execution complete: {}", serde_json::to_string_pretty(&execution).unwrap_or_default());
-                        execution
-                    };
-
-                    // Execute tool with proper span instrumentation
-                    let execution = tool_execution_future
-                        .instrument(tracing::info_span!("tool_execution",
-                            tool_name = %tool_call.function.name,
-                            tool_idx = tool_idx,
-                            iteration = iteration,
-                            agent_id = %self.id()
-                        ))
-                        .await;
-
-                    tool_executions.push(execution);
-                }
-            } else {
-                // No tool calls - check for semantic completion
-                iteration_span.record("agent.state", "done");
-
-                // Try to parse response for semantic stop conditions
-                if let Ok(step_output) = serde_json::from_str::<ReactStepOutput>(&response.message.content) {
-                    if step_output.status.to_lowercase() == "done" ||
-                       step_output.status.to_lowercase() == "complete" ||
-                       step_output.status.to_lowercase() == "finished" {
-                        iteration_span.record("agent.stop_reason", "stop_sequence");
-                        debug!("ReAct step completed with semantic stop condition: {}", step_output.status);
-                        break;
-                    }
-                }
-                // If no valid semantic output but no tool calls, step is complete
-                iteration_span.record("agent.stop_reason", "no_tool_calls");
-                info!("ReAct step completed - no tool calls and no explicit continuation signal (iteration {})", iteration + 1);
-                break;
-            }
-        }
-
-        // Check if we exited due to max iterations
-        if completed_iterations >= max_iter {
-            info!(target: "agent_execution", "ReAct loop completed due to max iterations reached ({}/{})", completed_iterations, max_iter);
-        }
-
-        // Record final results as span attributes for Jaeger visibility
-        current_span.record("total_iterations", completed_iterations);
-        current_span.record("total_tool_executions", tool_executions.len());
-        if let Some(ref final_response) = latest_response {
-            current_span.record("final_response_length", final_response.len());
-        }
-
-        // Log summary for console debugging
-        debug!(target: "agent_execution", "ReAct step '{}' completed: {}/{} iterations, {} tool executions",
-            step.name, completed_iterations, max_iter, tool_executions.len());
-        if let Some(ref final_response) = latest_response {
-            debug!(target: "agent_execution", "Final response length: {} chars", final_response.len());
-        }
-        for (i, tool_exec) in tool_executions.iter().enumerate() {
-            debug!(target: "agent_execution", "Tool {}: {} - Success: {}",
-                i + 1, tool_exec.tool_name, tool_exec.error.is_none());
-        }
-
-        // Parse final response
-        // let final_content = latest_response.unwrap_or_default();
+        debug!(target: "agent_execution", "Starting Coordinator chat for step '{}'", step.name);
+        info!(target: "agent_execution", "Using Coordinator for ReAct step '{}' with tools: write_file, lsp", step.name);
+        // Execute the coordinator chat
+        // let start_time = std::time::Instant::now();
+        let response = coordinator
+            .chat(vec![ChatMessage::user(initial_message)]).await
+            // .chat(&initial_message).await
+            .map_err(|e| anyhow::anyhow!("Coordinator chat failed: {}", e))?;
+        // let duration = start_time.elapsed();
         //
-        // let output = serde_json::from_str(&final_content)
-        //     .unwrap_or_else(|_| Value::String(final_content));
+        // current_span.record("final_response_length", response.len());
+
+        // debug!(target: "agent_execution", "Coordinator completed for step '{}' (duration: {}ms, response length: {} chars)",
+            // step.name, duration.as_millis(), response.len());
+
+        // For now, we'll create a simplified tool execution tracking
+        // In the future, we could extract tool calls from the coordinator's history
+        let tool_executions = vec![]; // TODO: Extract from coordinator if needed
 
         let step_result = StepResult {
             step_id: step.id.clone(),
             success: true,
-            output: latest_response.clone(),
+            output: Some(response.message.content),
             error: None,
-            tool_executions: tool_executions.clone(),
+            tool_executions,
         };
 
-        debug!(target: "agent_execution", "Final step result: {}", serde_json::to_string_pretty(&step_result).unwrap_or_default());
-        debug!(target: "agent_execution", "=== REACT STEP COMPLETE ===");
-
+        debug!(target: "agent_execution", "ReAct step '{}' completed successfully using Coordinator", step.name);
         Ok(step_result)
     }
 
@@ -710,254 +506,123 @@ pub trait Agent: Send + Sync {
     fn agent_type(&self) -> AgentType;
     fn system_prompt(&self) -> &str;
     fn model(&self) -> &str;
-    fn temperature(&self) -> f32;
     fn client(&self) -> &Ollama;
-    fn build_initial_messages(&self, context: &AgentContext) -> Vec<ChatMessage>;
-
-
-    // Return the JSON schema dynamically
-    fn output_schema(&self) -> JsonStructure;
 
     // Execute with type-erased result
-    async fn execute(&self, context: AgentContext, tool_registry: Arc<ToolRegistry>) -> Result<AgentResult>;
+    async fn execute(&self, context: AgentContext) -> Result<AgentResult>;
 }
 
 // Blanket implementation: any TypedAgent automatically becomes an Agent
 #[async_trait]
-impl<T: TypedAgent> Agent for T {
+impl<T> Agent for T
+where
+    T: TypedAgent,
+{
     fn id(&self) -> &str { TypedAgent::id(self) }
     fn agent_type(&self) -> AgentType { TypedAgent::agent_type(self) }
     fn system_prompt(&self) -> &str { TypedAgent::system_prompt(self) }
     fn model(&self) -> &str { TypedAgent::model(self) }
-    fn temperature(&self) -> f32 { TypedAgent::temperature(self) }
     fn client(&self) -> &Ollama { TypedAgent::client(self) }
 
-    fn output_schema(&self) -> JsonStructure {
-        JsonStructure::new::<T::Output>()
-    }
-
-    fn build_initial_messages(&self, context: &AgentContext) -> Vec<ChatMessage> {
-        let mut messages = Vec::new();
-
-        // 1. Add system message (agent role/instructions)
-        messages.push(ChatMessage::system(format!("#INSTRUCTIONS:\n{}",
-                    self.system_prompt().to_string()
-        )));
-
-        // 2. Optionally add RAG context as additional user or system message
-        if let Some(rag_context) = &context.rag_context {
-            messages.push(ChatMessage::user(format!(
-                "# RAG CONTEXT:\n{}",
-                rag_context
-            )));
-        }
-
-        // 3. Optionally add History context as additional user or system message
-        if let Some(history_context) = &context.history_context {
-            messages.push(ChatMessage::user(format!(
-                "# HISTORY CONTEXT:\n{}",
-                history_context
-            )));
-        }
-
-        // // 4. Optionally add Tools context as additional user or system message
-        // if let Ok(available_tools)= serde_json::to_string_pretty(&context.available_tools) {
-        //     messages.push(ChatMessage::user(format!(
-        //         "# AVAILABLE TOOLS:\n{}",
-        //         available_tools
-        //     )));
-        // }
-
-        // 4.5. Add dependency outputs from previous tasks (includes tool executions!)
-        if !context.dependency_outputs.is_empty() {
-            let dependency_msg = serde_json::to_string_pretty(&context.dependency_outputs)
-                .unwrap_or_else(|_| "Failed to serialize dependency outputs".to_string());
-            messages.push(ChatMessage::user(format!(
-                "# PREVIOUS TASK OUTPUTS:\n{}",
-                dependency_msg
-            )));
-        }
-
-        // 5. Add user message (the actual task/query)
-        messages.push(ChatMessage::user(format!("# USER PROMPT:\n{}",context.description)));
-
-
-
-        messages
-    }
-
     #[instrument(name = "agent_workflow_execution", skip(self, context), fields(agent_id = %self.id(), agent_type = %self.agent_type()))]
-    async fn execute(&self, context: AgentContext, tool_registry: Arc<ToolRegistry>) -> Result<AgentResult> {
+    async fn execute(&self, context: AgentContext) -> Result<AgentResult> {
         // All agents use workflow execution
         let workflow_steps = self.define_workflow_steps(&context);
-        self.execute_workflow(context, workflow_steps, tool_registry).await
+        let tools = ToolSet::new(&context.clone().project_scope.unwrap().root);
+        self.execute_workflow(context, workflow_steps, tools).await
     }
+
 }
 
 /// Context passed to agents during execution
 #[derive(Debug, Display, Clone)]
-#[display("AgentID: {}, AgentType: {}, TaskID: {}, Description:{}, dependencies: {:?}, dependency_outputs: {:?}, rag_context: {:?}, history_context: {:?}, file_context: {:?}, conversation_history: {:?}, project_scope: {}, conversation_id: {}, metadata: {:?}",agent_id, agent_type, task_id, description,dependencies, dependency_outputs, rag_context, history_context, file_context, conversation_history, project_scope, conversation_id, metadata)]
+#[display("AgentContext: {description}")]
 pub struct AgentContext {
-    // === Agent Identification ===
-    /// Which agent is executing this task
-    pub agent_id: String,
-
-    /// Type of agent (coding, planning, writing, evaluator)
-    pub agent_type: AgentType,
-
-    // === Task Information ===
-    /// Unique task identifier
-    pub task_id: String,
-
-    /// Description of what the agent should do
+    /// Primary task description
     pub description: String,
 
-    // === Workflow Dependencies ===
-    /// IDs of tasks this task depends on
+    /// Context dependencies that must be satisfied
     pub dependencies: Vec<String>,
 
-    /// Structured outputs from dependency tasks
+    /// Results from dependency tasks
     pub dependency_outputs: HashMap<String, Value>,
+    /// Conversation identifier
+    pub conversation_id: Option<ConversationId>,
 
-    // === Context & Retrieval ===
-    /// RAG context from vector store (top-k documents)
+    /// Project scope information
+    pub project_scope: Option<ProjectScope>,
+    /// Enhanced context from RAG system
     pub rag_context: Option<String>,
 
-    /// Historical context from conversation history
+    /// Historical context
     pub history_context: Option<String>,
 
-    /// Relevant file paths for this task
-    pub file_context: Vec<String>,
-    pub available_tools: Vec<ToolInfo>,
-
-    // === Conversation & Scope ===
-    /// Conversation history for multi-turn interactions
-    pub conversation_history: Vec<ConversationMessage>,
-
-    /// Project scope boundaries
-    pub project_scope: ProjectScope,
-
-    /// Conversation identifier
-    pub conversation_id: ConversationId,
-
-    // === Metadata ===
-    /// Additional metadata passed to agent
+    /// Additional metadata
     pub metadata: HashMap<String, Value>,
 }
 
 impl AgentContext {
-    /// Create a new agent context with required fields
-    pub fn new(
-        agent_id: String,
-        agent_type: AgentType,
-        task_id: String,
-        description: String,
-        project_scope: ProjectScope,
-        conversation_id: ConversationId,
-    ) -> Self {
+    /// Create new context with minimal required fields
+    pub fn new(description: String, conversation_id: String) -> Self {
         Self {
-            agent_id,
-            agent_type,
-            task_id,
             description,
-            dependencies: vec![],
+            dependencies: Vec::new(),
             dependency_outputs: HashMap::new(),
+            conversation_id: Some(ConversationId(conversation_id)),
+            project_scope: None,
             rag_context: None,
             history_context: None,
-            file_context: vec![],
-            conversation_history: vec![],
-            project_scope,
-            conversation_id,
             metadata: HashMap::new(),
-            available_tools: vec![],
         }
     }
 
-    /// Add dependencies
-    pub fn with_tools(mut self, tools: Vec<ToolInfo>) -> Self {
-        self.available_tools = tools;
-        self
+    /// Estimate total tokens for this context
+    pub fn estimate_tokens(&self) -> usize {
+        let mut total = 0;
+        total += self.description.len() / 4;
+
+        if let Some(rag) = &self.rag_context {
+            total += rag.len() / 4;
+        }
+
+        if let Some(history) = &self.history_context {
+            total += history.len() / 4;
+        }
+
+        total.max(1)
     }
 
-    /// Add dependencies
-    pub fn with_dependencies(mut self, deps: Vec<String>) -> Self {
-        self.dependencies = deps;
-        self
-    }
-
-    /// Add dependency outputs
+    /// Set dependency outputs
     pub fn with_dependency_outputs(mut self, outputs: HashMap<String, Value>) -> Self {
         self.dependency_outputs = outputs;
         self
     }
 
-    /// Add RAG context
+    /// Set RAG context
     pub fn with_rag_context(mut self, context: String) -> Self {
         self.rag_context = Some(context);
         self
     }
 
-    /// Add history context
-    pub fn with_history_context(mut self, context: String) -> Self {
-        self.history_context = Some(context);
-        self
-    }
-
-    /// Add file context
-    pub fn with_file_context(mut self, files: Vec<String>) -> Self {
-        self.file_context = files;
+    /// Set project scope
+    pub fn with_project_scope(mut self, scope: ProjectScope) -> Self {
+        self.project_scope = Some(scope);
         self
     }
 
     /// Add metadata
-    pub fn with_metadata(mut self, key: &str, value: Value) -> Self {
-        self.metadata.insert(key.to_string(), value);
+    pub fn with_metadata(mut self, key: String, value: Value) -> Self {
+        self.metadata.insert(key, value);
         self
     }
 
-    /// Add conversation message
-    pub fn with_message(mut self, message: ConversationMessage) -> Self {
-        self.conversation_history.push(message);
-        self
-    }
 }
+#[cfg(test)]
+mod tests {
+    // Uncomment when tests are needed
+    // use super::*;
 
-/// Result from tool execution
-#[derive(Debug, Clone)]
-pub struct ToolResult {
-    /// Name of the tool executed
-    pub tool_name: String,
-
-    /// Output from tool execution
-    pub output: String,
-
-    /// Whether tool execution succeeded
-    pub success: bool,
-
-    /// Error message if failed
-    pub error: Option<String>,
-}
-
-impl ToolResult {
-    /// Create successful tool result
-    pub fn success(tool_name: String, output: String) -> Self {
-        Self {
-            tool_name,
-            output,
-            success: true,
-            error: None,
-        }
-    }
-
-    /// Create failed tool result
-    pub fn error(tool_name: String, error: String) -> Self {
-        Self {
-            tool_name,
-            output: String::new(),
-            success: false,
-            error: Some(error),
-        }
-    }
+    // Add tests here when needed
 }
 
 /// Conversation message
@@ -973,44 +638,14 @@ pub enum ConversationMessage {
     System(String),
 }
 
-
 // #[cfg(test)]
 // mod tests {
 //     use super::*;
 //
 //     #[test]
-//     fn test_agent_context_builder() {
-//         let ctx = AgentContext::new("task-1".to_string(), "test task".to_string())
-//             .with_rag_context("some context".to_string())
-//             .with_metadata("key".to_string(), "value".to_string());
-//
-//         assert_eq!(ctx.task_id, "task-1");
-//         assert!(ctx.rag_context.is_some());
-//         assert!(ctx.metadata.contains_key("key"));
-//     }
-//
-//     #[test]
-//     fn test_agent_result_builder() {
-//         let result = AgentResult::from_response("agent-1", serde_json::from_str("output").unwrap()).unwrap()
-//             .with_confidence(0.95)
-//             .with_tokens(500)
-//             .requiring_hitl();
-//
-//         assert_eq!(result.confidence, 0.95);
-//         assert_eq!(result.tokens_used, Some(500));
-//         assert!(result.requires_hitl);
-//     }
-//
-//     #[test]
-//     fn test_agent_type_display() {
-//         assert_eq!(AgentType::Coding.to_string(), "Coding");
-//         assert_eq!(AgentType::Planning.to_string(), "Planning");
-//     }
-//
-//     #[test]
-//     fn test_context_token_estimation() {
-//         let ctx = AgentContext::new("t1".to_string(), "test".to_string());
-//         let tokens = ctx.estimate_tokens();
-//         assert!(tokens > 0);
+//     fn test_agent_context_token_estimation() {
+//         let ctx = AgentContext::new("test".to_string(), "conv1".to_string());
+//         assert!(ctx.estimate_tokens() > 0);
 //     }
 // }
+
