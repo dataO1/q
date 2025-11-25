@@ -505,6 +505,16 @@ pub trait TypedAgent: Send + Sync {
                 serde_json::to_string_pretty(&step.parameters).unwrap_or_default())));
         }
 
+        // Add RAG context if available
+        if let Some(rag_context) = &context.rag_context {
+            messages.push(ChatMessage::user(format!("# RELEVANT CONTEXT:\n{}", rag_context)));
+        }
+
+        // Add history context if available (for cases where it's separate from RAG)
+        if let Some(history_context) = &context.history_context {
+            messages.push(ChatMessage::user(format!("# CONVERSATION HISTORY:\n{}", history_context)));
+        }
+
         // Add main user prompt
         messages.push(ChatMessage::user(format!("# USER PROMPT:\n{}", context.description)));
 
