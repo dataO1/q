@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "*", features = ["full"] }
-sqlx = { version = "*", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+sqlx = { version = "*", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
 uuid = { version = "*", features = ["v4", "serde"] }
 reqwest = { version = "*", features = ["json", "rustls-tls"] }
 

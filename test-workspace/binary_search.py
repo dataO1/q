@@ -9,16 +9,10 @@ def binary_search(arr, low, high, x):
             return binary_search(arr, mid + 1, high, x)
     else:
         return -1
-def main():
-    try:
-        arr = list(map(int, input("Enter numbers separated by space: ").split()))
-        x = int(input("Enter number to search: "))
-        result = binary_search(arr, 0, len(arr)-1, x)
-        if result != -1:
-            print("Element is present at index", str(result))
-        else:
-            print("Element is not present in array")
-    except ValueError:
-        print("Invalid input")
+
 if __name__ == "__main__":
-    main()
+    import sys
+    arr = list(map(int, sys.argv[1].split(',')))
+    target = int(sys.argv[2])
+    result = binary_search(arr, 0, len(arr) - 1, target)
+    print(result)

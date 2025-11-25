@@ -21,6 +21,19 @@ impl SourceRouter {
         })
     }
 
+    /// Fast heuristic keyword intent detection for web content
+    fn detect_web_intent(&self, query: &str) -> bool {
+        let web_keywords = [
+            "http://", "https://", "www.", ".com", ".org", ".net",
+            "documentation", "docs", "tutorial", "guide", "example",
+            "stack overflow", "github", "api reference", "latest",
+            "online", "web", "internet", "search", "find"
+        ];
+        
+        let query_lower = query.to_lowercase();
+        web_keywords.iter().any(|&keyword| query_lower.contains(keyword))
+    }
+
     /// Fast heuristic keyword intent detection
 
     #[instrument(name = "intent_classification_llm", skip(self), fields(query))]
@@ -31,9 +44,6 @@ impl SourceRouter {
         let json_structure = JsonStructure::new::<Vec<CollectionTier>>();
 
         let categories: Vec<String> = CollectionTier::iter()
-            .filter(|x| x.to_string() == CollectionTier::Workspace.to_string()) // TODO: remove
-                                                                                // this, this is
-                                                                                // just for testing
             .map(|tier| tier.to_string())
             .collect();
 
@@ -89,9 +99,33 @@ impl SourceRouter {
         user_query: &str,
         ctx: &ProjectScope,
     ) -> anyhow::Result<HashMap<CollectionTier, String>> {
-        // Fallback to LLM classification
-        let tiers = self.classify_intent_llm(user_query).await?;
-        let res = tiers.into_iter().map(|tier| (tier,  user_query.to_string())).collect();
+        let mut result_tiers = Vec::new();
+        
+        // First, check heuristics for obvious web content requests
+        if self.detect_web_intent(user_query) {
+            info!("Detected web intent via heuristics for query: {}", user_query);
+            result_tiers.push(CollectionTier::Online);
+        }
+        
+        // Always use LLM classification as fallback to catch additional tiers
+        debug!("Using LLM classification for comprehensive tier detection");
+        let llm_tiers = self.classify_intent_llm(user_query).await?;
+        for tier in llm_tiers {
+            if !result_tiers.contains(&tier) {
+                result_tiers.push(tier);
+            }
+        }
+        
+        // Ensure we have at least one tier (default to Workspace)
+        if result_tiers.is_empty() {
+            result_tiers.push(CollectionTier::Workspace);
+        }
+        
+        let res: HashMap<CollectionTier, String> = result_tiers.into_iter()
+            .map(|tier| (tier, user_query.to_string()))
+            .collect();
+        
+        debug!("Routed query to tiers: {:?}", res.keys().collect::<Vec<_>>());
         Ok(res)
     }
 }

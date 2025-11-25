@@ -279,7 +279,15 @@ pub enum Location{
         line_end: Option<usize>,
         project_root: Option<String>
     },
-    URI{ uri: String }
+    URI{ 
+        uri: String 
+    },
+    WebContent{
+        url: String,
+        crawled_at: DateTime<Utc>,
+        content_hash: String,
+        title: Option<String>
+    }
 }
 
 

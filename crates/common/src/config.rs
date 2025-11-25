@@ -126,6 +126,82 @@ pub struct RagConfig {
     pub query_enhancement_model: String,
     pub classification_model: String,
     pub max_results: usize,
+    pub web_crawler: WebCrawlerConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebCrawlerConfig {
+    /// Enable web crawling functionality
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    
+    /// Maximum number of URLs to crawl per query
+    #[serde(default = "default_max_urls_per_query")]
+    pub max_urls_per_query: usize,
+    
+    /// Request timeout in seconds
+    #[serde(default = "default_crawler_timeout")]
+    pub request_timeout_secs: u64,
+    
+    /// Content cache TTL in seconds (24 hours default)
+    #[serde(default = "default_content_cache_ttl")]
+    pub content_cache_ttl_secs: u64,
+    
+    /// Query cache TTL in seconds (1 hour default)
+    #[serde(default = "default_query_cache_ttl")]
+    pub query_cache_ttl_secs: u64,
+    
+    /// Chunk size for content processing
+    #[serde(default = "default_chunk_size")]
+    pub chunk_size: usize,
+    
+    /// Chunk overlap percentage
+    #[serde(default = "default_chunk_overlap")]
+    pub chunk_overlap: usize,
+    
+    /// User agent string for crawling
+    #[serde(default = "default_user_agent")]
+    pub user_agent: String,
+    
+    /// Respect robots.txt
+    #[serde(default = "default_true")]
+    pub respect_robots_txt: bool,
+    
+    /// Qdrant collection name for web content
+    #[serde(default = "default_web_content_collection")]
+    pub web_content_collection: String,
+    
+    /// Qdrant collection name for query cache
+    #[serde(default = "default_web_query_cache_collection")]
+    pub web_query_cache_collection: String,
+    
+    /// Redis cache prefix for content
+    #[serde(default = "default_content_cache_prefix")]
+    pub content_cache_prefix: String,
+    
+    /// Redis cache prefix for query cache
+    #[serde(default = "default_query_cache_prefix")]
+    pub query_cache_prefix: String,
+}
+
+impl Default for WebCrawlerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_urls_per_query: default_max_urls_per_query(),
+            request_timeout_secs: default_crawler_timeout(),
+            content_cache_ttl_secs: default_content_cache_ttl(),
+            query_cache_ttl_secs: default_query_cache_ttl(),
+            chunk_size: default_chunk_size(),
+            chunk_overlap: default_chunk_overlap(),
+            user_agent: default_user_agent(),
+            respect_robots_txt: true,
+            web_content_collection: default_web_content_collection(),
+            web_query_cache_collection: default_web_query_cache_collection(),
+            content_cache_prefix: default_content_cache_prefix(),
+            query_cache_prefix: default_query_cache_prefix(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -642,6 +718,7 @@ impl Default for SystemConfig {
                 query_enhancement_model: "qwen2.5:7b".to_string(),
                 classification_model: "phi3:mini".to_string(),
                 max_results: 5,
+                web_crawler: WebCrawlerConfig::default(),
             },
             agent_network: AgentNetworkConfig::default() ,
             storage: StorageConfig {
@@ -727,4 +804,49 @@ fn default_min_quality_score() -> f32 {
 
 fn default_risk_threshold() -> RiskLevel {
     RiskLevel::High
+}
+
+// Web Crawler defaults
+fn default_max_urls_per_query() -> usize {
+    5
+}
+
+fn default_crawler_timeout() -> u64 {
+    30
+}
+
+fn default_content_cache_ttl() -> u64 {
+    86400 // 24 hours
+}
+
+fn default_query_cache_ttl() -> u64 {
+    3600 // 1 hour
+}
+
+fn default_chunk_size() -> usize {
+    1024
+}
+
+fn default_chunk_overlap() -> usize {
+    100
+}
+
+fn default_user_agent() -> String {
+    "AIAgentRAG/1.0 (Educational Research)".to_string()
+}
+
+fn default_web_content_collection() -> String {
+    "web_content".to_string()
+}
+
+fn default_web_query_cache_collection() -> String {
+    "web_query_cache".to_string()
+}
+
+fn default_content_cache_prefix() -> String {
+    "web_content_cache:".to_string()
+}
+
+fn default_query_cache_prefix() -> String {
+    "web_query_cache:".to_string()
 }

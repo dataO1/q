@@ -9,9 +9,10 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use futures::stream::StreamExt;
 use swiftide::{SparseEmbedding};
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
-use ai_agent_common::{llm::EmbeddingClient, CollectionTier, ContextFragment, ProjectScope};
+use ai_agent_common::{llm::EmbeddingClient, CollectionTier, ContextFragment, ProjectScope, SystemConfig};
+use crate::web_crawler::WebCrawlerRetriever;
 
 pub type Priority = u8;
 
@@ -139,9 +140,34 @@ pub struct MultiSourceRetriever {
 }
 
 impl MultiSourceRetriever {
-    pub async fn new(qdrant_client: Arc<QdrantClient>, embedder: Arc<EmbeddingClient>) -> Result<Self> {
+    pub async fn new(
+        qdrant_client: Arc<QdrantClient>, 
+        embedder: Arc<EmbeddingClient>,
+        redis_client: Arc<ai_agent_storage::RedisCache>,
+        system_config: SystemConfig,
+    ) -> Result<Self> {
+        let mut sources: Vec<Arc<dyn RetrieverSource>> = vec![
+            Arc::new(QdrantRetriever::new(qdrant_client.clone()))
+        ];
+        
+        // Add web crawler retriever if enabled
+        if system_config.rag.web_crawler.enabled {
+            match WebCrawlerRetriever::new(qdrant_client.clone(), redis_client, embedder.clone(), system_config).await {
+                Ok(web_crawler) => {
+                    sources.push(Arc::new(web_crawler));
+                    info!("Successfully initialized web crawler retriever");
+                }
+                Err(e) => {
+                    warn!("Failed to initialize web crawler retriever: {}", e);
+                    // Continue without web crawler - graceful degradation
+                }
+            }
+        } else {
+            info!("Web crawler disabled in configuration");
+        }
+        
         Ok(Self {
-            sources: vec![Arc::new(QdrantRetriever::new(qdrant_client.clone()))],
+            sources,
             embedder: embedder.clone(),
         })
     }

@@ -34,3 +34,8 @@ tracing = "*"
 tokio-stream = "*"
 env_logger = "*"
 repo-root = "*"
+spider = "*"
+lsh-rs = "0.2.2"
+url = "*"
+chrono = { version = "*", features = ["serde"] }
+urlencoding = "*"

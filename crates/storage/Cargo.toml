@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 ai-agent-common = { path = "../common" }
-sqlx = { version = "*", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+sqlx = { version = "*", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
 pgvector = "*"
 redis = { version = "*", features = ["tokio-comp"] }
 tokio = { version = "*", features = ["full"] }
