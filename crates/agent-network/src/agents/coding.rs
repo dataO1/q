@@ -100,23 +100,23 @@ impl TypedAgent for CodingAgent {
 
         // Multi-step workflow for coding: analysis, implementation, validation
         vec![
-            // WorkflowStep {
-            //     id: "analyze_codebase".to_string(),
-            //     name: "Codebase Analysis".to_string(),
-            //     description: "Analyze relevant code files, understand existing structure and dependencies for the coding task".to_string(),
-            //     execution_mode: StepExecutionMode::ReAct { max_iterations: Some(1) }, // Needs filesystem tool for writing
-            //     required_tools: vec!["filesystem".to_string()],
-            //     parameters: HashMap::new(),
-            //     formatted: false,
-            // },
+            WorkflowStep {
+                id: "analyze_codebase".to_string(),
+                name: "Codebase Analysis".to_string(),
+                description: "Analyze relevant code files, understand existing structure and dependencies for the coding task".to_string(),
+                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(1) }, // Needs filesystem tool for writing
+                required_tools: vec!["read_file".to_string()],
+                parameters: HashMap::new(),
+                formatted: false,
+            },
             WorkflowStep {
                 id: "implement_code".to_string(),
                 name: "Code Implementation".to_string(),
                 description: "Generate and write the code given the instructions".to_string(),
                 execution_mode: StepExecutionMode::ReAct { max_iterations: Some(2) }, // Needs filesystem tool for writing
-                required_tools: vec!["filesystem".to_string()],
+                required_tools: vec!["write_file".to_string()],
                 parameters: HashMap::new(),
-                formatted: false,
+                formatted: true,
             }
         ]
     }

@@ -246,48 +246,7 @@ pub trait TypedAgent: Send + Sync {
         if let Some(history_context) = &context.history_context {
             debug!(target: "agent_execution", "History context: {} chars", history_context.len());
         }
-        // Build messages for this specific step
-        let mut messages = vec![
-            ChatMessage::system(format!("# STEP: {}\n{}\n\n# INSTRUCTIONS:\n{}",
-                step.name,
-                step.description,
-                self.system_prompt()
-            ))
-        ];
-
-        if !context.dependency_outputs.is_empty() {
-            let dependency_msg = serde_json::to_string_pretty(&context.dependency_outputs)
-                .unwrap_or_else(|_| "Failed to serialize dependency outputs".to_string());
-            messages.push(ChatMessage::user(format!("# PREVIOUS TASK OUTPUTS:\n{}", dependency_msg)));
-        }
-
-        // Add workflow state if available
-        if let Some(workflow_state) = context.metadata.get("workflow_state") {
-            messages.push(ChatMessage::user(format!("# WORKFLOW CONTEXT:\n{}",
-                serde_json::to_string_pretty(workflow_state).unwrap_or_default())));
-        }
-
-        // Add step parameters
-        if !step.parameters.is_empty() {
-            messages.push(ChatMessage::user(format!("# STEP PARAMETERS:\n{}",
-                serde_json::to_string_pretty(&step.parameters).unwrap_or_default())));
-        }
-
-        // Add main user prompt
-        messages.push(ChatMessage::user(format!("# USER PROMPT:\n{}", context.description)));
-
-        // Record LLM messages as span attributes for Jaeger visibility
-        current_span.record("llm.messages_sent", messages.len());
-        let messages_json = serde_json::to_string(&messages.iter().map(|m| {
-            serde_json::json!({"role": format!("{:?}", m.role), "content": m.content})
-        }).collect::<Vec<_>>()).unwrap_or_default();
-        current_span.record("llm.messages_json", messages_json.as_str());
-
-        // Also log for console debugging
-        debug!(target: "agent_execution", "Sending {} messages to LLM", messages.len());
-        for (i, msg) in messages.iter().enumerate() {
-            debug!(target: "agent_execution", "Message {}: Role={:?}, Content length: {}", i + 1, msg.role, msg.content.len());
-        }
+        let messages = self.build_initial_message(&context, &step);
 
         // Execute LLM call
         let json_structure = JsonStructure::new::<Self::Output>();
@@ -426,44 +385,19 @@ pub trait TypedAgent: Send + Sync {
         if let Some(history_context) = &context.history_context {
             debug!(target: "agent_execution", "History context: {} chars", history_context.len());
         }
-        // Build the initial system message with all context
-        let mut initial_message = format!(
-            "# STEP: {}\n{}\n\n# INSTRUCTIONS:\n{}\n\n",
-            step.name,
-            step.description,
-            self.system_prompt()
-        );
-
-        // Add context information
-        if !context.dependency_outputs.is_empty() {
-            let dependency_msg = serde_json::to_string_pretty(&context.dependency_outputs)
-                .unwrap_or_else(|_| "Failed to serialize dependency outputs".to_string());
-            initial_message.push_str(&format!("# PREVIOUS TASK OUTPUTS:\n{}\n\n", dependency_msg));
-        }
-
-        if let Some(workflow_state) = context.metadata.get("workflow_state") {
-            initial_message.push_str(&format!("# WORKFLOW CONTEXT:\n{}\n\n",
-                serde_json::to_string_pretty(workflow_state).unwrap_or_default()));
-        }
-
-        if !step.parameters.is_empty() {
-            initial_message.push_str(&format!("# STEP PARAMETERS:\n{}\n\n",
-                serde_json::to_string_pretty(&step.parameters).unwrap_or_default()));
-        }
-
-        // Add the main user prompt
-        initial_message.push_str(&format!("# USER PROMPT:\n{}", context.description));
-
+        let messages = self.build_initial_message(context,step);
         // Create Coordinator with tools
         let mut coordinator = Coordinator::new(
             self.client().clone(),
             self.model().to_string(),
             vec![] // Start with empty history
         );
-
-        // Add tools to the coordinator
+        let json_structure = JsonStructure::new::<Self::Output>();
+        if step.formatted{
+            coordinator = coordinator.format(FormatType::StructuredJson(Box::new(json_structure)));
+        }
         coordinator = coordinator.add_tool(tools.write_file.as_ref().clone());
-        initial_message = initial_message + FILESYSTEM_PREAMBLE;
+        // initial_message = initial_message + FILESYSTEM_PREAMBLE;
         // TODO: add filesystem preambles for agent available tools
         // coordinator = coordinator.add_tool(tools.lsp.as_ref().clone());
 
@@ -472,8 +406,7 @@ pub trait TypedAgent: Send + Sync {
         // Execute the coordinator chat
         // let start_time = std::time::Instant::now();
         let response = coordinator
-            .chat(vec![ChatMessage::user(initial_message)]).await
-            // .chat(&initial_message).await
+            .chat(messages).await
             .map_err(|e| anyhow::anyhow!("Coordinator chat failed: {}", e))?;
         // let duration = start_time.elapsed();
         //
@@ -496,6 +429,56 @@ pub trait TypedAgent: Send + Sync {
 
         debug!(target: "agent_execution", "ReAct step '{}' completed successfully using Coordinator", step.name);
         Ok(step_result)
+    }
+
+    /// Execute a single ReAct workflow step
+    #[instrument(name = "agent_react_step", skip(self, context, step), fields())]
+    fn build_initial_message(&self,context: &AgentContext, step: &WorkflowStep)-> Vec<ChatMessage>{
+
+        let current_span = tracing::Span::current();
+        // Build messages for this specific step
+        let mut messages = vec![
+            ChatMessage::system(format!("# STEP: {}\n{}\n\n# INSTRUCTIONS:\n{}",
+                step.name,
+                step.description,
+                self.system_prompt()
+            ))
+        ];
+
+        if !context.dependency_outputs.is_empty() {
+            let dependency_msg = serde_json::to_string_pretty(&context.dependency_outputs)
+                .unwrap_or_else(|_| "Failed to serialize dependency outputs".to_string());
+            messages.push(ChatMessage::user(format!("# PREVIOUS TASK OUTPUTS:\n{}", dependency_msg)));
+        }
+
+        // Add workflow state if available
+        if let Some(workflow_state) = context.metadata.get("workflow_state") {
+            messages.push(ChatMessage::user(format!("# WORKFLOW CONTEXT:\n{}",
+                serde_json::to_string_pretty(workflow_state).unwrap_or_default())));
+        }
+
+        // Add step parameters
+        if !step.parameters.is_empty() {
+            messages.push(ChatMessage::user(format!("# STEP PARAMETERS:\n{}",
+                serde_json::to_string_pretty(&step.parameters).unwrap_or_default())));
+        }
+
+        // Add main user prompt
+        messages.push(ChatMessage::user(format!("# USER PROMPT:\n{}", context.description)));
+
+        // Record LLM messages as span attributes for Jaeger visibility
+        current_span.record("llm.messages_sent", messages.len());
+        let messages_json = serde_json::to_string(&messages.iter().map(|m| {
+            serde_json::json!({"role": format!("{:?}", m.role), "content": m.content})
+        }).collect::<Vec<_>>()).unwrap_or_default();
+        current_span.record("llm.messages_json", messages_json.as_str());
+
+        // Also log for console debugging
+        debug!(target: "agent_execution", "Sending {} messages to LLM", messages.len());
+        for (i, msg) in messages.iter().enumerate() {
+            debug!(target: "agent_execution", "Message {}: Role={:?}, Content length: {}", i + 1, msg.role, msg.content.len());
+        }
+        messages
     }
 
     // async fn execute_typed(&self, context: AgentContext) -> Result<Self::Output>{}

@@ -22,8 +22,8 @@ pub struct TaskDecompositionPlan {
     /// Ordered list of subtasks
     pub subtasks: Vec<SubtaskSpec>,
 
-    /// Critical path tasks
-    pub critical_path: Vec<String>,
+    // Critical path tasks
+    // pub critical_path: Vec<String>,
 
     /// Whether human review is needed
     pub requires_hitl: bool,
@@ -32,8 +32,8 @@ pub struct TaskDecompositionPlan {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SubtaskSpec {
     pub id: String,  // e.g., "task-1", "task-2"
-    /// Human-readable description
-    pub description: String,
+    /// Instructions for the subtask
+    pub instructions: String,
 
     /// Agent type to execute this
     pub agent_type: AgentType,
