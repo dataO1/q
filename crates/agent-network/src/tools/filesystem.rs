@@ -12,6 +12,14 @@ use anyhow::anyhow;
 use ollama_rs::generation::tools::Tool;
 use serde::{Deserialize, Serialize};
 
+pub const FILESYSTEM_PREAMBLE: &str = r#"
+## FILESYSTEM WORKSPACE RULES
+You are operating within a restricted project workspace.
+1. **Relative Paths Only**: All file paths must be relative to the project root (e.g., use `src/main.rs`, not `/home/user/src/main.rs`).
+2. **Workspace Confinement**: You cannot access or modify files outside this workspace.
+3. **File Creation**: If a target directory does not exist, you must create it first or assume the tool handles it (check tool descriptions).
+"#;
+
 // Shared base functionality for all filesystem tools
 #[derive(Debug, Clone)]
 struct FilesystemBase {
@@ -26,6 +34,38 @@ impl FilesystemBase {
         Self { base_path }
     }
 
+    fn resolve_secure_path(&self, relative_path: &str) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+        // 1. Sanitize input: Remove leading '/' to force relative logic if agent messes up
+        let relative_path = relative_path.trim_start_matches('/');
+
+        // 2. Resolve absolute path
+        let target_path = self.base_path.join(relative_path);
+
+        // 3. Security Check (Canonicalize to prevent ../../ escapes)
+        let canonical_target = if target_path.exists() {
+            std::fs::canonicalize(&target_path)?
+        } else {
+            // For new files, we check the parent directory
+            let parent = target_path.parent().unwrap_or(&self.base_path);
+            let canonical_parent = std::fs::canonicalize(parent)?;
+            // Ensure parent is safe
+            if !canonical_parent.starts_with(&self.base_path) {
+                return Err("Access denied".into());
+            }
+            // Construct the full path safely
+            canonical_parent.join(target_path.file_name().unwrap())
+        };
+
+        // 4. Final Verify
+        if !canonical_target.starts_with(&self.base_path) {
+            return Err(format!("Access denied: {} is outside the workspace", relative_path).into());
+        }
+
+        debug!("resolved secure path: {} -> {}", relative_path, canonical_target.display());
+        Ok(canonical_target)
+    }
+
+    #[deprecated(note = "Use resolve_secure_path instead")]
     fn is_path_allowed(&self, path: &Path) -> bool {
         let path = std::fs::canonicalize(path)
             .unwrap_or_else(|_| PathBuf::from(path)); // Fallback if path doesn't exist yet
@@ -71,7 +111,7 @@ impl Tool for ReadFileTool {
     }
 
     fn description() -> &'static str  {
-        "Read the contents of a file. Provide an absolute path."
+        "Read the contents of a file. Provide a relative path."
     }
 
     #[instrument(name = "read_file_tool", skip(self), fields(
@@ -87,18 +127,19 @@ impl Tool for ReadFileTool {
     ) -> impl std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send + Sync {
         async move {
             let current_span = tracing::Span::current();
-            let path = Path::new(&parameters.path);
+            current_span.record("path", parameters.path.as_str());
 
-            current_span.record("path", path.display().to_string().as_str());
+            let target_path = match self.base.resolve_secure_path(&parameters.path) {
+                Ok(path) => path,
+                Err(e) => {
+                    let error_msg = format!("Path access error: {}", e);
+                    current_span.record("success", false);
+                    current_span.record("error", error_msg.as_str());
+                    return Ok(format!("Error: {}", error_msg));
+                }
+            };
 
-            if !self.base.is_path_allowed(path) {
-                let error_msg = format!("Path not allowed: {}", path.display());
-                current_span.record("success", false);
-                current_span.record("error", error_msg.as_str());
-                return Ok(format!("Error: {}", error_msg));
-            }
-
-            let contents = match fs::read_to_string(path).await {
+            let contents = match fs::read_to_string(&target_path).await {
                 Ok(contents) => contents,
                 Err(e) => {
                     let error_msg = format!("Error reading file: {}", e);
@@ -137,7 +178,7 @@ impl Tool for WriteFileTool {
     }
 
     fn description() -> &'static str {
-        "Write content to a file. Creates parent directories if needed. Provide absolute path and content."
+        "Write content to a file. Creates parent directories if needed. Provide relative path and content."
     }
 
     #[instrument(name = "write_file_tool", skip(self), fields(
@@ -153,19 +194,20 @@ impl Tool for WriteFileTool {
     ) -> impl std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send + Sync {
         async move {
             let current_span = tracing::Span::current();
-            let path = Path::new(&parameters.path);
-
-            current_span.record("path", path.display().to_string().as_str());
+            current_span.record("path", parameters.path.as_str());
             current_span.record("content_size", parameters.content.len());
 
-            if !self.base.is_path_allowed(path) {
-                let error_msg = format!("Path not allowed: {}", path.display());
-                current_span.record("success", false);
-                current_span.record("error", error_msg.as_str());
-                return Ok(format!("Error: {}", error_msg));
-            }
+            let target_path = match self.base.resolve_secure_path(&parameters.path) {
+                Ok(path) => path,
+                Err(e) => {
+                    let error_msg = format!("Path access error: {}", e);
+                    current_span.record("success", false);
+                    current_span.record("error", error_msg.as_str());
+                    return Ok(format!("Error: {}", error_msg));
+                }
+            };
 
-            if let Some(parent) = path.parent() {
+            if let Some(parent) = target_path.parent() {
                 if let Err(e) = fs::create_dir_all(parent).await {
                     let error_msg = format!("Error creating parent directories: {}", e);
                     current_span.record("success", false);
@@ -174,7 +216,7 @@ impl Tool for WriteFileTool {
                 }
             }
 
-            if let Err(e) = fs::write(path, &parameters.content).await {
+            if let Err(e) = fs::write(&target_path, &parameters.content).await {
                 let error_msg = format!("Error writing file: {}", e);
                 current_span.record("success", false);
                 current_span.record("error", error_msg.as_str());
@@ -182,7 +224,7 @@ impl Tool for WriteFileTool {
             };
             current_span.record("success", true);
 
-            Ok(format!("Wrote {} bytes to {}", parameters.content.len(), path.display()))
+            Ok(format!("Wrote {} bytes to {}", parameters.content.len(), target_path.display()))
         }
     }
 }
@@ -209,7 +251,7 @@ impl Tool for ListDirectoryTool {
     }
 
     fn description() -> &'static str {
-        "List the contents of a directory. Provide an absolute path to a directory."
+        "List the contents of a directory. Provide a relative path to a directory."
     }
 
     #[instrument(name = "list_directory_tool", skip(self), fields(
@@ -225,18 +267,19 @@ impl Tool for ListDirectoryTool {
     ) -> impl std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send + Sync {
         async move {
             let current_span = tracing::Span::current();
-            let path = Path::new(&parameters.path);
+            current_span.record("path", parameters.path.as_str());
 
-            current_span.record("path", path.display().to_string().as_str());
+            let target_path = match self.base.resolve_secure_path(&parameters.path) {
+                Ok(path) => path,
+                Err(e) => {
+                    let error_msg = format!("Path access error: {}", e);
+                    current_span.record("success", false);
+                    current_span.record("error", error_msg.as_str());
+                    return Ok(format!("Error: {}", error_msg));
+                }
+            };
 
-            if !self.base.is_path_allowed(path) {
-                let error_msg = format!("Path not allowed: {}", path.display());
-                current_span.record("success", false);
-                current_span.record("error", error_msg.as_str());
-                return Ok(format!("Error: {}", error_msg));
-            }
-
-            let mut entries = match fs::read_dir(path).await {
+            let mut entries = match fs::read_dir(&target_path).await {
                 Ok(entries) => entries,
                 Err(e) => {
                     let error_msg = format!("Error reading directory: {}", e);
@@ -286,7 +329,7 @@ impl Tool for CreateDirectoryTool {
     }
 
     fn description() -> &'static str {
-        "Create a directory and all parent directories if they don't exist. Provide an absolute path."
+        "Create a directory and all parent directories if they don't exist. Provide a relative path."
     }
 
     #[instrument(name = "create_directory_tool", skip(self), fields(
@@ -301,18 +344,19 @@ impl Tool for CreateDirectoryTool {
     ) -> impl std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send + Sync {
         async move {
             let current_span = tracing::Span::current();
-            let path = Path::new(&parameters.path);
+            current_span.record("path", parameters.path.as_str());
 
-            current_span.record("path", path.display().to_string().as_str());
+            let target_path = match self.base.resolve_secure_path(&parameters.path) {
+                Ok(path) => path,
+                Err(e) => {
+                    let error_msg = format!("Path access error: {}", e);
+                    current_span.record("success", false);
+                    current_span.record("error", error_msg.as_str());
+                    return Ok(format!("Error: {}", error_msg));
+                }
+            };
 
-            if !self.base.is_path_allowed(path) {
-                let error_msg = format!("Path not allowed: {}", path.display());
-                current_span.record("success", false);
-                current_span.record("error", error_msg.as_str());
-                return Ok(format!("Error: {}", error_msg));
-            }
-
-            if let Err(e) = fs::create_dir_all(path).await {
+            if let Err(e) = fs::create_dir_all(&target_path).await {
                 let error_msg = format!("Error creating directory: {}", e);
                 current_span.record("success", false);
                 current_span.record("error", error_msg.as_str());
@@ -320,7 +364,7 @@ impl Tool for CreateDirectoryTool {
             };
             current_span.record("success", true);
 
-            Ok(format!("Created directory: {}", path.display()))
+            Ok(format!("Created directory: {}", target_path.display()))
         }
     }
 }
@@ -347,7 +391,7 @@ impl Tool for DeleteFileTool {
     }
 
     fn description() -> &'static str {
-        "Delete a file. Provide an absolute path to the file to delete."
+        "Delete a file. Provide a relative path to the file to delete."
     }
 
     #[instrument(name = "delete_file_tool", skip(self), fields(
@@ -362,18 +406,19 @@ impl Tool for DeleteFileTool {
     ) -> impl std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send + Sync {
         async move {
             let current_span = tracing::Span::current();
-            let path = Path::new(&parameters.path);
+            current_span.record("path", parameters.path.as_str());
 
-            current_span.record("path", path.display().to_string().as_str());
+            let target_path = match self.base.resolve_secure_path(&parameters.path) {
+                Ok(path) => path,
+                Err(e) => {
+                    let error_msg = format!("Path access error: {}", e);
+                    current_span.record("success", false);
+                    current_span.record("error", error_msg.as_str());
+                    return Ok(format!("Error: {}", error_msg));
+                }
+            };
 
-            if !self.base.is_path_allowed(path) {
-                let error_msg = format!("Path not allowed: {}", path.display());
-                current_span.record("success", false);
-                current_span.record("error", error_msg.as_str());
-                return Ok(format!("Error: {}", error_msg));
-            }
-
-            if let Err(e) = fs::remove_file(path).await {
+            if let Err(e) = fs::remove_file(&target_path).await {
                 let error_msg = format!("Error deleting file: {}", e);
                 current_span.record("success", false);
                 current_span.record("error", error_msg.as_str());
@@ -381,7 +426,7 @@ impl Tool for DeleteFileTool {
             };
             current_span.record("success", true);
 
-            Ok(format!("Deleted file: {}", path.display()))
+            Ok(format!("Deleted file: {}", target_path.display()))
         }
     }
 }
@@ -408,7 +453,7 @@ impl Tool for FileExistsTool {
     }
 
     fn description() -> &'static str {
-        "Check if a file or directory exists. Provide an absolute path."
+        "Check if a file or directory exists. Provide a relative path."
     }
 
     #[instrument(name = "file_exists_tool", skip(self), fields(
@@ -424,18 +469,19 @@ impl Tool for FileExistsTool {
     ) -> impl std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send + Sync {
         async move {
             let current_span = tracing::Span::current();
-            let path = Path::new(&parameters.path);
+            current_span.record("path", parameters.path.as_str());
 
-            current_span.record("path", path.display().to_string().as_str());
+            let target_path = match self.base.resolve_secure_path(&parameters.path) {
+                Ok(path) => path,
+                Err(e) => {
+                    let error_msg = format!("Path access error: {}", e);
+                    current_span.record("success", false);
+                    current_span.record("error", error_msg.as_str());
+                    return Ok(format!("Error: {}", error_msg));
+                }
+            };
 
-            if !self.base.is_path_allowed(path) {
-                let error_msg = format!("Path not allowed: {}", path.display());
-                current_span.record("success", false);
-                current_span.record("error", error_msg.as_str());
-                return Ok(format!("Error: {}", error_msg));
-            }
-
-            let exists = fs::metadata(path).await.is_ok();
+            let exists = fs::metadata(&target_path).await.is_ok();
             current_span.record("success", true);
             current_span.record("exists", exists);
 
@@ -466,7 +512,7 @@ impl Tool for FileMetadataTool {
     }
 
     fn description() -> &'static str  {
-        "Get metadata information about a file or directory (size, type, permissions). Provide an absolute path."
+        "Get metadata information about a file or directory (size, type, permissions). Provide a relative path."
     }
 
     #[instrument(name = "file_metadata_tool", skip(self), fields(
@@ -483,18 +529,19 @@ impl Tool for FileMetadataTool {
     ) -> impl std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send + Sync {
         async move {
             let current_span = tracing::Span::current();
-            let path = Path::new(&parameters.path);
+            current_span.record("path", parameters.path.as_str());
 
-            current_span.record("path", path.display().to_string().as_str());
+            let target_path = match self.base.resolve_secure_path(&parameters.path) {
+                Ok(path) => path,
+                Err(e) => {
+                    let error_msg = format!("Path access error: {}", e);
+                    current_span.record("success", false);
+                    current_span.record("error", error_msg.as_str());
+                    return Ok(format!("Error: {}", error_msg));
+                }
+            };
 
-            if !self.base.is_path_allowed(path) {
-                let error_msg = format!("Path not allowed: {}", path.display());
-                current_span.record("success", false);
-                current_span.record("error", error_msg.as_str());
-                return Ok(format!("Error: {}", error_msg));
-            }
-
-            let metadata = match fs::metadata(path).await {
+            let metadata = match fs::metadata(&target_path).await {
                 Ok(metadata) => metadata,
                 Err(e) => {
                     let error_msg = format!("Error getting file metadata: {}", e);

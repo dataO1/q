@@ -16,7 +16,7 @@ use schemars::JsonSchema;
 use anyhow::{Context, Result, anyhow};
 use ollama_rs::coordinator::Coordinator;
 
-use crate::{agents::AgentResult, tools::{ToolExecution, ToolSet}};
+use crate::{agents::AgentResult, tools::{filesystem::FILESYSTEM_PREAMBLE, ToolExecution, ToolSet}};
 
 /// ReAct step output for semantic stop conditions
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -463,6 +463,8 @@ pub trait TypedAgent: Send + Sync {
 
         // Add tools to the coordinator
         coordinator = coordinator.add_tool(tools.write_file.as_ref().clone());
+        initial_message = initial_message + FILESYSTEM_PREAMBLE;
+        // TODO: add filesystem preambles for agent available tools
         // coordinator = coordinator.add_tool(tools.lsp.as_ref().clone());
 
         debug!(target: "agent_execution", "Starting Coordinator chat for step '{}'", step.name);

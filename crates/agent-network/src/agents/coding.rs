@@ -63,6 +63,13 @@ impl CodingAgent {
 
     fn build_system_prompt(prompt: String) -> String{
         let tools_usage = r#"
+            ## FILESYSTEM & WORKSPACE
+            You are working in a restricted workspace (chroot) containing the project files.
+            - The current working directory is the project root.
+            - **ALWAYS use relative paths** (e.g., "src/main.rs", "./Cargo.toml") for all file operations.
+            - DO NOT use absolute paths (e.g., "/home/user/...").
+            - You cannot access files outside this workspace.
+
             ## CRITICAL TOOL-USAGE RULES:
             - You can use the "list", "exists", "read" and "write" functions of the filesystem tool as described
             - Do NOT use "delete" or "metadata" functions
