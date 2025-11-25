@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
 use tracing::{debug, info, error, warn, instrument, Instrument};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::{HashMap, HashSet}, sync::Arc};
 use schemars::JsonSchema;
 use anyhow::{Context, Result, anyhow};
 use ollama_rs::coordinator::Coordinator;
@@ -246,7 +246,7 @@ pub trait TypedAgent: Send + Sync {
         if let Some(history_context) = &context.history_context {
             debug!(target: "agent_execution", "History context: {} chars", history_context.len());
         }
-        let messages = self.build_initial_message(&context, &step);
+        let messages = self.build_initial_message(&context, &step, None);
 
         // Execute LLM call
         let json_structure = JsonStructure::new::<Self::Output>();
@@ -385,7 +385,7 @@ pub trait TypedAgent: Send + Sync {
         if let Some(history_context) = &context.history_context {
             debug!(target: "agent_execution", "History context: {} chars", history_context.len());
         }
-        let messages = self.build_initial_message(context,step);
+        let messages = self.build_initial_message(context,step, Some(&tools));
 
         // Dynamically add required tools for this step
         for tool_name in &step.required_tools {
@@ -475,7 +475,7 @@ pub trait TypedAgent: Send + Sync {
 
     /// Execute a single ReAct workflow step
     #[instrument(name = "agent_react_step", skip(self, context, step), fields())]
-    fn build_initial_message(&self,context: &AgentContext, step: &WorkflowStep)-> Vec<ChatMessage>{
+    fn build_initial_message(&self,context: &AgentContext, step: &WorkflowStep, tools: Option<&ToolSet>)-> Vec<ChatMessage>{
 
         let current_span = tracing::Span::current();
         // Build messages for this specific step
@@ -489,7 +489,7 @@ pub trait TypedAgent: Send + Sync {
 
         if !context.dependency_outputs.is_empty() {
             let mut dependency_msg = format!("# PREVIOUS TASK OUTPUTS ({} tasks completed):\n\n", context.dependency_outputs.len());
-            
+
             for (task_id, output) in &context.dependency_outputs {
                 // Extract attribution metadata if available
                 let agent_id = output.get("agent_id")
@@ -501,20 +501,20 @@ pub trait TypedAgent: Send + Sync {
                 let completed_at = output.get("completed_at")
                     .and_then(|v| v.as_str())
                     .unwrap_or("Unknown time");
-                
+
                 dependency_msg.push_str(&format!(
                     "## Task: {} | Agent: {} | Completed: {}\n",
                     task_description.chars().take(50).collect::<String>(),
                     agent_id,
                     completed_at
                 ));
-                
+
                 // Add the actual output content
                 let output_content = serde_json::to_string_pretty(output)
                     .unwrap_or_else(|_| "Failed to serialize output".to_string());
                 dependency_msg.push_str(&format!("{}\n\n", output_content));
             }
-            
+
             messages.push(ChatMessage::user(dependency_msg));
         }
 
@@ -523,7 +523,7 @@ pub trait TypedAgent: Send + Sync {
             // Try to parse the workflow state for better formatting
             if let Ok(workflow_state) = serde_json::from_value::<WorkflowState>(workflow_state_value.clone()) {
                 let mut workflow_msg = format!("# WORKFLOW CONTEXT (Step {} of workflow):\n\n", workflow_state.step_results.len() + 1);
-                
+
                 if !workflow_state.step_results.is_empty() {
                     workflow_msg.push_str("## Previous Steps:\n");
                     for (i, step_result) in workflow_state.step_results.iter().enumerate() {
@@ -538,7 +538,7 @@ pub trait TypedAgent: Send + Sync {
                     }
                     workflow_msg.push_str("\n");
                 }
-                
+
                 if !workflow_state.shared_context.is_empty() {
                     workflow_msg.push_str("## Shared Context:\n");
                     for (key, value) in &workflow_state.shared_context {
@@ -546,7 +546,7 @@ pub trait TypedAgent: Send + Sync {
                     }
                     workflow_msg.push_str("\n");
                 }
-                
+
                 messages.push(ChatMessage::user(workflow_msg));
             } else {
                 // Fallback to raw JSON if parsing fails
@@ -558,7 +558,7 @@ pub trait TypedAgent: Send + Sync {
         // Add step parameters
         if !step.parameters.is_empty() {
             let mut params_msg = format!("# STEP PARAMETERS (from {} definition):\n", step.name);
-            
+
             // Format parameters with better readability
             for (key, value) in &step.parameters {
                 let value_str = match value {
@@ -569,12 +569,30 @@ pub trait TypedAgent: Send + Sync {
                     serde_json::Value::Object(obj) => format!("{} fields", obj.len()),
                     serde_json::Value::Null => "null".to_string(),
                 };
-                
+
                 params_msg.push_str(&format!("- {}: {}\n", key, value_str));
             }
-            
+
             messages.push(ChatMessage::user(params_msg));
         }
+        // Add Tools instructions per tool type
+        if let Some(tools) = tools{
+
+            let mut tools_instructions = HashSet::new();
+            let mut accumulated_instructions: String = "".to_string();
+            for tool_name in &step.required_tools {
+                if let Some(tool_instruction) = tools.get_tool_type_instructions(tool_name){
+                    if tools_instructions.insert(tool_instruction.clone()){
+                        accumulated_instructions += &format!("# RELEVANT TOOLS USAGE CONTEXT :\n");
+                        accumulated_instructions += &tool_instruction ;
+                    }
+                };
+            };
+            messages.push(ChatMessage::user(accumulated_instructions.clone()));
+
+            debug!(target: "agent_execution", "Accumulated Tool instructions: {} for step: {}",accumulated_instructions, step.name);
+        }
+
 
         // Add RAG context if available
         if let Some(rag_context) = &context.rag_context {
@@ -582,15 +600,15 @@ pub trait TypedAgent: Send + Sync {
             let source_count = rag_context.matches("##").count();
             let context_length = rag_context.len();
             let estimated_tokens = context_length / 4;
-            
+
             let header = if source_count > 0 {
-                format!("# RELEVANT CONTEXT ({} sources, ~{} tokens):\n{}", 
+                format!("# RELEVANT CONTEXT ({} sources, ~{} tokens):\n{}",
                     source_count, estimated_tokens, rag_context)
             } else {
-                format!("# RELEVANT CONTEXT (~{} tokens):\n{}", 
+                format!("# RELEVANT CONTEXT (~{} tokens):\n{}",
                     estimated_tokens, rag_context)
             };
-            
+
             messages.push(ChatMessage::user(header));
         }
 
@@ -599,15 +617,15 @@ pub trait TypedAgent: Send + Sync {
             // Estimate the amount of history content
             let estimated_tokens = history_context.len() / 4;
             let section_count = history_context.matches("##").count();
-            
+
             let header = if section_count > 0 {
-                format!("# CONVERSATION HISTORY ({} sections, ~{} tokens):\n{}", 
+                format!("# CONVERSATION HISTORY ({} sections, ~{} tokens):\n{}",
                     section_count, estimated_tokens, history_context)
             } else {
-                format!("# CONVERSATION HISTORY (~{} tokens):\n{}", 
+                format!("# CONVERSATION HISTORY (~{} tokens):\n{}",
                     estimated_tokens, history_context)
             };
-            
+
             messages.push(ChatMessage::user(header));
         }
 

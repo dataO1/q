@@ -63,21 +63,25 @@ impl CodingAgent {
 
     fn build_system_prompt(prompt: String) -> String{
         let tools_usage = r#"
-            ## FILESYSTEM & WORKSPACE
-            You are working in a restricted workspace (chroot) containing the project files.
-            - The current working directory is the project root.
-            - **ALWAYS use relative paths** (e.g., "src/main.rs", "./Cargo.toml") for all file operations.
-            - DO NOT use absolute paths (e.g., "/home/user/...").
-            - You cannot access files outside this workspace.
+        ## RAG CONTEXT USAGE
+        You will receive a "RAG Context" containing snippets of relevant files from the codebase.
+        **How to use it:**
+        1. **Identify relevant files**: The RAG Context shows file paths and partial content.
+        2. **Read full files**: Use `read_file(path)` to get the COMPLETE content of any relevant file.
+        3. **Understand structure**: Analyze the existing code style, patterns, and architecture.
+        4. **Preserve consistency**: Match the existing coding style when making changes.
 
-            ## CRITICAL TOOL-USAGE RULES:
-            - You can use the "list", "exists", "read" and "write" functions of the filesystem tool as described
-            - Do NOT use "delete" or "metadata" functions
-            - You MUST use the filesystem tool to write all generated code to files
-            - DO NOT return code in your message - always write it using tools
-            - DO NOT write the change_log as a file output, just as a resulting message
+        ## CRITICAL TOOL-USAGE RULES:
+        - You can use: `list_directory`, `read_file`, `write_file`
+        - Do NOT use: `delete` or `metadata` functions
+        - You MUST use the filesystem tool to write all generated code to files
+        - DO NOT return code in your message - always write it using tools
+        - DO NOT write the change_log as a file - it should be in your final JSON output
+        - NEVER output code directly in your response
 
-            NEVER output code directly in your response."
+        ## WORKFLOW:
+        Step 1 (Analysis): Use `read_file` on files mentioned in RAG Context. Understand structure.
+        Step 2 (Implementation): Write code using `write_file`. Generate `CodingOutput` with change_log.
             }"#;
         format!("##{}\n{}", prompt, tools_usage)
     }
@@ -98,25 +102,24 @@ impl TypedAgent for CodingAgent {
         use crate::agents::base::{WorkflowStep, StepExecutionMode};
         use std::collections::HashMap;
 
-        // Multi-step workflow for coding: analysis, implementation, validation
         vec![
-            // WorkflowStep {
-            //     id: "analyze_codebase".to_string(),
-            //     name: "Codebase Analysis".to_string(),
-            //     description: "Analyze relevant code files, understand existing structure and dependencies for the coding task".to_string(),
-            //     execution_mode: StepExecutionMode::ReAct { max_iterations: Some(1) }, // Needs filesystem tool for writing
-            //     required_tools: vec!["read_file".to_string(), "list_directory".to_string()],
-            //     parameters: HashMap::new(),
-            //     formatted: false,
-            // },
+            WorkflowStep {
+                id: "analyze_codebase".to_string(),
+                name: "Codebase Analysis".to_string(),
+                description: "Review the RAG Context provided. Identify relevant files mentioned. Use `read_file` to examine the FULL content of these files. Understand the existing code structure, patterns, and dependencies. Summarize your findings.".to_string(),
+                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(1) }, // Allow multiple tool calls
+                required_tools: vec!["read_file".to_string(), "list_directory".to_string()],
+                parameters: HashMap::new(),
+                formatted: false, // Free-form reasoning output
+            },
             WorkflowStep {
                 id: "implement_code".to_string(),
                 name: "Code Implementation".to_string(),
-                description: "Generate and write the code given the instructions".to_string(),
-                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(1) }, // Needs filesystem tool for writing
+                description: "Based on your analysis from the previous step and the coding instructions, generate the required code. Use `write_file` to save all code. Follow the existing code style and structure. Do NOT output code in text - only use the write_file tool.".to_string(),
+                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(1) }, // Allow multiple writes if needed
                 required_tools: vec!["write_file".to_string()],
                 parameters: HashMap::new(),
-                formatted: true,
+                formatted: true, // Must produce CodingOutput JSON
             }
         ]
     }

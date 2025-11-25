@@ -19,6 +19,8 @@ use anyhow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::tools::filesystem::FILESYSTEM_PREAMBLE;
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Display)]
 #[display("Name: {}, Params: {}, Result: {:?}, Error: {:?}, timestamp: {}", tool_name, parameters, result, error, timestamp)]
 pub struct ToolExecution {
@@ -157,6 +159,11 @@ impl ToolSet {
     /// Get all available tool names
     pub fn available_tools(&self) -> Vec<String> {
         self.tools.keys().cloned().collect()
+    }
+
+    pub fn get_tool_type_instructions(&self,tool_name: &str ) ->Option<String>{
+        // TODO: implement this really
+        return Some(FILESYSTEM_PREAMBLE.to_string())
     }
 }
 

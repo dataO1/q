@@ -140,7 +140,7 @@ impl TypedAgent for PlanningAgent {
                 id: "analyze_structure".to_string(),
                 name: "Project Structure Analysis".to_string(),
                 description: "Analyze the project structure using available tools to understand the codebase layout and existing files. Output this concise analysis.".to_string(),
-                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(1) }, // Needs filesystem tool
+                execution_mode: StepExecutionMode::OneShot , // Needs filesystem tool
                 required_tools: vec!["read_file".to_string()],
                 parameters: HashMap::new(),
                 formatted: false,
@@ -149,7 +149,7 @@ impl TypedAgent for PlanningAgent {
                 id: "generate_plan".to_string(),
                 name: "Task Decomposition Planning".to_string(),
                 description: "Generate a structured task decomposition plan based on complexity analysis and project understanding".to_string(),
-                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(1) }, // Needs filesystem tool
+                execution_mode: StepExecutionMode::OneShot, // Needs filesystem tool
                 required_tools: vec![],
                 parameters: HashMap::new(),
                 formatted: true,
