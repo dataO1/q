@@ -39,12 +39,12 @@ impl LspTool {
 impl Tool for LspTool {
     type Params = Value;
 
-    fn name() -> String {
-        "lsp".to_string()
+    fn name() -> &'static str {
+        "lsp"
     }
 
-    fn description() -> String {
-        "Language Server Protocol tool for code analysis and completion".to_string()
+    fn description() -> &'static str {
+        "Language Server Protocol tool for code analysis and completion"
     }
 
     fn call(

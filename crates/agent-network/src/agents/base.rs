@@ -466,7 +466,7 @@ pub trait TypedAgent: Send + Sync {
         // coordinator = coordinator.add_tool(tools.lsp.as_ref().clone());
 
         debug!(target: "agent_execution", "Starting Coordinator chat for step '{}'", step.name);
-        info!(target: "agent_execution", "Using Coordinator for ReAct step '{}' with tools: write_file, lsp", step.name);
+        info!(target: "agent_execution", "Using Coordinator for ReAct step '{}' with tools: write_file", step.name);
         // Execute the coordinator chat
         // let start_time = std::time::Instant::now();
         let response = coordinator
