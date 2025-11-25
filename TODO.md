@@ -1,3 +1,3 @@
-- analyze_query is still hard-coded
-- decompose_query is still hard-coded
-- actually connect the RAG to the agents
+- really integrate the RAG and history context!!
+- decide whether to use workflowsteps or single step agents.
+- fine tune which models to use for which tasks.

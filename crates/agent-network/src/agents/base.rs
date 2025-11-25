@@ -10,13 +10,13 @@ use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, Ch
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
-use tracing::{debug, info, error, instrument, Instrument};
+use tracing::{debug, info, error, warn, instrument, Instrument};
 use std::{collections::HashMap, sync::Arc};
 use schemars::JsonSchema;
 use anyhow::{Context, Result, anyhow};
 use ollama_rs::coordinator::Coordinator;
 
-use crate::{agents::AgentResult, tools::{filesystem::FILESYSTEM_PREAMBLE, ToolExecution, ToolSet}};
+use crate::{agents::AgentResult, tools::{filesystem::FILESYSTEM_PREAMBLE, DynamicTool, ToolExecution, ToolSet}};
 
 /// ReAct step output for semantic stop conditions
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -362,7 +362,7 @@ pub trait TypedAgent: Send + Sync {
         &self,
         context: &AgentContext,
         step: &WorkflowStep,
-        tools: ToolSet,
+        mut tools: ToolSet,
         max_iterations: Option<usize>
     ) -> Result<StepResult> {
         // Record comprehensive input details as span attributes for Jaeger visibility
@@ -386,6 +386,13 @@ pub trait TypedAgent: Send + Sync {
             debug!(target: "agent_execution", "History context: {} chars", history_context.len());
         }
         let messages = self.build_initial_message(context,step);
+
+        // Dynamically add required tools for this step
+        for tool_name in &step.required_tools {
+            tools.ensure_filesystem_tool(tool_name);
+            debug!(target: "agent_execution", "Ensured tool '{}' is available for step '{}'", tool_name, step.name);
+        }
+
         // Create Coordinator with tools
         let mut coordinator = Coordinator::new(
             self.client().clone(),
@@ -396,13 +403,48 @@ pub trait TypedAgent: Send + Sync {
         if step.formatted{
             coordinator = coordinator.format(FormatType::StructuredJson(Box::new(json_structure)));
         }
-        coordinator = coordinator.add_tool(tools.write_file.as_ref().clone());
-        // initial_message = initial_message + FILESYSTEM_PREAMBLE;
-        // TODO: add filesystem preambles for agent available tools
-        // coordinator = coordinator.add_tool(tools.lsp.as_ref().clone());
+
+        // Dynamically add tools based on required_tools for this step
+        for tool_name in &step.required_tools {
+            if let Some(dynamic_tool) = tools.get_tool(tool_name) {
+                match dynamic_tool {
+                    DynamicTool::WriteFile(tool) => {
+                        coordinator = coordinator.add_tool(tool.as_ref().clone());
+                    }
+                    DynamicTool::ReadFile(tool) => {
+                        coordinator = coordinator.add_tool(tool.as_ref().clone());
+                    }
+                    DynamicTool::ListDirectory(tool) => {
+                        coordinator = coordinator.add_tool(tool.as_ref().clone());
+                    }
+                    DynamicTool::CreateDirectory(tool) => {
+                        coordinator = coordinator.add_tool(tool.as_ref().clone());
+                    }
+                    DynamicTool::FileExists(tool) => {
+                        coordinator = coordinator.add_tool(tool.as_ref().clone());
+                    }
+                    DynamicTool::FileMetadata(tool) => {
+                        coordinator = coordinator.add_tool(tool.as_ref().clone());
+                    }
+                    DynamicTool::DeleteFile(tool) => {
+                        coordinator = coordinator.add_tool(tool.as_ref().clone());
+                    }
+                    DynamicTool::Lsp(tool) => {
+                        coordinator = coordinator.add_tool(tool.as_ref().clone());
+                    }
+                }
+                debug!(target: "agent_execution", "Added tool '{}' to coordinator for step '{}'", tool_name, step.name);
+            } else {
+                warn!(target: "agent_execution", "Required tool '{}' not found for step '{}'", tool_name, step.name);
+            }
+        }
 
         debug!(target: "agent_execution", "Starting Coordinator chat for step '{}'", step.name);
-        info!(target: "agent_execution", "Using Coordinator for ReAct step '{}' with tools: write_file", step.name);
+        if step.required_tools.is_empty() {
+            info!(target: "agent_execution", "Using Coordinator for ReAct step '{}' with no tools", step.name);
+        } else {
+            info!(target: "agent_execution", "Using Coordinator for ReAct step '{}' with tools: {}", step.name, step.required_tools.join(", "));
+        }
         // Execute the coordinator chat
         // let start_time = std::time::Instant::now();
         let response = coordinator

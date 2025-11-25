@@ -13,11 +13,14 @@ use ollama_rs::generation::tools::Tool;
 use serde::{Deserialize, Serialize};
 
 pub const FILESYSTEM_PREAMBLE: &str = r#"
+
 ## FILESYSTEM WORKSPACE RULES
 You are operating within a restricted project workspace.
 1. **Relative Paths Only**: All file paths must be relative to the project root (e.g., use `src/main.rs`, not `/home/user/src/main.rs`).
 2. **Workspace Confinement**: You cannot access or modify files outside this workspace.
 3. **File Creation**: If a target directory does not exist, you must create it first or assume the tool handles it (check tool descriptions).
+
+### CRITICAL: When passing code content in JSON, do NOT double-escape newlines. Use standard JSON string escaping (e.g. use \n for a newline, not \\n).
 "#;
 
 // Shared base functionality for all filesystem tools
@@ -64,20 +67,43 @@ impl FilesystemBase {
         debug!("resolved secure path: {} -> {}", relative_path, canonical_target.display());
         Ok(canonical_target)
     }
-
-    #[deprecated(note = "Use resolve_secure_path instead")]
-    fn is_path_allowed(&self, path: &Path) -> bool {
-        let path = std::fs::canonicalize(path)
-            .unwrap_or_else(|_| PathBuf::from(path)); // Fallback if path doesn't exist yet
-        let allowed = path.starts_with(self.base_path.clone());
-        debug!("is path allowed: {}", allowed);
-        allowed
-    }
 }
 
-// Tool parameter structs
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct PathParam {
+pub struct FileMetaParam {
+    #[schemars(description = "The path of the file from which metadata should be retrieved.")]
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct FileExistsParam {
+    #[schemars(description = "The path of the file check if it exists.")]
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteFileParam {
+    #[schemars(description = "The path of the file to delete.")]
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CreateDirParam {
+    #[schemars(description = "The path of the path to create.")]
+    pub path: String,
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ReadParam {
+    #[schemars(description = "The path of the file to read.")]
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ListDirParam {
+    #[schemars(description = "The path of the directory to list files in.")]
     pub path: String,
 }
 
@@ -104,7 +130,7 @@ impl ReadFileTool {
 }
 
 impl Tool for ReadFileTool {
-    type Params = PathParam;
+    type Params = ReadParam;
 
     fn name() -> &'static str {
         "read_file"
@@ -244,7 +270,7 @@ impl ListDirectoryTool {
 }
 
 impl Tool for ListDirectoryTool {
-    type Params = PathParam;
+    type Params = ListDirParam;
 
     fn name() -> &'static str {
         "list_directory"
@@ -322,7 +348,7 @@ impl CreateDirectoryTool {
 }
 
 impl Tool for CreateDirectoryTool {
-    type Params = PathParam;
+    type Params = CreateDirParam;
 
     fn name() -> &'static str {
         "create_directory"
@@ -384,7 +410,7 @@ impl DeleteFileTool {
 }
 
 impl Tool for DeleteFileTool {
-    type Params = PathParam;
+    type Params = DeleteFileParam;
 
     fn name() -> &'static str {
         "delete_file"
@@ -446,7 +472,7 @@ impl FileExistsTool {
 }
 
 impl Tool for FileExistsTool {
-    type Params = PathParam;
+    type Params = FileExistsParam;
 
     fn name() -> &'static str {
         "file_exists"
@@ -505,7 +531,7 @@ impl FileMetadataTool {
 }
 
 impl Tool for FileMetadataTool {
-    type Params = PathParam;
+    type Params = FileMetaParam;
 
     fn name() -> &'static str {
         "file_metadata"

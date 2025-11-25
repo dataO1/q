@@ -491,7 +491,7 @@ Return only the agent type name (e.g., "Coding", "Writing", "Evaluator")."#,
                 Ok(DecomposedTask {
                     id: actual_task_id,
                     agent_id: agent.id.clone(),
-                    description: subtask.description,
+                    description: subtask.instructions,
                     dependencies: resolved_dependencies,  // Use resolved deps
                     requires_hitl: subtask.requires_approval || plan.requires_hitl,
                     recovery_strategy:  agent.effective_recovery_strategy()
