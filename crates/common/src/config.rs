@@ -134,54 +134,58 @@ pub struct WebCrawlerConfig {
     /// Enable web crawling functionality
     #[serde(default = "default_true")]
     pub enabled: bool,
-    
+
     /// Maximum number of URLs to crawl per query
     #[serde(default = "default_max_urls_per_query")]
     pub max_urls_per_query: usize,
-    
+
     /// Request timeout in seconds
     #[serde(default = "default_crawler_timeout")]
     pub request_timeout_secs: u64,
-    
+
     /// Content cache TTL in seconds (24 hours default)
     #[serde(default = "default_content_cache_ttl")]
     pub content_cache_ttl_secs: u64,
-    
+
     /// Query cache TTL in seconds (1 hour default)
     #[serde(default = "default_query_cache_ttl")]
     pub query_cache_ttl_secs: u64,
-    
+
     /// Chunk size for content processing
     #[serde(default = "default_chunk_size")]
     pub chunk_size: usize,
-    
+
     /// Chunk overlap percentage
     #[serde(default = "default_chunk_overlap")]
     pub chunk_overlap: usize,
-    
+
     /// User agent string for crawling
     #[serde(default = "default_user_agent")]
     pub user_agent: String,
-    
+
     /// Respect robots.txt
     #[serde(default = "default_true")]
     pub respect_robots_txt: bool,
-    
+
     /// Qdrant collection name for web content
     #[serde(default = "default_web_content_collection")]
     pub web_content_collection: String,
-    
+
     /// Qdrant collection name for query cache
     #[serde(default = "default_web_query_cache_collection")]
     pub web_query_cache_collection: String,
-    
+
     /// Redis cache prefix for content
     #[serde(default = "default_content_cache_prefix")]
     pub content_cache_prefix: String,
-    
+
     /// Redis cache prefix for query cache
     #[serde(default = "default_query_cache_prefix")]
     pub query_cache_prefix: String,
+
+    /// SearXNG configuration
+    #[serde(default)]
+    pub searxng: SearXNGConfig,
 }
 
 impl Default for WebCrawlerConfig {
@@ -200,6 +204,43 @@ impl Default for WebCrawlerConfig {
             web_query_cache_collection: default_web_query_cache_collection(),
             content_cache_prefix: default_content_cache_prefix(),
             query_cache_prefix: default_query_cache_prefix(),
+            searxng: SearXNGConfig::default(),
+        }
+    }
+}
+
+/// SearXNG search engine configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearXNGConfig {
+    /// Enable SearXNG integration (if false, falls back to simple scraping)
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// SearXNG instance endpoint URL
+    #[serde(default = "default_searxng_endpoint")]
+    pub endpoint: String,
+
+    /// Request timeout in seconds
+    #[serde(default = "default_searxng_timeout")]
+    pub timeout_secs: u64,
+
+    /// Maximum results to retrieve per query
+    #[serde(default = "default_searxng_max_results")]
+    pub max_results: usize,
+
+    /// Preferred search engines (empty = use SearXNG defaults)
+    #[serde(default)]
+    pub preferred_engines: Vec<String>,
+}
+
+impl Default for SearXNGConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            endpoint: default_searxng_endpoint(),
+            timeout_secs: default_searxng_timeout(),
+            max_results: default_searxng_max_results(),
+            preferred_engines: vec![],
         }
     }
 }
@@ -849,4 +890,16 @@ fn default_content_cache_prefix() -> String {
 
 fn default_query_cache_prefix() -> String {
     "web_query_cache:".to_string()
+}
+
+fn default_searxng_endpoint() -> String {
+    "http://localhost:8888".to_string()
+}
+
+fn default_searxng_timeout() -> u64 {
+    10
+}
+
+fn default_searxng_max_results() -> usize {
+    5
 }

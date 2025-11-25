@@ -1,8 +1,8 @@
 use anyhow::Result;
-use ai_agent_common::{ProjectScope, ConversationId};
+use ai_agent_common::{ProjectScope, ConversationId, Language};
 use std::collections::HashMap;
 use std::sync::Once;
-use query_enhancer::QueryEnhancer;
+use ai_agent_rag::query_enhancer::QueryEnhancer;
 
 static INIT: Once = Once::new();
 
@@ -14,7 +14,11 @@ fn init() {
 }
 
 fn dummy_project_scope() -> ProjectScope {
-    ProjectScope { language_distribution: vec!["en".to_string()] }
+    ProjectScope::new(
+        "/test/project".to_string(),
+        Some(std::path::PathBuf::from("/test/project/src/main.rs")),
+        vec![(Language::Rust, 1.0)]
+    )
 }
 
 fn dummy_conversation_id() -> ConversationId {

@@ -1,6 +1,6 @@
 //! # Web Crawler Retrieval Source
 //!
-//! This module provides a web crawling retrieval source that integrates with the multi-agent 
+//! This module provides a web crawling retrieval source that integrates with the multi-agent
 //! orchestration framework's RAG (Retrieval-Augmented Generation) system. It enables the system
 //! to retrieve relevant content from web sources in addition to local code repositories.
 //!
@@ -62,7 +62,7 @@
 //! ## Performance Characteristics
 //!
 //! - **Cache Hit Rate**: LSH semantic similarity provides ~80% cache hit rate for similar queries
-//! - **Crawling Speed**: ~2-5 seconds per URL (depending on content size and site responsiveness)  
+//! - **Crawling Speed**: ~2-5 seconds per URL (depending on content size and site responsiveness)
 //! - **Memory Usage**: LSH index scales linearly with cached query count
 //! - **Storage**: Content cached in Redis, embeddings in Qdrant for fast retrieval
 //!
@@ -74,12 +74,13 @@
 //! - Cache failures: bypass cache and perform live crawling
 //! - LSH errors: fall back to direct Redis cache lookup
 
+
 use ai_agent_storage::{QdrantClient, RedisCache};
 use ai_agent_common::{CollectionTier, ContextFragment, ProjectScope, Location, MetadataContextFragment, AnnotationsContextFragment, TagContextFragment, SystemConfig, llm::EmbeddingClient};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::Utc;
-use lsh_rs::LshMem;
+use lsh_rs::{LshMem, SignRandomProjections};
 use sha2::{Digest, Sha256};
 use spider::website::Website;
 use std::sync::Arc;
@@ -88,59 +89,32 @@ use tracing::{debug, info, instrument, warn};
 use url::Url;
 use serde::{Serialize, Deserialize};
 use swiftide::traits::EmbeddingModel;
+use futures::stream::{FuturesUnordered, StreamExt};
+use tokio::time::Duration;
 
 use crate::retriever::{RetrieverSource, Priority};
+use crate::searxng_client::{SearXNGClient, SearchResult};
 
 /// Cached query result containing fragments and metadata
-/// 
-/// This structure holds the results of a web crawling query that have been
-/// cached for fast retrieval when similar queries are made in the future.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CachedQueryResult {
-    /// The context fragments retrieved from web sources
     pub fragments: Vec<ContextFragment>,
-    /// Timestamp when this result was cached
     pub cached_at: chrono::DateTime<Utc>,
-    /// Source URLs that were crawled to generate these fragments
     pub source_urls: Vec<String>,
 }
 
-/// Web crawler retrieval source implementing the RetrieverSource trait
-///
-/// This struct provides intelligent web content retrieval with semantic caching,
-/// content deduplication, and integration with the multi-source RAG system.
-/// 
-/// ## Key Components
-/// 
-/// - **Spider Engine**: Fast web crawling with configurable timeouts and user agents
-/// - **LSH Semantic Cache**: Locality Sensitive Hashing for finding similar queries
-/// - **Redis Content Cache**: TTL-based caching of crawled content and query results  
-/// - **Qdrant Integration**: Vector storage for embeddings and similarity search
-/// - **Content Processing**: Chunking, deduplication, and metadata enrichment
-///
-/// ## Priority
-/// 
-/// The web crawler has priority 3, ensuring it runs after local code (priority 1) 
-/// and personal documentation (priority 2) sources.
+/// Web crawler retrieval source with SearXNG integration
 pub struct WebCrawlerRetriever {
-    /// Qdrant client for vector storage and similarity search
     qdrant_client: Arc<QdrantClient>,
-    /// Redis client for content and query result caching
     redis_client: Arc<RedisCache>,
-    /// Embedding client for generating query and content embeddings
     embedder: Arc<EmbeddingClient>,
-    /// Qdrant collection name for storing web content embeddings
     collection_name: String,
-    /// Qdrant collection name for query result cache
     query_cache_collection: String,
-    /// Redis cache prefix for web content
     cache_prefix: String,
-    /// Redis cache prefix for query results
     query_cache_prefix: String,
-    /// LSH index for semantic query similarity matching
-    lsh: Arc<std::sync::Mutex<LshMem<lsh_rs::SignRandomProjections>>>,
-    /// System configuration containing all web crawler settings
+    lsh: Arc<std::sync::Mutex<LshMem<SignRandomProjections>>>,
     system_config: SystemConfig,
+    searxng_client: Option<SearXNGClient>,
 }
 
 impl std::fmt::Debug for WebCrawlerRetriever {
@@ -150,38 +124,16 @@ impl std::fmt::Debug for WebCrawlerRetriever {
             .field("query_cache_collection", &self.query_cache_collection)
             .field("cache_prefix", &self.cache_prefix)
             .field("query_cache_prefix", &self.query_cache_prefix)
-            .field("lsh", &"<LSH instance>")
+            .field("searxng_enabled", &self.searxng_client.is_some())
             .finish()
     }
 }
 
 impl WebCrawlerRetriever {
-    /// Create a new WebCrawlerRetriever instance
-    ///
-    /// Initializes the web crawler with all necessary clients and configuration.
-    /// Sets up the LSH index for semantic caching with dimensions matching the
-    /// embedding model configuration.
-    ///
-    /// # Arguments
-    ///
-    /// * `qdrant_client` - Vector database client for storing embeddings
-    /// * `redis_client` - Cache client for content and query result caching  
-    /// * `embedder` - Embedding model client for generating embeddings
-    /// * `system_config` - Complete system configuration including web crawler settings
-    ///
-    /// # Returns
-    ///
-    /// A configured `WebCrawlerRetriever` ready for use in the RAG pipeline
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - LSH index initialization fails
-    /// - Configuration is invalid or incomplete
     #[instrument(skip_all, fields(
         web_crawler_enabled = %system_config.rag.web_crawler.enabled,
-        vector_size = %system_config.embedding.vector_size,
-        collection_name = %system_config.rag.web_crawler.web_content_collection
+        searxng_enabled = %system_config.rag.web_crawler.searxng.enabled,
+        vector_size = %system_config.embedding.vector_size
     ))]
     pub async fn new(
         qdrant_client: Arc<QdrantClient>,
@@ -189,12 +141,36 @@ impl WebCrawlerRetriever {
         embedder: Arc<EmbeddingClient>,
         system_config: SystemConfig,
     ) -> Result<Self> {
-        // Web crawler configuration will be applied per URL in crawl_url method
-
-        // Initialize LSH for semantic query caching
-        // Configure dimensions based on embedding model from config
         let embedding_vector_size = system_config.embedding.vector_size as usize;
         let lsh = lsh_rs::LshMem::new(16, 8, embedding_vector_size).srp()?;
+
+        // Initialize SearXNG client if enabled
+        let searxng_client = if system_config.rag.web_crawler.searxng.enabled {
+            match SearXNGClient::new(
+                system_config.rag.web_crawler.searxng.endpoint.clone(),
+                system_config.rag.web_crawler.searxng.timeout_secs,
+                system_config.rag.web_crawler.searxng.max_results,
+                system_config.rag.web_crawler.searxng.preferred_engines.clone(),
+            ) {
+                Ok(client) => {
+                    // Perform health check
+                    if let Err(e) = client.health_check().await {
+                        warn!("SearXNG health check failed: {}. Continuing without SearXNG.", e);
+                        None
+                    } else {
+                        info!("SearXNG client initialized and healthy");
+                        Some(client)
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to initialize SearXNG client: {}. Continuing without SearXNG.", e);
+                    None
+                }
+            }
+        } else {
+            info!("SearXNG disabled in configuration");
+            None
+        };
 
         let instance = Self {
             qdrant_client,
@@ -206,6 +182,7 @@ impl WebCrawlerRetriever {
             query_cache_prefix: system_config.rag.web_crawler.query_cache_prefix.clone(),
             lsh: Arc::new(std::sync::Mutex::new(lsh)),
             system_config,
+            searxng_client,
         };
 
         Ok(instance)
@@ -213,7 +190,6 @@ impl WebCrawlerRetriever {
 
     #[instrument(skip(self, query_embedding), fields(query_len = query.len()))]
     async fn check_semantic_cache(&self, query: &str, query_embedding: Vec<f32>) -> Result<Option<CachedQueryResult>> {
-        // Use LSH to find similar query embeddings
         let similar_vectors: Vec<Vec<f32>> = {
             let lsh = self.lsh.lock()
                 .map_err(|e| anyhow::anyhow!("Failed to acquire LSH lock: {}", e))?;
@@ -226,14 +202,11 @@ impl WebCrawlerRetriever {
             }
         };
 
-        // Create a hash from the similar vectors for caching
         for (idx, _similar_vec) in similar_vectors.iter().enumerate() {
-            let cache_key = format!("{}{}_{}", self.query_cache_prefix, 
+            let cache_key = format!("{}{}_{}", self.query_cache_prefix,
                 self.compute_content_hash(query).await, idx);
-            
             if let Ok(Some(cached_data)) = self.redis_client.get::<String>(&cache_key).await {
                 if let Ok(cached_result) = serde_json::from_str::<CachedQueryResult>(&cached_data) {
-                    // Check if cache is still valid
                     let cache_age = Utc::now().signed_duration_since(cached_result.cached_at);
                     let ttl_hours = self.system_config.rag.web_crawler.query_cache_ttl_secs / 3600;
                     if cache_age.num_hours() < ttl_hours as i64 {
@@ -269,15 +242,11 @@ impl WebCrawlerRetriever {
             source_urls,
         };
 
-        // Generate a unique cache key
         let cache_key = format!("{}{}", self.query_cache_prefix, self.compute_content_hash(query).await);
-        
-        // Store in Redis for fast retrieval
         let serialized = serde_json::to_string(&cached_result)?;
         let ttl = self.system_config.rag.web_crawler.query_cache_ttl_secs;
         self.redis_client.set_ex(&cache_key, &serialized, ttl).await?;
 
-        // Store query embedding in LSH for fast similarity matching
         {
             let mut lsh = self.lsh.lock()
                 .map_err(|e| anyhow::anyhow!("Failed to acquire LSH lock for storage: {}", e))?;
@@ -286,13 +255,11 @@ impl WebCrawlerRetriever {
             }
         }
 
-        // Store cached results in Redis using a hash-based key
-        let semantic_cache_key = format!("{}semantic_{}", self.query_cache_prefix, 
+        let semantic_cache_key = format!("{}semantic_{}", self.query_cache_prefix,
             self.compute_content_hash(query).await);
         self.redis_client.set_ex(&semantic_cache_key, &serialized, ttl).await?;
 
         debug!("Stored query embedding and results in LSH semantic cache");
-        
         info!("Cached query results for: {}", query);
         Ok(())
     }
@@ -300,18 +267,15 @@ impl WebCrawlerRetriever {
     #[instrument(skip(self))]
     async fn normalize_url(&self, url: &str) -> Result<String> {
         let parsed = Url::parse(url).context("Failed to parse URL")?;
-        
-        // Normalize URL by removing fragments and query parameters that don't affect content
         let mut normalized = parsed.clone();
         normalized.set_fragment(None);
-        
-        // Remove common tracking parameters
+
         let tracking_params = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"];
         let query_pairs: Vec<_> = normalized
             .query_pairs()
             .filter(|(key, _)| !tracking_params.contains(&key.as_ref()))
             .collect();
-        
+
         if query_pairs.is_empty() {
             normalized.set_query(None);
         } else {
@@ -338,17 +302,17 @@ impl WebCrawlerRetriever {
         let web_config = &self.system_config.rag.web_crawler;
         let chunk_size = web_config.chunk_size;
         let overlap = web_config.chunk_overlap;
-        
+
         let mut fragments = Vec::new();
         let content_lines: Vec<&str> = content.lines().collect();
         let mut current_pos = 0;
         let content_hash = self.compute_content_hash(content).await;
-        
+
         while current_pos < content_lines.len() {
             let end_pos = std::cmp::min(current_pos + chunk_size, content_lines.len());
             let chunk_lines = &content_lines[current_pos..end_pos];
             let chunk_content = chunk_lines.join("\n");
-            
+
             if !chunk_content.trim().is_empty() {
                 let fragment = ContextFragment {
                     content: chunk_content,
@@ -359,29 +323,30 @@ impl WebCrawlerRetriever {
                             content_hash: content_hash.clone(),
                             title: title.clone(),
                         },
-                        structures: vec![], // Could be enhanced with HTML structure analysis
+                        structures: vec![],
                         annotations: Some(AnnotationsContextFragment {
                             last_updated: Some(Utc::now()),
                             tags: Some(vec![
                                 TagContextFragment::TAG("web_content".to_string()),
-                                TagContextFragment::KV("source_domain".to_string(), 
+                                TagContextFragment::KV("source_domain".to_string(),
                                     Url::parse(url)
                                         .map(|u| u.host_str().unwrap_or("unknown").to_string())
                                         .unwrap_or_else(|_| "invalid_url".to_string())),
                             ]),
                         }),
                     },
-                    relevance_score: 50, // Default relevance, will be updated by reranking
+                    relevance_score: 50,
                 };
                 fragments.push(fragment);
             }
-            
+
             if end_pos >= content_lines.len() {
                 break;
             }
+
             current_pos = end_pos - overlap.min(end_pos);
         }
-        
+
         debug!("Chunked content into {} fragments", fragments.len());
         Ok(fragments)
     }
@@ -403,28 +368,24 @@ impl WebCrawlerRetriever {
     #[instrument(skip(self), fields(url = %url))]
     async fn crawl_url(&self, url: &str) -> Result<String> {
         let normalized_url = self.normalize_url(url).await?;
-        
-        // Check cache first
+
         if let Some(cached_content) = self.get_cached_content(&normalized_url).await? {
             debug!("Found cached content for URL: {}", normalized_url);
             return Ok(cached_content);
         }
 
         info!("Crawling URL: {}", normalized_url);
-        
-        // Create a new website instance for this specific URL with full configuration
+
         let web_config = &self.system_config.rag.web_crawler;
         let mut website = Website::new(&normalized_url);
         website
             .with_user_agent(Some(&web_config.user_agent))
             .with_respect_robots_txt(web_config.respect_robots_txt)
             .with_request_timeout(Some(std::time::Duration::from_secs(web_config.request_timeout_secs)))
-            .with_limit(1); // Only crawl the single URL
-        
-        // Crawl the URL
+            .with_limit(1);
+
         website.crawl().await;
-        
-        // Extract content from the crawled page
+
         let pages = website.get_pages();
         let content = if let Some(pages_vec) = pages {
             if let Some(page) = pages_vec.first() {
@@ -438,35 +399,64 @@ impl WebCrawlerRetriever {
             return Err(anyhow::anyhow!("No pages found for URL"));
         };
 
-        // Cache the content
         self.cache_content(&normalized_url, &content).await?;
-
         Ok(content)
     }
 
+    /// Perform web search using SearXNG
     #[instrument(skip(self), fields(query_len = query.len()))]
-    async fn generate_search_urls(&self, query: &str) -> Result<Vec<String>> {
-        // Generate URLs for common documentation and knowledge sites
-        let mut search_urls = Vec::new();
-        
-        // Add common documentation sites based on query content
-        if query.to_lowercase().contains("rust") {
-            search_urls.push(format!("https://doc.rust-lang.org/std/?search={}", urlencoding::encode(query)));
-            search_urls.push(format!("https://docs.rs/?search={}", urlencoding::encode(query)));
+    async fn perform_web_search(&self, query: &str) -> Result<Vec<String>> {
+        if let Some(ref searxng) = self.searxng_client {
+            info!("Using SearXNG for web search");
+
+            let results = searxng.search(query).await?;
+            let urls = SearXNGClient::extract_urls(&results);
+
+            info!("SearXNG returned {} unique URLs", urls.len());
+            Ok(urls)
+        } else {
+            warn!("SearXNG not available, no web search performed");
+            Ok(vec![])
         }
-        
-        if query.to_lowercase().contains("python") {
-            search_urls.push(format!("https://docs.python.org/3/search.html?q={}", urlencoding::encode(query)));
+    }
+
+    /// Crawl multiple URLs in parallel with concurrency control
+    #[instrument(skip(self, urls), fields(url_count = urls.len()))]
+    async fn crawl_urls_parallel(&self, urls: Vec<String>) -> Vec<(String, Result<String>)> {
+        let max_concurrent = 3; // Limit concurrent crawls to avoid overwhelming targets
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
+
+        let futures: FuturesUnordered<_> = urls
+            .into_iter()
+            .map(|url| {
+                let semaphore = semaphore.clone();
+                let self_clone = self.clone_for_parallel();
+
+                async move {
+                    let _permit = semaphore.acquire().await.unwrap();
+                    let result = self_clone.crawl_url(&url).await;
+                    (url, result)
+                }
+            })
+            .collect();
+
+        futures.collect().await
+    }
+
+    /// Helper to clone fields needed for parallel operations
+    fn clone_for_parallel(&self) -> Self {
+        Self {
+            qdrant_client: self.qdrant_client.clone(),
+            redis_client: self.redis_client.clone(),
+            embedder: self.embedder.clone(),
+            collection_name: self.collection_name.clone(),
+            query_cache_collection: self.query_cache_collection.clone(),
+            cache_prefix: self.cache_prefix.clone(),
+            query_cache_prefix: self.query_cache_prefix.clone(),
+            lsh: self.lsh.clone(),
+            system_config: self.system_config.clone(),
+            searxng_client: self.searxng_client.clone(),
         }
-        
-        // Add GitHub search for code examples
-        search_urls.push(format!("https://github.com/search?q={}&type=code", urlencoding::encode(query)));
-        
-        // Add Stack Overflow search
-        search_urls.push(format!("https://stackoverflow.com/search?q={}", urlencoding::encode(query)));
-        
-        debug!("Generated {} search URLs for query: {}", search_urls.len(), query);
-        Ok(search_urls)
     }
 
     #[instrument(skip(self, fragments), fields(input_count = fragments.len()))]
@@ -474,18 +464,16 @@ impl WebCrawlerRetriever {
         let mut seen_hashes = std::collections::HashSet::new();
         let mut deduped = Vec::new();
         let fragment_count = fragments.len();
-        
+
         for fragment in fragments {
-            // Create content hash for deduplication
             let content_hash = self.compute_content_hash(&fragment.content).await;
-            
             if seen_hashes.insert(content_hash) {
                 deduped.push(fragment);
             } else {
                 debug!("Skipped duplicate content fragment");
             }
         }
-        
+
         info!("Deduplicated {} fragments to {} unique fragments", fragment_count, deduped.len());
         Ok(deduped)
     }
@@ -513,64 +501,64 @@ impl RetrieverSource for WebCrawlerRetriever {
 
             debug!("Processing web query: {}", query);
 
-            // First, check semantic cache for similar queries
-            // Generate real embedding using the embedding client
+            // Generate embedding for semantic caching
             let query_embeddings = self.embedder.embedder_dense.embed(vec![query.to_string()]).await?;
             let query_embedding = query_embeddings.first().cloned()
                 .ok_or_else(|| anyhow::anyhow!("Failed to generate embedding for query"))?;
-            
+
+            // Check semantic cache first
             if let Ok(Some(cached_result)) = self.check_semantic_cache(&query, query_embedding.clone()).await {
                 info!("Using cached results for semantically similar query");
                 all_fragments.extend(cached_result.fragments);
                 continue;
             }
 
-            // Process the query - either as direct URL or search query
+            // Perform web search using SearXNG
+            let search_urls = self.perform_web_search(&query).await?;
+
+            if search_urls.is_empty() {
+                warn!("No URLs found for query: {}", query);
+                continue;
+            }
+
+            info!("Found {} URLs to crawl for query: {}", search_urls.len(), query);
+
+            // Crawl URLs in parallel
+            let crawl_results = self.crawl_urls_parallel(search_urls).await;
+
+            // Process crawl results
             let mut query_fragments = Vec::new();
-            
-            if let Ok(url) = Url::parse(&query) {
-                // Direct URL crawling
-                match self.crawl_url(url.as_str()).await {
+            for (url, content_result) in crawl_results {
+                match content_result {
                     Ok(content) => {
-                        let fragments = self.chunk_content(&content, url.as_str(), None).await?;
-                        query_fragments.extend(fragments);
+                        match self.chunk_content(&content, &url, None).await {
+                            Ok(fragments) => {
+                                debug!("Chunked {} fragments from {}", fragments.len(), url);
+                                query_fragments.extend(fragments);
+                            }
+                            Err(e) => {
+                                warn!("Failed to chunk content from {}: {}", url, e);
+                            }
+                        }
                     }
                     Err(e) => {
                         warn!("Failed to crawl URL {}: {}", url, e);
                     }
                 }
-            } else {
-                // Search query - would typically use web search API
-                // For now, we'll implement a simple approach that searches for common documentation sites
-                let search_urls = self.generate_search_urls(&query).await?;
-                
-                for search_url in &search_urls {
-                    match self.crawl_url(search_url).await {
-                        Ok(content) => {
-                            let fragments = self.chunk_content(&content, search_url, None).await?;
-                            query_fragments.extend(fragments);
-                        }
-                        Err(e) => {
-                            warn!("Failed to crawl search URL {}: {}", search_url, e);
-                        }
-                    }
-                }
             }
 
-            // Deduplicate content using content hashes
+            // Deduplicate and cache
             let deduped_fragments = self.deduplicate_fragments(query_fragments).await?;
-            
-            // Cache the results for future semantic matching
+
             if !deduped_fragments.is_empty() {
                 if let Err(e) = self.cache_query_results(&query, &deduped_fragments, query_embedding).await {
                     warn!("Failed to cache query results: {}", e);
                 }
+                all_fragments.extend(deduped_fragments);
             }
-
-            all_fragments.extend(deduped_fragments);
         }
 
-        debug!("Retrieved {} total web content fragments", all_fragments.len());
+        info!("Web retrieval complete: {} total fragments", all_fragments.len());
         Ok(all_fragments)
     }
 }

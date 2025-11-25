@@ -69,7 +69,15 @@ cargo test -p ai-agent-indexing --test pipeline_test -- --ignored --test-threads
 
 echo ""
 echo "Running RAG crate tests..."
-cargo test -p ai-agent-rag --ignored
+cargo test -p ai-agent-rag
+
+echo ""
+echo "Running RAG integration tests (requires test infrastructure)..."
+cargo test -p ai-agent-rag --test web_crawler_tests -- --ignored --test-threads=1
+
+echo ""
+echo "Running full RAG integration tests..."
+cargo test -p ai-agent-rag --test rag_integration_tests -- --ignored --test-threads=1
 
 
 # Cleanup

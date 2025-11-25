@@ -1,0 +1,106 @@
+# SearXNG Settings for Local AI-RAG Development
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "AI-RAG-Search"
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+  formats:
+    - html
+    - json
+
+server:
+  secret_key: "ultrasecretkey"
+  limiter: false  # Disable rate limiting
+  image_proxy: true
+  http_protocol_version: "1.1"
+  method: "GET"
+
+# CRITICAL: Disable bot detection for local development
+botdetection:
+  ip_lists:
+    pass_ip:
+      - 0.0.0.0/0  # Allow all IPs (local development only!)
+    block_ip: []
+
+ui:
+  static_use_hash: true
+  infinite_scroll: false
+  default_theme: simple
+  query_in_title: true
+
+# Enabled engines (errors in your logs are from missing engines, we'll use the working ones)
+engines:
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+    weight: 1
+
+  - name: google
+    engine: google
+    shortcut: go
+    disabled: false
+    weight: 1
+
+  - name: bing
+    engine: bing
+    shortcut: bi
+    disabled: false
+    weight: 1
+
+  - name: github
+    engine: github
+    shortcut: gh
+    disabled: false
+    weight: 1
+
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    disabled: false
+    weight: 1
+
+  - name: reddit
+    engine: reddit
+    shortcut: re
+    disabled: false
+    weight: 1
+
+  - name: arxiv
+    engine: arxiv
+    shortcut: arx
+    disabled: false
+    weight: 1
+
+  # Disabled engines that were failing in your logs
+  - name: stackoverflow
+    engine: xpath
+    disabled: true  # Not available in this SearXNG version
+
+  - name: wolframalpha
+    disabled: true  # Missing engine file
+
+outgoing:
+  request_timeout: 10.0
+  max_request_timeout: 15.0
+  useragent_suffix: "AI-RAG/1.0"
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: true
+  # Don't verify SSL for local dev
+  verify: true
+
+enabled_plugins:
+  - 'Hash plugin'
+  - 'Self Information'
+  - 'Tracker URL remover'
+  - 'Ahmia blacklist'  # Keep for safety
+
+disabled_plugins:
+  - 'Hostnames plugin'  # Don't leak local IPs

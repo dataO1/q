@@ -38,6 +38,25 @@ conversation_boost = 1.2
 recency_boost = 1.1
 dependency_boost = 0.8
 
+[rag.web_crawler]
+enabled = true
+max_urls_per_query = 3
+request_timeout_secs = 10
+content_cache_ttl_secs = 300     # 5 minutes for testing
+query_cache_ttl_secs = 60        # 1 minute for testing
+chunk_size = 512
+chunk_overlap = 50
+user_agent = "RAGTestAgent/1.0 (Testing)"
+respect_robots_txt = false        # Disabled for testing
+web_content_collection = "test_web_content"
+web_query_cache_collection = "test_web_query_cache"
+content_cache_prefix = "test_web_content:"
+query_cache_prefix = "test_web_query:"
+endpoint = "http://localhost:8888"
+timeout_secs = 10
+max_results = 5
+preferred_engines = ["duckduckgo", "google", "github", "stackoverflow"]
+
 
 
 [[agent_network.agents]]

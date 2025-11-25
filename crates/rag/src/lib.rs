@@ -7,6 +7,8 @@ pub mod source_router;
 pub mod retriever;
 pub mod reranker;
 pub mod web_crawler;
+pub mod searxng_client;
+pub use searxng_client::{SearXNGClient, SearchResult};
 
 use ai_agent_common::llm::EmbeddingClient;
 use ai_agent_storage::{QdrantClient, RedisCache};

@@ -133,7 +133,7 @@ impl RetrieverSource for QdrantRetriever {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MultiSourceRetriever {
     sources: Vec<Arc<dyn RetrieverSource>>,
     embedder: Arc<EmbeddingClient>,

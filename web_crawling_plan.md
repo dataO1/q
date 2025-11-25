@@ -107,3 +107,55 @@ This approach keeps your system local-first while leveraging proven techniques f
     Vector DB (Cache Collection): For Semantic Caching of questions you've already answered.
 
     Key-Value Store: For raw web pages and search results.
+
+### Current feedback from gemini
+
+🐞 Diagnosis: Web Source Retrieval Failure
+
+The RAG system fails to return web results because the WebCrawlerRetriever is simulating search by constructing URL strings (like https://google.com/search?q=...) and then crawling the raw HTML of those search result pages using spider-rs. It is not parsing the search results to find actual links to crawl.
+
+When spider-rs crawls a modern search engine results page (SERP), it gets a JavaScript-heavy, anti-bot-protected page or raw HTML full of unhelpful scripts, not the actual content you want.
+
+Here is the breakdown of the failure chain:
+1. ❌ Faulty "Search" Implementation
+
+In web_crawler.rs, the generate_search_urls function merely appends the query to a URL:
+
+rust
+search_urls.push(format!("https://stackoverflow.com/search?q={}", urlencoding::encode(query)));
+
+Then, retrieve calls crawl_url(search_url). This crawls the search results list page, not the answers.
+2. ❌ Incorrect Crawling of SERPs
+
+The spider website configuration in crawl_url is set to with_limit(1).
+
+rust
+website.with_limit(1); // Only crawl the single URL
+
+This means it downloads the single page https://stackoverflow.com/search?q=..., extracts its text (which is likely "Search results for X..."), chunks it, and returns it. It does not follow the links to the actual answers.
+3. ⚠️ Missing Search API
+
+You are missing a real Search API (like Google Custom Search, Bing API, or DuckDuckGo HTML scraping) to turn a query into a list of target_urls.
+🛠️ Fix Plan
+
+To fix this locally without paid APIs, we need to scrape the search engine results to get actual target URLs, and then crawl those URLs.
+Step 1: Fix generate_search_urls to actually resolve links
+
+The current implementation just guesses URLs. You need a function that actually performs a search. Since you want a local approach, we can scrape DuckDuckGo's HTML version (easier to parse) or use a library that does this.
+Step 2: Update retrieve logic
+
+Instead of crawling the search URL directly, the flow should be:
+
+    fetch_search_results(query) -> Vec<Url>
+
+    crawl_parallel(urls) -> Vec<Content>
+
+For SERP solution we should use SearXNG. Setup a service in the docker-compose,
+add it to the configs and implement for the primitive search.
+
+Step 3: Verify Agent Consumption
+
+The ContextBuilder correctly formats RAG fragments. If we fix the retrieval, the agent will see the content.
+📝 Actionable Code Changes
+
+I will create a patch to replace the naive generate_search_urls with a basic SERP scraper and update the retrieve flow.
