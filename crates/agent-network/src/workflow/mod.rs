@@ -50,4 +50,9 @@ pub struct TaskResult {
     pub output: Option<String>,
     pub error: Option<String>,
     pub tool_executions: Vec<crate::tools::ToolExecution>,
+    
+    // Attribution metadata
+    pub agent_id: Option<String>,
+    pub task_description: Option<String>,
+    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
 }

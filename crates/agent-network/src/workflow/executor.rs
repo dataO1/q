@@ -322,6 +322,9 @@ impl WorkflowExecutor {
                         output: None,
                         error: Some(e.to_string()),
                         tool_executions: vec![],
+                        agent_id: None,
+                        task_description: None,
+                        completed_at: Some(chrono::Utc::now()),
                     });
                 }
                 Err(e) => {
@@ -332,6 +335,9 @@ impl WorkflowExecutor {
                         output: None,
                         error: Some(format!("Join error: {}", e)),
                         tool_executions: vec![],
+                        agent_id: None,
+                        task_description: None,
+                        completed_at: Some(chrono::Utc::now()),
                     });
                 }
             }
@@ -448,9 +454,20 @@ async fn execute_single_task(
                 }
             }
 
-            // Add tool executions (this is the key missing piece!)
+            // Add tool executions 
             let tool_executions_json = serde_json::to_value(&task_result.tool_executions)?;
             dep_output.insert("tool_executions".to_string(), tool_executions_json);
+
+            // Add attribution metadata
+            if let Some(agent_id) = &task_result.agent_id {
+                dep_output.insert("agent_id".to_string(), serde_json::Value::String(agent_id.clone()));
+            }
+            if let Some(task_description) = &task_result.task_description {
+                dep_output.insert("task_description".to_string(), serde_json::Value::String(task_description.clone()));
+            }
+            if let Some(completed_at) = &task_result.completed_at {
+                dep_output.insert("completed_at".to_string(), serde_json::Value::String(completed_at.to_rfc3339()));
+            }
 
             dependency_outputs.insert(task_id.clone(), serde_json::Value::Object(dep_output));
         }
@@ -505,7 +522,7 @@ async fn execute_single_task(
             // Store exchange in history if provider available
             if let Some(provider) = context_provider.as_ref() {
                 if let Err(e) = provider.store_exchange(
-                    task.description,
+                    task.description.clone(),
                     serde_json::to_string(&result.output)?,
                     conversation_id
                 ).await {
@@ -518,6 +535,9 @@ async fn execute_single_task(
                 output: Some(serde_json::to_string(&result.output)?),
                 error: None,
                 tool_executions: result.tool_executions,
+                agent_id: Some(agent.id().to_string()),
+                task_description: Some(task.description),
+                completed_at: Some(chrono::Utc::now()),
             })
         }
         Err(e) => {
@@ -690,6 +710,9 @@ async fn execute_task_with_retry(
         output: None,
         error: Some(error_msg),
         tool_executions: vec![],
+        agent_id: Some(agent_id),
+        task_description: Some(task.description.clone()),
+        completed_at: Some(chrono::Utc::now()),
     })
 
 }

@@ -488,31 +488,127 @@ pub trait TypedAgent: Send + Sync {
         ];
 
         if !context.dependency_outputs.is_empty() {
-            let dependency_msg = serde_json::to_string_pretty(&context.dependency_outputs)
-                .unwrap_or_else(|_| "Failed to serialize dependency outputs".to_string());
-            messages.push(ChatMessage::user(format!("# PREVIOUS TASK OUTPUTS:\n{}", dependency_msg)));
+            let mut dependency_msg = format!("# PREVIOUS TASK OUTPUTS ({} tasks completed):\n\n", context.dependency_outputs.len());
+            
+            for (task_id, output) in &context.dependency_outputs {
+                // Extract attribution metadata if available
+                let agent_id = output.get("agent_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown-agent");
+                let task_description = output.get("task_description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("No description");
+                let completed_at = output.get("completed_at")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown time");
+                
+                dependency_msg.push_str(&format!(
+                    "## Task: {} | Agent: {} | Completed: {}\n",
+                    task_description.chars().take(50).collect::<String>(),
+                    agent_id,
+                    completed_at
+                ));
+                
+                // Add the actual output content
+                let output_content = serde_json::to_string_pretty(output)
+                    .unwrap_or_else(|_| "Failed to serialize output".to_string());
+                dependency_msg.push_str(&format!("{}\n\n", output_content));
+            }
+            
+            messages.push(ChatMessage::user(dependency_msg));
         }
 
         // Add workflow state if available
-        if let Some(workflow_state) = context.metadata.get("workflow_state") {
-            messages.push(ChatMessage::user(format!("# WORKFLOW CONTEXT:\n{}",
-                serde_json::to_string_pretty(workflow_state).unwrap_or_default())));
+        if let Some(workflow_state_value) = context.metadata.get("workflow_state") {
+            // Try to parse the workflow state for better formatting
+            if let Ok(workflow_state) = serde_json::from_value::<WorkflowState>(workflow_state_value.clone()) {
+                let mut workflow_msg = format!("# WORKFLOW CONTEXT (Step {} of workflow):\n\n", workflow_state.step_results.len() + 1);
+                
+                if !workflow_state.step_results.is_empty() {
+                    workflow_msg.push_str("## Previous Steps:\n");
+                    for (i, step_result) in workflow_state.step_results.iter().enumerate() {
+                        let status_icon = if step_result.success { "✅" } else { "❌" };
+                        workflow_msg.push_str(&format!(
+                            "- Step {}: {} {} {}\n",
+                            i + 1,
+                            step_result.step_id,
+                            status_icon,
+                            step_result.error.as_ref().unwrap_or(&"Completed".to_string())
+                        ));
+                    }
+                    workflow_msg.push_str("\n");
+                }
+                
+                if !workflow_state.shared_context.is_empty() {
+                    workflow_msg.push_str("## Shared Context:\n");
+                    for (key, value) in &workflow_state.shared_context {
+                        workflow_msg.push_str(&format!("- {}: {}\n", key, value.chars().take(100).collect::<String>()));
+                    }
+                    workflow_msg.push_str("\n");
+                }
+                
+                messages.push(ChatMessage::user(workflow_msg));
+            } else {
+                // Fallback to raw JSON if parsing fails
+                messages.push(ChatMessage::user(format!("# WORKFLOW CONTEXT:\n{}",
+                    serde_json::to_string_pretty(workflow_state_value).unwrap_or_default())));
+            }
         }
 
         // Add step parameters
         if !step.parameters.is_empty() {
-            messages.push(ChatMessage::user(format!("# STEP PARAMETERS:\n{}",
-                serde_json::to_string_pretty(&step.parameters).unwrap_or_default())));
+            let mut params_msg = format!("# STEP PARAMETERS (from {} definition):\n", step.name);
+            
+            // Format parameters with better readability
+            for (key, value) in &step.parameters {
+                let value_str = match value {
+                    serde_json::Value::String(s) => format!("\"{}\"", s),
+                    serde_json::Value::Number(n) => n.to_string(),
+                    serde_json::Value::Bool(b) => b.to_string(),
+                    serde_json::Value::Array(arr) => format!("{} items", arr.len()),
+                    serde_json::Value::Object(obj) => format!("{} fields", obj.len()),
+                    serde_json::Value::Null => "null".to_string(),
+                };
+                
+                params_msg.push_str(&format!("- {}: {}\n", key, value_str));
+            }
+            
+            messages.push(ChatMessage::user(params_msg));
         }
 
         // Add RAG context if available
         if let Some(rag_context) = &context.rag_context {
-            messages.push(ChatMessage::user(format!("# RELEVANT CONTEXT:\n{}", rag_context)));
+            // Count sources and estimate relevance from context content
+            let source_count = rag_context.matches("##").count();
+            let context_length = rag_context.len();
+            let estimated_tokens = context_length / 4;
+            
+            let header = if source_count > 0 {
+                format!("# RELEVANT CONTEXT ({} sources, ~{} tokens):\n{}", 
+                    source_count, estimated_tokens, rag_context)
+            } else {
+                format!("# RELEVANT CONTEXT (~{} tokens):\n{}", 
+                    estimated_tokens, rag_context)
+            };
+            
+            messages.push(ChatMessage::user(header));
         }
 
         // Add history context if available (for cases where it's separate from RAG)
         if let Some(history_context) = &context.history_context {
-            messages.push(ChatMessage::user(format!("# CONVERSATION HISTORY:\n{}", history_context)));
+            // Estimate the amount of history content
+            let estimated_tokens = history_context.len() / 4;
+            let section_count = history_context.matches("##").count();
+            
+            let header = if section_count > 0 {
+                format!("# CONVERSATION HISTORY ({} sections, ~{} tokens):\n{}", 
+                    section_count, estimated_tokens, history_context)
+            } else {
+                format!("# CONVERSATION HISTORY (~{} tokens):\n{}", 
+                    estimated_tokens, history_context)
+            };
+            
+            messages.push(ChatMessage::user(header));
         }
 
         // Add main user prompt
