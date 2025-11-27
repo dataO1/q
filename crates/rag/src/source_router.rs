@@ -29,7 +29,7 @@ impl SourceRouter {
             "stack overflow", "github", "api reference", "latest",
             "online", "web", "internet", "search", "find"
         ];
-        
+
         let query_lower = query.to_lowercase();
         web_keywords.iter().any(|&keyword| query_lower.contains(keyword))
     }
@@ -100,13 +100,13 @@ impl SourceRouter {
         ctx: &ProjectScope,
     ) -> anyhow::Result<HashMap<CollectionTier, String>> {
         let mut result_tiers = Vec::new();
-        
+
         // First, check heuristics for obvious web content requests
         if self.detect_web_intent(user_query) {
             info!("Detected web intent via heuristics for query: {}", user_query);
             result_tiers.push(CollectionTier::Online);
         }
-        
+
         // Always use LLM classification as fallback to catch additional tiers
         debug!("Using LLM classification for comprehensive tier detection");
         let llm_tiers = self.classify_intent_llm(user_query).await?;
@@ -115,16 +115,16 @@ impl SourceRouter {
                 result_tiers.push(tier);
             }
         }
-        
+
         // Ensure we have at least one tier (default to Workspace)
         if result_tiers.is_empty() {
             result_tiers.push(CollectionTier::Workspace);
         }
-        
+
         let res: HashMap<CollectionTier, String> = result_tiers.into_iter()
             .map(|tier| (tier, user_query.to_string()))
             .collect();
-        
+
         debug!("Routed query to tiers: {:?}", res.keys().collect::<Vec<_>>());
         Ok(res)
     }

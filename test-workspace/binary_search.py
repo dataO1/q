@@ -10,9 +10,8 @@ def binary_search(arr, low, high, x):
     else:
         return -1
 
-if __name__ == "__main__":
-    import sys
-    arr = list(map(int, sys.argv[1].split(',')))
-    target = int(sys.argv[2])
-    result = binary_search(arr, 0, len(arr) - 1, target)
-    print(result)
+def main():
+    arr = [2, 3, 4, 10, 40]
+    print(binary_search(arr, 0, len(arr) - 1, 10))
+if __name__ == '__main__':
+    main()

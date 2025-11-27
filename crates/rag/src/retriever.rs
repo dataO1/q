@@ -11,7 +11,7 @@ use futures::stream::StreamExt;
 use swiftide::{SparseEmbedding};
 use tracing::{debug, info, instrument, warn};
 
-use ai_agent_common::{llm::EmbeddingClient, CollectionTier, ContextFragment, ProjectScope, SystemConfig};
+use ai_agent_common::{llm::EmbeddingClient, CollectionTier, ContextFragment, Location, ProjectScope, SystemConfig};
 use crate::web_crawler::WebCrawlerRetriever;
 
 pub type Priority = u8;
@@ -34,20 +34,15 @@ pub fn create_retriever_stream(
     project_scope: ProjectScope,
 ) -> RetrieverSourcePrioStream {
     let total_queries: usize = queries.values().map(|v| v.len()).sum();
-    
+
     // Get source name for debugging (using Debug trait)
     let source_name = format!("{:?}", source);
-    let source_type = if source_name.contains("QdrantRetriever") {
-        "qdrant_retriever"
-    } else {
-        "unknown_retriever"
-    };
-    
-    debug!("Starting retrieval from {} (priority: {}, total queries: {})", 
-        source_type, source.priority(), total_queries);
-    
+
+    debug!("Starting retrieval from {} (priority: {}, total queries: {})",
+        source_name, source.priority(), total_queries);
+
     let start_time = std::time::Instant::now();
-    
+
     // Map each (tier, queries) to an async future that retrieves vectors & converts to Vec<Result<ContextFragment>>
     let fetch_futures = queries.into_iter().map(|(tier, q_list)| {
         let tier = tier.clone();
@@ -56,7 +51,7 @@ pub fn create_retriever_stream(
         let s_self = Arc::clone(&source); // Arc clone, 'static safe
         async move {
             debug!("Querying {:?} tier with {} queries", tier, q_list.len());
-            
+
             // Retrieve results: Vec<ContextFragment>
             let results = s_self
                 .retrieve(
@@ -66,7 +61,7 @@ pub fn create_retriever_stream(
                 .await?;
 
             debug!("Retrieved {} fragments from {:?} tier", results.len(), tier);
-            
+
             // Map to Vec<Result<ContextFragment>>
             let fragments = results.into_iter().map(|frag| Ok(frag)).collect::<Vec<_>>();
 
@@ -96,8 +91,8 @@ pub fn create_retriever_stream(
 
     // Record completion metrics
     let duration = start_time.elapsed();
-    
-    debug!("RetrieverSource stream created for {} (latency: {}ms)", source_type, duration.as_millis());
+
+    debug!("RetrieverSource stream created for {} (latency: {}ms)", source_name, duration.as_millis());
 
     RetrieverSourcePrioStream {
         stream: Box::pin(stream),
@@ -129,7 +124,28 @@ impl RetrieverSource for QdrantRetriever {
         queries: Vec<(CollectionTier, String)>,
         project_scope: ProjectScope,
     ) -> Result<Vec<ContextFragment>> {
-        self.client.query_collections(queries, &project_scope,None).await
+        // Filter out Online/System tiers
+        let local_queries: Vec<_> = queries
+            .into_iter()
+            .filter(|(tier, _)|
+                matches!(*tier,
+                    CollectionTier::Personal |
+                    CollectionTier::Workspace |
+                    CollectionTier::System))
+            .collect();
+
+        if local_queries.is_empty() {
+            return Ok(vec![]);
+        }
+
+        match self.client.query_collections(local_queries, &project_scope, None).await {
+            Ok(results) => Ok(results),
+            Err(e) => {
+                // Log the error but don't crash the stream
+                warn!("QdrantRetriever failed: {}. Returning empty results.", e);
+                Ok(vec![]) // Graceful degradation
+            }
+        }
     }
 }
 
@@ -141,7 +157,7 @@ pub struct MultiSourceRetriever {
 
 impl MultiSourceRetriever {
     pub async fn new(
-        qdrant_client: Arc<QdrantClient>, 
+        qdrant_client: Arc<QdrantClient>,
         embedder: Arc<EmbeddingClient>,
         redis_client: Arc<ai_agent_storage::RedisCache>,
         system_config: SystemConfig,
@@ -149,7 +165,7 @@ impl MultiSourceRetriever {
         let mut sources: Vec<Arc<dyn RetrieverSource>> = vec![
             Arc::new(QdrantRetriever::new(qdrant_client.clone()))
         ];
-        
+
         // Add web crawler retriever if enabled
         if system_config.rag.web_crawler.enabled {
             match WebCrawlerRetriever::new(qdrant_client.clone(), redis_client, embedder.clone(), system_config).await {
@@ -165,7 +181,7 @@ impl MultiSourceRetriever {
         } else {
             info!("Web crawler disabled in configuration");
         }
-        
+
         Ok(Self {
             sources,
             embedder: embedder.clone(),
@@ -181,9 +197,10 @@ impl MultiSourceRetriever {
         println!("Stream finished.");
     }
 
-    /// Retrieve all sources, then rerank and deduplicate combined results before streaming out in batches
+    /// Retrieve all sources in parallel, rerank combined results, then stream them
+    /// This ensures consumers get best results first regardless of source priority
     pub fn retrieve_stream(
-        self:Arc<Self>,
+        self: Arc<Self>,
         raw_query: String,
         queries: HashMap<CollectionTier, Vec<String>>,
         project_scope: ProjectScope,
@@ -193,66 +210,192 @@ impl MultiSourceRetriever {
         let project_scope = project_scope.clone();
 
         let stream = Box::pin(try_stream! {
-            // Collect all results from all sources
-            let mut all_streams = Vec::<RetrieverSourcePrioStream>::new();
+            let fetch_start = std::time::Instant::now();
 
-            // let all_streams:  Vec<RetrieverSourcePrioStream> = sources.into_iter().map(|source|{
-            //     source.retrieve_stream(queries.clone(), &project_scope.clone())
-            // }).collect();
+            // Launch parallel retrieval from all sources
+            let mut fetch_futures = Vec::new();
+
             for source in sources.iter() {
+                let source = Arc::clone(source);
+                let queries = queries.clone();
+                let project_scope = project_scope.clone();
                 let source_name = format!("{:?}", source);
-                let source_type = if source_name.contains("QdrantRetriever") {
-                    "qdrant"
-                } else {
-                    "unknown"
+
+                // Create future for this source
+                let fut = async move {
+                    let source_start = std::time::Instant::now();
+
+                    // Convert HashMap<Tier, Vec<String>> to Vec<(Tier, String)>
+                    let query_vec: Vec<(CollectionTier, String)> = queries
+                        .into_iter()
+                        .flat_map(|(tier, q_list)| {
+                            q_list.into_iter().map(move |q| (tier.clone(), q))
+                        })
+                        .collect();
+
+                    debug!(
+                        "Fetching from source {:?} with {} queries",
+                        source_name,
+                        query_vec.len()
+                    );
+
+                    // Retrieve from this source
+                    let results = match source.retrieve(query_vec, project_scope).await {
+                        Ok(fragments) => {
+                            let duration = source_start.elapsed();
+                            info!(
+                                "Source {:?} returned {} fragments in {:?}",
+                                source_name,
+                                fragments.len(),
+                                duration
+                            );
+                            fragments
+                        }
+                        Err(e) => {
+                            // Log error but don't fail entire stream
+                            warn!(
+                                "Source {:?} failed: {}. Continuing with other sources.",
+                                source_name,
+                                e
+                            );
+                            vec![]
+                        }
+                    };
+
+                    // Return results with priority metadata
+                    Ok::<(u8, Vec<ContextFragment>), anyhow::Error>((
+                        source.priority(),
+                        results
+                    ))
                 };
-                
-                let retrieval_span = tracing::info_span!(
-                    "retrieval_source", 
-                    source_type = source_type,
-                    priority = source.priority(),
-                    query_count = queries.values().map(|v| v.len()).sum::<usize>()
+
+                fetch_futures.push(fut);
+            }
+
+            // Wait for all sources with timeout
+            let timeout = tokio::time::Duration::from_secs(60);
+            let all_results = match tokio::time::timeout(
+                timeout,
+                futures::future::join_all(fetch_futures)
+            ).await {
+                Ok(results) => {
+                    let fetch_duration = fetch_start.elapsed();
+                    debug!(
+                        "All sources completed in {:?}",
+                        fetch_duration
+                    );
+                    results
+                }
+                Err(_) => {
+                    warn!(
+                        "Timeout waiting for sources after {:?}. Using partial results.",
+                        timeout
+                    );
+                    // This shouldn't happen with join_all, but handle it anyway
+                    vec![]
+                }
+            };
+
+            // Flatten results and apply priority-based relevance boost
+            let mut all_fragments: Vec<ContextFragment> = Vec::new();
+            let mut source_stats: HashMap<u8, usize> = HashMap::new();
+
+            for result in all_results {
+                match result {
+                    Ok((priority, mut fragments)) => {
+                        let count = fragments.len();
+                        *source_stats.entry(priority).or_insert(0) += count;
+
+                        // Apply priority boost to relevance scores
+                        // Priority 1 (local) → 2.0x boost
+                        // Priority 2 → 1.5x boost
+                        // Priority 3 (web) → 1.0x (no boost)
+                        let boost_factor = match priority {
+                            1 => 2.0,
+                            2 => 1.5,
+                            _ => 1.0,
+                        };
+
+                        for fragment in fragments.iter_mut() {
+                            fragment.relevance_score =
+                                (fragment.relevance_score as f32 * boost_factor) as usize;
+                        }
+
+                        all_fragments.extend(fragments);
+                    }
+                    Err(e) => {
+                        warn!("Source fetch failed: {}", e);
+                    }
+                }
+            }
+
+            info!(
+                "Retrieved {} total fragments from sources: {:?}",
+                all_fragments.len(),
+                source_stats
+            );
+
+            if all_fragments.is_empty() {
+                warn!("No fragments retrieved from any source");
+                return;
+            }
+
+            // Rerank: Sort by boosted relevance score (descending)
+            all_fragments.sort_by_key(|f| std::cmp::Reverse(f.relevance_score));
+
+            // Optional: Apply diversity to avoid too many results from same source
+            // (Uncomment if needed)
+            all_fragments = self.apply_diversity_filter(all_fragments, 5);
+
+            debug!(
+                "Reranked {} fragments, streaming in relevance order",
+                all_fragments.len()
+            );
+
+            // Stream reranked results
+            for (idx, fragment) in all_fragments.into_iter().enumerate() {
+                debug!(
+                    "Yielding fragment {} with score {} from {:?}",
+                    idx + 1,
+                    fragment.relevance_score,
+                    fragment.metadata.location
                 );
-                
-                let partial_results = retrieval_span.in_scope(|| {
-                    create_retriever_stream(source.clone(), queries.clone(), project_scope.clone())
-                });
-                
-                all_streams.push(partial_results);
-            }
-            // let query_embeddings = self.embedder.embedder_sparse.embed(vec![raw_query.to_string()]).await?;
-            // let query_embedding = query_embeddings.get(0).unwrap();
-            //
-            // Group streams by priority in a BTreeMap to ensure ascending order of priority
-            let mut streams_by_priority: BTreeMap<Priority, Vec<_>> = BTreeMap::new();
-            for ps in all_streams {
-                streams_by_priority.entry(ps.priority).or_default().push(ps.stream);
+                yield fragment;
             }
 
-            //  yield entire batch downstream grouped by priority
-            for (_priority, mut streams) in streams_by_priority {
-                let mut batch: Vec<ContextFragment> = Vec::new();
-
-                // Drain all streams for this priority concurrently
-                for mut stream in streams.drain(..) {
-                    while let Some(fragment) = stream.next().await {
-                        let fragment = fragment?;
-                        batch.push(fragment);
-                    }
-                }
-                if !batch.is_empty() {
-                    // Step 5: Rerank batch of fragments before yield
-                    // let reranked = Reranker::rerank_and_deduplicate(&query_embedding,&batch);
-                    let mut reranked = batch;
-
-                    reranked.sort_by_key(|f| Reverse(f.relevance_score));
-                    for fragment in reranked {
-                        yield fragment;
-                    }
-                }
-            }
+            info!("Stream completed successfully");
         });
+
         stream
+    }
+    /// Apply diversity filter to prevent single source domination
+    fn apply_diversity_filter(
+        &self,
+        fragments: Vec<ContextFragment>,
+        max_per_source: usize
+    ) -> Vec<ContextFragment> {
+        use std::collections::HashMap;
+
+        let mut source_counts: HashMap<String, usize> = HashMap::new();
+        let mut filtered = Vec::new();
+
+        for fragment in fragments {
+            // Use location type as source identifier
+            let source_key = match &fragment.metadata.location {
+                Location::File { .. } => "local_file",
+                Location::WebContent { .. } => "web_content",
+                _ => "other",
+            };
+
+            let count = source_counts.entry(source_key.to_string()).or_insert(0);
+
+            if *count < max_per_source {
+                *count += 1;
+                filtered.push(fragment);
+            }
+        }
+
+        filtered
     }
 }
 

@@ -1,0 +1,1081 @@
+warning: unused import: `info`
+ --> crates/common/src/config.rs:2:15
+  |
+2 | use tracing::{info, warn};
+  |               ^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `Config`
+ --> crates/common/src/tracing.rs:4:41
+  |
+4 | use opentelemetry_sdk::trace::{Sampler, Config};
+  |                                         ^^^^^^
+
+warning: unused import: `runtime`
+ --> crates/common/src/tracing.rs:5:35
+  |
+5 | use opentelemetry_sdk::{Resource, runtime};
+  |                                   ^^^^^^^
+
+warning: unused import: `Span`
+ --> crates/common/src/tracing.rs:7:37
+  |
+7 | use opentelemetry::{global, trace::{Span, Tracer}};
+  |                                     ^^^^
+
+warning: unused import: `Tracer`
+ --> crates/common/src/tracing.rs:7:43
+  |
+7 | use opentelemetry::{global, trace::{Span, Tracer}};
+  |                                           ^^^^^^
+
+warning: unused variable: `max_attempts`
+   --> crates/common/src/types.rs:361:25
+    |
+361 |             Self::Retry{max_attempts,backoff_ms} => true,
+    |                         ^^^^^^^^^^^^ help: try ignoring the field: `max_attempts: _`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `backoff_ms`
+   --> crates/common/src/types.rs:361:38
+    |
+361 |             Self::Retry{max_attempts,backoff_ms} => true,
+    |                                      ^^^^^^^^^^ help: try ignoring the field: `backoff_ms: _`
+
+warning: `ai-agent-common` (lib) generated 7 warnings (run `cargo fix --lib -p ai-agent-common` to apply 4 suggestions)
+warning: unused import: `std::collections::HashMap`
+ --> crates/storage/src/qdrant.rs:1:5
+  |
+1 | use std::collections::HashMap;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `Value`
+  --> crates/storage/src/qdrant.rs:10:118
+   |
+10 | use qdrant_client::qdrant::{Condition, Filter, Fusion, PrefetchQueryBuilder, Query, QueryPointsBuilder, ScoredPoint, Value, VectorInput};
+   |                                                                                                                      ^^^^^
+
+warning: unused imports: `Definition`, `MetadataContextFragment`, and `StructureContextFragmentBuilder`
+  --> crates/storage/src/qdrant.rs:13:91
+   |
+13 | ...nt, Definition, Location, MetadataContextFragment, MetadataContextFragmentBuilder, ProjectScope, StructureContextFragment, StructureContextFragmentBuilder, Ta...
+   |        ^^^^^^^^^^            ^^^^^^^^^^^^^^^^^^^^^^^                                                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `SparseEmbeddings`
+  --> crates/storage/src/qdrant.rs:16:33
+   |
+16 | use swiftide::{SparseEmbedding, SparseEmbeddings};
+   |                                 ^^^^^^^^^^^^^^^^
+
+warning: unused variable: `filter`
+   --> crates/storage/src/qdrant.rs:140:13
+    |
+140 |         let filter = self.build_metadata_filter(project_scope)?;
+    |             ^^^^^^ help: if this is intentional, prefix it with an underscore: `_filter`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: use of deprecated method `redis::AsyncCommands::set_multiple`: Renamed to mset() to reflect Redis name
+  --> crates/storage/src/redis.rs:98:14
+   |
+98 |         conn.set_multiple::<_, _, ()>(pairs)
+   |              ^^^^^^^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+warning: field `client` is never read
+ --> crates/storage/src/redis.rs:9:5
+  |
+8 | pub struct RedisCache {
+  |            ---------- field in this struct
+9 |     client: redis::Client,
+  |     ^^^^^^
+  |
+  = note: `RedisCache` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ai-agent-storage` (lib) generated 7 warnings (run `cargo fix --lib -p ai-agent-storage` to apply 4 suggestions)
+warning: unused import: `types::*`
+ --> crates/indexing/src/watcher.rs:1:40
+  |
+1 | use ai_agent_common::{IndexingFilters, types::*};
+  |                                        ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `anyhow`
+ --> crates/indexing/src/pipeline.rs:3:31
+  |
+3 | use anyhow::{Context, Result, anyhow};
+  |                               ^^^^^^
+
+warning: unused import: `serde_json::json`
+ --> crates/indexing/src/pipeline.rs:5:5
+  |
+5 | use serde_json::json;
+  |     ^^^^^^^^^^^^^^^^
+
+warning: unused import: `fs`
+ --> crates/indexing/src/pipeline.rs:6:11
+  |
+6 | use std::{fs, path::{Path, PathBuf}, sync::Arc};
+  |           ^^
+
+warning: unused imports: `Parser` and `Tree`
+  --> crates/indexing/src/pipeline.rs:10:25
+   |
+10 | use tree_sitter::{self, Parser, Tree};
+   |                         ^^^^^^  ^^^^
+
+warning: unused imports: `RepoRoot` and `projects::GitProject`
+ --> crates/indexing/src/metadata_transformer.rs:3:17
+  |
+3 | use repo_root::{projects::GitProject, RepoRoot};
+  |                 ^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^
+
+warning: unused import: `fs`
+ --> crates/indexing/src/metadata_chunk_transformer.rs:1:33
+  |
+1 | use std::{collections::HashMap, fs, path::Path};
+  |                                 ^^
+
+warning: unused imports: `DefinitionBuilder`, `Definition`, `LanguageIter`, and `Language`
+ --> crates/indexing/src/metadata_chunk_transformer.rs:3:23
+  |
+3 | use ai_agent_common::{Definition, DefinitionBuilder, Language, LanguageIter, StructureContextFragment, StructureContextFragmentBuilder};
+  |                       ^^^^^^^^^^  ^^^^^^^^^^^^^^^^^  ^^^^^^^^  ^^^^^^^^^^^^
+
+warning: unused imports: `RepoRoot` and `projects::GitProject`
+ --> crates/indexing/src/metadata_chunk_transformer.rs:7:17
+  |
+7 | use repo_root::{projects::GitProject, RepoRoot};
+  |                 ^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^
+
+warning: unused import: `Node`
+ --> crates/indexing/src/metadata_chunk_transformer.rs:9:37
+  |
+9 | use swiftide::{indexing::{Metadata, Node, TextNode, Transformer}, traits::WithIndexingDefaults};
+  |                                     ^^^^
+
+warning: unused imports: `QueryMatches` and `TextProvider`
+  --> crates/indexing/src/metadata_chunk_transformer.rs:10:95
+   |
+10 | use tree_sitter::{{Language as TSLanguage}, Node as TsNode, Parser, Query, QueryCursor, Tree, QueryMatches, StreamingIterator, TextProvider};
+   |                                                                                               ^^^^^^^^^^^^                     ^^^^^^^^^^^^
+
+warning: unused import: `strum::IntoEnumIterator`
+ --> crates/indexing/src/metadata_chunk_transformer.rs:4:5
+  |
+4 | use strum::IntoEnumIterator;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unnecessary `unsafe` block
+  --> crates/indexing/src/metadata_transformer.rs:70:26
+   |
+70 |             "ts" => Some(unsafe { tree_sitter_typescript::LANGUAGE_TYPESCRIPT }.into()),
+   |                          ^^^^^^ unnecessary `unsafe` block
+   |
+   = note: `#[warn(unused_unsafe)]` (part of `#[warn(unused)]`) on by default
+
+warning: unnecessary `unsafe` block
+  --> crates/indexing/src/metadata_transformer.rs:71:27
+   |
+71 |             "tsx" => Some(unsafe { tree_sitter_typescript::LANGUAGE_TSX.into() }),
+   |                           ^^^^^^ unnecessary `unsafe` block
+
+warning: unused variable: `dependencies`
+   --> crates/indexing/src/metadata_transformer.rs:178:13
+    |
+178 |         let dependencies = self.extract_dependencies(root, &node.chunk.as_bytes());
+    |             ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_dependencies`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unnecessary `unsafe` block
+   --> crates/indexing/src/metadata_chunk_transformer.rs:123:26
+    |
+123 |             "ts" => Some(unsafe { tree_sitter_typescript::LANGUAGE_TYPESCRIPT }.into()),
+    |                          ^^^^^^ unnecessary `unsafe` block
+
+warning: unnecessary `unsafe` block
+   --> crates/indexing/src/metadata_chunk_transformer.rs:124:27
+    |
+124 |             "tsx" => Some(unsafe { tree_sitter_typescript::LANGUAGE_TSX.into() }),
+    |                           ^^^^^^ unnecessary `unsafe` block
+
+warning: unused variable: `capture_name`
+   --> crates/indexing/src/metadata_chunk_transformer.rs:215:21
+    |
+215 |                 let capture_name = &query.capture_names()[capture.index as usize];
+    |                     ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_capture_name`
+
+warning: unused variable: `root_node`
+   --> crates/indexing/src/metadata_chunk_transformer.rs:256:13
+    |
+256 |         let root_node = tree.root_node();
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_root_node`
+
+warning: field `redis_cache` is never read
+  --> crates/indexing/src/pipeline.rs:26:5
+   |
+24 | pub struct IndexingPipeline {
+   |            ---------------- field in this struct
+25 |     qdrant_client: Arc<QdrantClient>,
+26 |     redis_cache: Redis,
+   |     ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: methods `extract_definitions` and `extract_references` are never used
+   --> crates/indexing/src/metadata_transformer.rs:92:8
+    |
+ 35 | impl ExtractMetadataTransformer {
+    | ------------------------------- methods in this implementation
+...
+ 92 |     fn extract_definitions(&self, ts_node: TsNode, source: &[u8]) -> Vec<String> {
+    |        ^^^^^^^^^^^^^^^^^^^
+...
+148 |     fn extract_references(&self, ts_node: TsNode, source: &[u8]) -> Vec<String> {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: method `print_node_tree` is never used
+   --> crates/indexing/src/metadata_chunk_transformer.rs:167:8
+    |
+ 42 | impl ExtractMetadataChunkTransformer {
+    | ------------------------------------ method in this implementation
+...
+167 |     fn print_node_tree(&self, node: TsNode, source: &[u8], indent: usize) {
+    |        ^^^^^^^^^^^^^^^
+
+warning: `ai-agent-indexing` (lib) generated 22 warnings (run `cargo fix --lib -p ai-agent-indexing` to apply 11 suggestions)
+   Compiling ai-agent-rag v0.1.0 (/home/data01/Projects/q/crates/rag)
+warning: unused import: `Context`
+ --> crates/rag/src/context_manager.rs:1:14
+  |
+1 | use anyhow::{Context, Result};
+  |              ^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `ProjectType` and `ProjectTypes`
+ --> crates/rag/src/context_manager.rs:6:18
+  |
+6 | use repo_root::{ ProjectType, ProjectTypes, RepoRoot};
+  |                  ^^^^^^^^^^^  ^^^^^^^^^^^^
+
+warning: unused import: `std::env::current_dir`
+ --> crates/rag/src/context_manager.rs:7:5
+  |
+7 | use std::env::current_dir;
+  |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `ai_agent_common::*`
+ --> crates/rag/src/context_providers.rs:1:5
+  |
+1 | use ai_agent_common::*;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `cmp::Reverse` and `collections::BTreeMap`
+ --> crates/rag/src/retriever.rs:6:11
+  |
+6 | use std::{cmp::Reverse, collections::BTreeMap};
+  |           ^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `instrument`
+  --> crates/rag/src/retriever.rs:12:28
+   |
+12 | use tracing::{debug, info, instrument, warn};
+   |                            ^^^^^^^^^^
+
+warning: unused import: `std::collections::HashMap`
+  --> crates/rag/src/web_crawler.rs:88:5
+   |
+88 | use std::collections::HashMap;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `tokio::time::Duration`
+  --> crates/rag/src/web_crawler.rs:94:5
+   |
+94 | use tokio::time::Duration;
+   |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `SearchResult`
+  --> crates/rag/src/web_crawler.rs:97:44
+   |
+97 | use crate::searxng_client::{SearXNGClient, SearchResult};
+   |                                            ^^^^^^^^^^^^
+
+warning: unused variable: `input`
+  --> crates/rag/src/context_providers.rs:21:42
+   |
+21 |     pub async fn process_mentions(&self, input: &str) -> Result<Vec<(String, String)>> {
+   |                                          ^^^^^ help: if this is intentional, prefix it with an underscore: `_input`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `item`
+   --> crates/rag/src/retriever.rs:192:24
+    |
+192 |         while let Some(item) = stream.next().await {
+    |                        ^^^^ help: if this is intentional, prefix it with an underscore: `_item`
+
+warning: unused variable: `raw_query`
+   --> crates/rag/src/retriever.rs:204:9
+    |
+204 |         raw_query: String,
+    |         ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_raw_query`
+
+warning: unused variable: `project_scope`
+   --> crates/rag/src/web_crawler.rs:518:9
+    |
+518 |         project_scope: ProjectScope,
+    |         ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_project_scope`
+
+warning: field `providers` is never read
+  --> crates/rag/src/context_providers.rs:13:5
+   |
+12 | pub struct ContextProviderEngine {
+   |            --------------------- field in this struct
+13 |     providers: std::collections::HashMap<String, Box<dyn ContextProvider>>,
+   |     ^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `embedder` is never read
+   --> crates/rag/src/retriever.rs:155:5
+    |
+153 | pub struct MultiSourceRetriever {
+    |            -------------------- field in this struct
+154 |     sources: Vec<Arc<dyn RetrieverSource>>,
+155 |     embedder: Arc<EmbeddingClient>,
+    |     ^^^^^^^^
+    |
+    = note: `MultiSourceRetriever` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: method `process_stream` is never used
+   --> crates/rag/src/retriever.rs:191:14
+    |
+158 | impl MultiSourceRetriever {
+    | ------------------------- method in this implementation
+...
+191 |     async fn process_stream(&self, mut stream: impl Stream<Item = Result<(ContextFragment,SparseEmbedding)>> + Unpin) {
+    |              ^^^^^^^^^^^^^^
+
+warning: fields `stream` and `priority` are never read
+   --> crates/rag/src/retriever.rs:403:5
+    |
+402 | pub struct RetrieverSourcePrioStream {
+    |            ------------------------- fields in this struct
+403 |     stream: Pin<Box<dyn Stream<Item = Result<ContextFragment>> + Send>>,
+    |     ^^^^^^
+404 |     priority: u8,
+    |     ^^^^^^^^
+
+warning: fields `query` and `suggestions` are never read
+  --> crates/rag/src/searxng_client.rs:38:5
+   |
+36 | struct SearXNGResponse {
+   |        --------------- fields in this struct
+37 |     /// Search query
+38 |     query: String,
+   |     ^^^^^
+...
+48 |     suggestions: Vec<String>,
+   |     ^^^^^^^^^^^
+   |
+   = note: `SearXNGResponse` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `timeout` is never read
+  --> crates/rag/src/searxng_client.rs:77:5
+   |
+69 | pub struct SearXNGClient {
+   |            ------------- field in this struct
+...
+77 |     timeout: Duration,
+   |     ^^^^^^^
+   |
+   = note: `SearXNGClient` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: `ai-agent-rag` (lib) generated 19 warnings (run `cargo fix --lib -p ai-agent-rag` to apply 9 suggestions)
+warning: unused imports: `Language` and `ProjectScope`
+  --> crates/rag/src/bin/rag_cli.rs:10:39
+   |
+10 | use ai_agent_common::{ConversationId, Language, ProjectScope, SystemConfig};
+   |                                       ^^^^^^^^  ^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `any`
+ --> crates/rag/tests/common/mock_web_server.rs:4:40
+  |
+4 | use wiremock::matchers::{method, path, any};
+  |                                        ^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `ContextFragment`
+ --> crates/rag/tests/rag_integration_tests.rs:6:39
+  |
+6 | use ai_agent_common::{CollectionTier, ContextFragment, ConversationId};
+  |                                       ^^^^^^^^^^^^^^^
+
+warning: unused variable: `redis`
+  --> crates/rag/tests/rag_integration_tests.rs:31:9
+   |
+31 |     let redis = create_test_redis_client().await?;
+   |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_redis`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `queries`
+  --> crates/rag/tests/rag_integration_tests.rs:41:9
+   |
+41 |     let queries = HashMap::from([
+   |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_queries`
+
+warning: function `test_collection_name` is never used
+  --> crates/rag/tests/common/mod.rs:63:8
+   |
+63 | pub fn test_collection_name(prefix: &str) -> String {
+   |        ^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `create_test_embedding` is never used
+  --> crates/rag/tests/common/mod.rs:77:8
+   |
+77 | pub fn create_test_embedding() -> Vec<f32> {
+   |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `setup_test_collections` is never used
+  --> crates/rag/tests/common/mod.rs:82:14
+   |
+82 | pub async fn setup_test_collections() -> Result<()> {
+   |              ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `check_collection_exists` is never used
+   --> crates/rag/tests/common/mod.rs:126:10
+    |
+126 | async fn check_collection_exists(qdrant: &QdrantClient, collection_name: &str) -> bool {
+    |          ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `ai-agent-rag` (bin "rag_cli") generated 1 warning (run `cargo fix --bin "rag_cli"` to apply 1 suggestion)
+warning: `ai-agent-rag` (test "rag_integration_tests") generated 8 warnings (run `cargo fix --test "rag_integration_tests"` to apply 2 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.27s
+warning: the following packages contain code that will be rejected by a future version of Rust: sqlx-core v0.6.3
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running tests/rag_integration_tests.rs (target/debug/deps/rag_integration_tests-a68f47a2dbe7b42c)
+
+running 6 tests
+[2025-11-27T00:35:50Z INFO  ai_agent_storage::redis] Connected to Redis at redis://localhost:16379
+[2025-11-27T00:35:50Z INFO  ai_agent_storage::redis] Connected to Redis at redis://localhost:16379
+[2025-11-27T00:35:50Z INFO  ai_agent_storage::redis] Connected to Redis at redis://localhost:16379
+[2025-11-27T00:35:50Z INFO  ai_agent_storage::redis] Connected to Redis at redis://localhost:16379
+[2025-11-27T00:35:50Z INFO  ai_agent_storage::redis] Connected to Redis at redis://localhost:16379
+[2025-11-27T00:35:50Z INFO  ai_agent_storage::redis] Connected to Redis at redis://localhost:16379
+[2025-11-27T00:35:50Z INFO  ai_agent_storage::redis] Connected to Redis at redis://localhost:16379
+[2025-11-27T00:35:50Z INFO  ai_agent_storage::redis] Connected to Redis at redis://localhost:16379
+[2025-11-27T00:35:50Z INFO  ai_agent_rag::web_crawler] new; web_crawler_enabled=true searxng_enabled=true vector_size=384
+[2025-11-27T00:35:50Z INFO  ai_agent_rag::searxng_client] new; endpoint=http://localhost:8888
+[2025-11-27T00:35:50Z INFO  ai_agent_rag::searxng_client] Initialized SearXNG client: endpoint=http://localhost:8888, timeout=10s, max_results=5
+[2025-11-27T00:35:50Z INFO  ai_agent_rag::searxng_client] health_check; endpoint=http://localhost:8888
+[2025-11-27T00:35:50Z INFO  ai_agent_rag::searxng_client] SearXNG health check passed
+[2025-11-27T00:35:50Z INFO  ai_agent_rag::web_crawler] SearXNG client initialized and healthy
+[2025-11-27T00:35:50Z INFO  ai_agent_rag::retriever] Successfully initialized web crawler retriever
+[2025-11-27T00:35:50Z INFO  ai_agent_rag] rag_streaming_retrieval;
+[2025-11-27T00:35:50Z INFO  ai_agent_rag::source_router] query_routing; ctx=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] }
+[2025-11-27T00:35:50Z INFO  ai_agent_rag::source_router] Detected web intent via heuristics for query: async documentation from http://127.0.0.1:42487/rust/async
+[2025-11-27T00:35:50Z INFO  ai_agent_rag::source_router] intent_classification_llm;
+[2025-11-27T00:35:51Z INFO  ai_agent_rag::retriever] Web crawler disabled in configuration
+[2025-11-27T00:35:51Z INFO  ai_agent_rag] rag_streaming_retrieval;
+[2025-11-27T00:35:51Z INFO  ai_agent_rag::source_router] query_routing; ctx=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] }
+[2025-11-27T00:35:51Z INFO  ai_agent_rag::source_router] Detected web intent via heuristics for query: find documentation online about async functions
+[2025-11-27T00:35:51Z INFO  ai_agent_rag::source_router] intent_classification_llm;
+[2025-11-27T00:35:55Z INFO  ai_agent_rag] rag_query_enhancement; project_scope=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] } conversation_id=ConversationId("test_conversation")
+[2025-11-27T00:35:55Z INFO  ai_agent_rag::query_enhancer] query_enhancement_full; project_scope=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] } conversation_id=ConversationId("test_conversation") tier=Online
+[2025-11-27T00:35:55Z INFO  ai_agent_rag::query_enhancer] query_heuristic_expansion; query="async documentation from http://127.0.0.1:42487/rust/async"
+[2025-11-27T00:35:55Z INFO  ai_agent_rag::retriever] Source "QdrantRetriever { client: QdrantClient { url: \"http://localhost:16334\", raw_client: Qdrant Config uri: http://localhost:16334, embedder: EmbeddingClient { embedder_dense: GenericOpenAI { client: Client { http_client: Client { accepts: Accepts { gzip: true, brotli: true, zstd: true, deflate: true }, proxies: [Matcher], referer: true, default_headers: {\"accept\": \"*/*\"} }, config: OllamaConfig { api_base: \"http://localhost:11434/v1\", api_key: SecretBox<str>([REDACTED]) }, backoff: ExponentialBackoff { current_interval: 500ms, initial_interval: 500ms, randomization_factor: 0.5, multiplier: 1.5, max_interval: 60s, start_time: Instant { tv_sec: 148201, tv_nsec: 186962423 }, max_elapsed_time: Some(900s), clock: SystemClock } }, default_options: Options { embed_model: Some(\"all-minilm:l6-v2\"), prompt_model: None, parallel_tool_calls: None, max_completion_tokens: None, temperature: None, reasoning_effort: None, seed: None, presence_penalty: None, metadata: None, user: None, dimensions: None }, stream_full: true, use_responses_api: false, .. }, vector_size_dense: 384, embedder_sparse: FastEmbedBuilder { batch_size: Some(256) } } } }" returned 0 fragments in 959.625µs
+[2025-11-27T00:35:55Z INFO  ai_agent_rag::web_crawler] retrieve; queries=[(Online, "async documentation from http://127.0.0.1:42487/rust/async"), (Online, "as ##yn ##c documentation from http : ##/ ##/ 127 . 0 . 0 . 1 : 42 ##48 ##7 / rust / as ##yn ##c"), (Online, "LLM enhanced query for prompt: Generate an enhanced search query optimized for this source:\nOnline\n\nRaw query and heuristic variants:\n[\"async documentation from http://127.0.0.1:42487/rust/async\", \"as ##yn ##c documentation from http : ##/ ##/ 127 . 0 . 0 . 1 : 42 ##48 ##7 / rust / as ##yn ##c\"]\n\nProject context:\nProjectScope { root: \"/test/project\", current_file: Some(\"/test/project/src/main.rs\"), language_distribution: [(Rust, 1.0)] }\nConversation ID:\ntest_conversation")] query_count=3 project_scope=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] }
+[2025-11-27T00:35:55Z INFO  ai_agent_rag::web_crawler] 🕸️ WebCrawlerRetriever.retrieve() called with 3 queries
+[2025-11-27T00:35:55Z INFO  ai_agent_rag::web_crawler]   SearXNG client available: true
+[2025-11-27T00:35:55Z INFO  ai_agent_rag::web_crawler]   Query 1: tier=Online, query=async documentation from http://127.0.0.1:42487/ru
+[2025-11-27T00:35:55Z INFO  ai_agent_rag::web_crawler]   Query 2: tier=Online, query=as ##yn ##c documentation from http : ##/ ##/ 127 
+[2025-11-27T00:35:55Z INFO  ai_agent_rag::web_crawler]   Query 3: tier=Online, query=LLM enhanced query for prompt: Generate an enhance
+[2025-11-27T00:35:55Z INFO  ai_agent_rag::web_crawler] 🌐 Processing Online tier query: async documentation from http://127.0.0.1:42487/ru
+[2025-11-27T00:35:55Z INFO  ai_agent_rag::web_crawler] check_semantic_cache; query="async documentation from http://127.0.0.1:42487/rust/async" query_len=58
+[2025-11-27T00:35:55Z INFO  ai_agent_rag::web_crawler] perform_web_search; query="async documentation from http://127.0.0.1:42487/rust/async" query_len=58
+[2025-11-27T00:35:55Z INFO  ai_agent_rag::web_crawler] Using SearXNG for web search
+[2025-11-27T00:35:55Z INFO  ai_agent_rag::searxng_client] search; query="async documentation from http://127.0.0.1:42487/rust/async" query_len=58 endpoint=http://localhost:8888
+[2025-11-27T00:35:56Z INFO  ai_agent_storage::redis] Connected to Redis at redis://localhost:16379
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler] new; web_crawler_enabled=true searxng_enabled=true vector_size=384
+[2025-11-27T00:35:56Z INFO  ai_agent_storage::redis] Connected to Redis at redis://localhost:16379
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::searxng_client] new; endpoint=http://localhost:8888
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::searxng_client] Initialized SearXNG client: endpoint=http://localhost:8888, timeout=10s, max_results=5
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::searxng_client] health_check; endpoint=http://localhost:8888
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::searxng_client] SearXNG health check passed
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler] SearXNG client initialized and healthy
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::retriever] Successfully initialized web crawler retriever
+[2025-11-27T00:35:56Z INFO  tracing::span] sparse_embed;
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler] retrieve; queries=[(Personal, "documentation"), (Online, "http://127.0.0.1:44657/rust/async"), (Workspace, "async functions")] query_count=3 project_scope=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] }
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler] 🕸️ WebCrawlerRetriever.retrieve() called with 3 queries
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler]   SearXNG client available: true
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler]   Query 1: tier=Personal, query=documentation
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler]   Query 2: tier=Online, query=http://127.0.0.1:44657/rust/async
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler]   Query 3: tier=Workspace, query=async functions
+[2025-11-27T00:35:56Z WARN  ai_agent_rag::web_crawler] ⏭️ Skipping non-online tier: Personal for query: documentation
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler] 🌐 Processing Online tier query: http://127.0.0.1:44657/rust/async
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler] new; web_crawler_enabled=true searxng_enabled=true vector_size=384
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::searxng_client] new; endpoint=http://localhost:8888
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler] new; web_crawler_enabled=true searxng_enabled=true vector_size=384
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::searxng_client] new; endpoint=http://localhost:8888
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::searxng_client] Initialized SearXNG client: endpoint=http://localhost:8888, timeout=10s, max_results=5
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::searxng_client] health_check; endpoint=http://localhost:8888
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler] new; web_crawler_enabled=true searxng_enabled=true vector_size=384
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::searxng_client] new; endpoint=http://localhost:8888
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::searxng_client] SearXNG health check passed
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler] SearXNG client initialized and healthy
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::retriever] Successfully initialized web crawler retriever
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::retriever] Source "QdrantRetriever { client: QdrantClient { url: \"http://localhost:16334\", raw_client: Qdrant Config uri: http://localhost:16334, embedder: EmbeddingClient { embedder_dense: GenericOpenAI { client: Client { http_client: Client { accepts: Accepts { gzip: true, brotli: true, zstd: true, deflate: true }, proxies: [Matcher], referer: true, default_headers: {\"accept\": \"*/*\"} }, config: OllamaConfig { api_base: \"http://localhost:11434/v1\", api_key: SecretBox<str>([REDACTED]) }, backoff: ExponentialBackoff { current_interval: 500ms, initial_interval: 500ms, randomization_factor: 0.5, multiplier: 1.5, max_interval: 60s, start_time: Instant { tv_sec: 148201, tv_nsec: 187573538 }, max_elapsed_time: Some(900s), clock: SystemClock } }, default_options: Options { embed_model: Some(\"all-minilm:l6-v2\"), prompt_model: None, parallel_tool_calls: None, max_completion_tokens: None, temperature: None, reasoning_effort: None, seed: None, presence_penalty: None, metadata: None, user: None, dimensions: None }, stream_full: true, use_responses_api: false, .. }, vector_size_dense: 384, embedder_sparse: FastEmbedBuilder { batch_size: Some(256) } } } }" returned 0 fragments in 47.632µs
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler] retrieve; queries=[(Online, "http://127.0.0.1:38751/rust/async")] query_count=1 project_scope=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] }
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler] 🕸️ WebCrawlerRetriever.retrieve() called with 1 queries
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler]   SearXNG client available: true
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler]   Query 1: tier=Online, query=http://127.0.0.1:38751/rust/async
+[2025-11-27T00:35:56Z INFO  ai_agent_rag::web_crawler] 🌐 Processing Online tier query: http://127.0.0.1:38751/rust/async
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::searxng_client] Initialized SearXNG client: endpoint=http://localhost:8888, timeout=10s, max_results=5
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::searxng_client] health_check; endpoint=http://localhost:8888
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::searxng_client] SearXNG health check passed
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] SearXNG client initialized and healthy
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::retriever] Successfully initialized web crawler retriever
+[2025-11-27T00:35:57Z INFO  ai_agent_rag] rag_streaming_retrieval;
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::source_router] query_routing; ctx=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] }
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::source_router] Detected web intent via heuristics for query: rust async documentation
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::source_router] intent_classification_llm;
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::searxng_client] Initialized SearXNG client: endpoint=http://localhost:8888, timeout=10s, max_results=5
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::searxng_client] health_check; endpoint=http://localhost:8888
+[2025-11-27T00:35:57Z INFO  tracing::span] sparse_embed;
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::searxng_client] SearXNG health check passed
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] SearXNG client initialized and healthy
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::retriever] Successfully initialized web crawler retriever
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::retriever] Source "QdrantRetriever { client: QdrantClient { url: \"http://localhost:16334\", raw_client: Qdrant Config uri: http://localhost:16334, embedder: EmbeddingClient { embedder_dense: GenericOpenAI { client: Client { http_client: Client { accepts: Accepts { gzip: true, brotli: true, zstd: true, deflate: true }, proxies: [Matcher], referer: true, default_headers: {\"accept\": \"*/*\"} }, config: OllamaConfig { api_base: \"http://localhost:11434/v1\", api_key: SecretBox<str>([REDACTED]) }, backoff: ExponentialBackoff { current_interval: 500ms, initial_interval: 500ms, randomization_factor: 0.5, multiplier: 1.5, max_interval: 60s, start_time: Instant { tv_sec: 148201, tv_nsec: 186502865 }, max_elapsed_time: Some(900s), clock: SystemClock } }, default_options: Options { embed_model: Some(\"all-minilm:l6-v2\"), prompt_model: None, parallel_tool_calls: None, max_completion_tokens: None, temperature: None, reasoning_effort: None, seed: None, presence_penalty: None, metadata: None, user: None, dimensions: None }, stream_full: true, use_responses_api: false, .. }, vector_size_dense: 384, embedder_sparse: FastEmbedBuilder { batch_size: Some(256) } } } }" returned 0 fragments in 22.908µs
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] retrieve; queries=[(Online, "http://127.0.0.1:34771/rust/async")] query_count=1 project_scope=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] }
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] 🕸️ WebCrawlerRetriever.retrieve() called with 1 queries
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler]   SearXNG client available: true
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler]   Query 1: tier=Online, query=http://127.0.0.1:34771/rust/async
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] 🌐 Processing Online tier query: http://127.0.0.1:34771/rust/async
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::retriever] Source "QdrantRetriever { client: QdrantClient { url: \"http://localhost:16334\", raw_client: Qdrant Config uri: http://localhost:16334, embedder: EmbeddingClient { embedder_dense: GenericOpenAI { client: Client { http_client: Client { accepts: Accepts { gzip: true, brotli: true, zstd: true, deflate: true }, proxies: [Matcher], referer: true, default_headers: {\"accept\": \"*/*\"} }, config: OllamaConfig { api_base: \"http://localhost:11434/v1\", api_key: SecretBox<str>([REDACTED]) }, backoff: ExponentialBackoff { current_interval: 500ms, initial_interval: 500ms, randomization_factor: 0.5, multiplier: 1.5, max_interval: 60s, start_time: Instant { tv_sec: 148201, tv_nsec: 186502865 }, max_elapsed_time: Some(900s), clock: SystemClock } }, default_options: Options { embed_model: Some(\"all-minilm:l6-v2\"), prompt_model: None, parallel_tool_calls: None, max_completion_tokens: None, temperature: None, reasoning_effort: None, seed: None, presence_penalty: None, metadata: None, user: None, dimensions: None }, stream_full: true, use_responses_api: false, .. }, vector_size_dense: 384, embedder_sparse: FastEmbedBuilder { batch_size: Some(256) } } } }" returned 0 fragments in 13.479µs
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] retrieve; queries=[(Online, "http://127.0.0.1:34771/python/asyncio")] query_count=1 project_scope=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] }
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] 🕸️ WebCrawlerRetriever.retrieve() called with 1 queries
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler]   SearXNG client available: true
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler]   Query 1: tier=Online, query=http://127.0.0.1:34771/python/asyncio
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] 🌐 Processing Online tier query: http://127.0.0.1:34771/python/asyncio
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::retriever] Source "QdrantRetriever { client: QdrantClient { url: \"http://localhost:16334\", raw_client: Qdrant Config uri: http://localhost:16334, embedder: EmbeddingClient { embedder_dense: GenericOpenAI { client: Client { http_client: Client { accepts: Accepts { gzip: true, brotli: true, zstd: true, deflate: true }, proxies: [Matcher], referer: true, default_headers: {\"accept\": \"*/*\"} }, config: OllamaConfig { api_base: \"http://localhost:11434/v1\", api_key: SecretBox<str>([REDACTED]) }, backoff: ExponentialBackoff { current_interval: 500ms, initial_interval: 500ms, randomization_factor: 0.5, multiplier: 1.5, max_interval: 60s, start_time: Instant { tv_sec: 148201, tv_nsec: 186502865 }, max_elapsed_time: Some(900s), clock: SystemClock } }, default_options: Options { embed_model: Some(\"all-minilm:l6-v2\"), prompt_model: None, parallel_tool_calls: None, max_completion_tokens: None, temperature: None, reasoning_effort: None, seed: None, presence_penalty: None, metadata: None, user: None, dimensions: None }, stream_full: true, use_responses_api: false, .. }, vector_size_dense: 384, embedder_sparse: FastEmbedBuilder { batch_size: Some(256) } } } }" returned 0 fragments in 26.75µs
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] retrieve; queries=[(Online, "http://127.0.0.1:34771/concepts/error-handling")] query_count=1 project_scope=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] }
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] 🕸️ WebCrawlerRetriever.retrieve() called with 1 queries
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler]   SearXNG client available: true
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler]   Query 1: tier=Online, query=http://127.0.0.1:34771/concepts/error-handling
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] 🌐 Processing Online tier query: http://127.0.0.1:34771/concepts/error-handling
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] check_semantic_cache; query="http://127.0.0.1:44657/rust/async" query_len=33
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] perform_web_search; query="http://127.0.0.1:44657/rust/async" query_len=33
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] Using SearXNG for web search
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::searxng_client] search; query="http://127.0.0.1:44657/rust/async" query_len=33 endpoint=http://localhost:8888
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] check_semantic_cache; query="http://127.0.0.1:38751/rust/async" query_len=33
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] perform_web_search; query="http://127.0.0.1:38751/rust/async" query_len=33
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] Using SearXNG for web search
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::searxng_client] search; query="http://127.0.0.1:38751/rust/async" query_len=33 endpoint=http://localhost:8888
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] check_semantic_cache; query="http://127.0.0.1:34771/concepts/error-handling" query_len=46
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] perform_web_search; query="http://127.0.0.1:34771/concepts/error-handling" query_len=46
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] Using SearXNG for web search
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::searxng_client] search; query="http://127.0.0.1:34771/concepts/error-handling" query_len=46 endpoint=http://localhost:8888
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] check_semantic_cache; query="http://127.0.0.1:34771/python/asyncio" query_len=37
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] perform_web_search; query="http://127.0.0.1:34771/python/asyncio" query_len=37
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::web_crawler] Using SearXNG for web search
+[2025-11-27T00:35:57Z INFO  ai_agent_rag::searxng_client] search; query="http://127.0.0.1:34771/python/asyncio" query_len=37 endpoint=http://localhost:8888
+[2025-11-27T00:35:58Z INFO  ai_agent_rag::web_crawler] check_semantic_cache; query="http://127.0.0.1:34771/rust/async" query_len=33
+[2025-11-27T00:35:58Z INFO  ai_agent_rag::web_crawler] perform_web_search; query="http://127.0.0.1:34771/rust/async" query_len=33
+[2025-11-27T00:35:58Z INFO  ai_agent_rag::web_crawler] Using SearXNG for web search
+[2025-11-27T00:35:58Z INFO  ai_agent_rag::searxng_client] search; query="http://127.0.0.1:34771/rust/async" query_len=33 endpoint=http://localhost:8888
+[2025-11-27T00:35:58Z INFO  ai_agent_rag::retriever] Source "QdrantRetriever { client: QdrantClient { url: \"http://localhost:16334\", raw_client: Qdrant Config uri: http://localhost:16334, embedder: EmbeddingClient { embedder_dense: GenericOpenAI { client: Client { http_client: Client { accepts: Accepts { gzip: true, brotli: true, zstd: true, deflate: true }, proxies: [Matcher], referer: true, default_headers: {\"accept\": \"*/*\"} }, config: OllamaConfig { api_base: \"http://localhost:11434/v1\", api_key: SecretBox<str>([REDACTED]) }, backoff: ExponentialBackoff { current_interval: 500ms, initial_interval: 500ms, randomization_factor: 0.5, multiplier: 1.5, max_interval: 60s, start_time: Instant { tv_sec: 148201, tv_nsec: 186341181 }, max_elapsed_time: Some(900s), clock: SystemClock } }, default_options: Options { embed_model: Some(\"all-minilm:l6-v2\"), prompt_model: None, parallel_tool_calls: None, max_completion_tokens: None, temperature: None, reasoning_effort: None, seed: None, presence_penalty: None, metadata: None, user: None, dimensions: None }, stream_full: true, use_responses_api: false, .. }, vector_size_dense: 384, embedder_sparse: FastEmbedBuilder { batch_size: Some(256) } } } }" returned 3 fragments in 1.468551635s
+[2025-11-27T00:35:59Z INFO  ai_agent_rag] rag_query_enhancement; project_scope=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] } conversation_id=ConversationId("test_conversation")
+[2025-11-27T00:35:59Z INFO  ai_agent_rag::query_enhancer] query_enhancement_full; project_scope=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] } conversation_id=ConversationId("test_conversation") tier=Online
+[2025-11-27T00:35:59Z INFO  ai_agent_rag::retriever] Source "QdrantRetriever { client: QdrantClient { url: \"http://localhost:16334\", raw_client: Qdrant Config uri: http://localhost:16334, embedder: EmbeddingClient { embedder_dense: GenericOpenAI { client: Client { http_client: Client { accepts: Accepts { gzip: true, brotli: true, zstd: true, deflate: true }, proxies: [Matcher], referer: true, default_headers: {\"accept\": \"*/*\"} }, config: OllamaConfig { api_base: \"http://localhost:11434/v1\", api_key: SecretBox<str>([REDACTED]) }, backoff: ExponentialBackoff { current_interval: 500ms, initial_interval: 500ms, randomization_factor: 0.5, multiplier: 1.5, max_interval: 60s, start_time: Instant { tv_sec: 148201, tv_nsec: 188657550 }, max_elapsed_time: Some(900s), clock: SystemClock } }, default_options: Options { embed_model: Some(\"all-minilm:l6-v2\"), prompt_model: None, parallel_tool_calls: None, max_completion_tokens: None, temperature: None, reasoning_effort: None, seed: None, presence_penalty: None, metadata: None, user: None, dimensions: None }, stream_full: true, use_responses_api: false, .. }, vector_size_dense: 384, embedder_sparse: FastEmbedBuilder { batch_size: Some(256) } } } }" returned 0 fragments in 1.269372ms
+[2025-11-27T00:35:59Z INFO  ai_agent_rag::retriever] Retrieved 0 total fragments from sources: {1: 0}
+[2025-11-27T00:35:59Z WARN  ai_agent_rag::retriever] No fragments retrieved from any source
+RAG with disabled web crawler returned 0 fragments
+test test_rag_graceful_degradation ... ok
+[2025-11-27T00:36:01Z INFO  ai_agent_rag] rag_query_enhancement; project_scope=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] } conversation_id=ConversationId("39665f9c-e995-4a66-a769-32dc2a2809de")
+[2025-11-27T00:36:01Z INFO  ai_agent_rag::query_enhancer] query_enhancement_full; project_scope=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] } conversation_id=ConversationId("39665f9c-e995-4a66-a769-32dc2a2809de") tier=Online
+[2025-11-27T00:36:01Z INFO  ai_agent_rag::query_enhancer] query_heuristic_expansion; query="rust async documentation"
+[2025-11-27T00:36:01Z INFO  ai_agent_rag::retriever] Source "QdrantRetriever { client: QdrantClient { url: \"http://localhost:16334\", raw_client: Qdrant Config uri: http://localhost:16334, embedder: EmbeddingClient { embedder_dense: GenericOpenAI { client: Client { http_client: Client { accepts: Accepts { gzip: true, brotli: true, zstd: true, deflate: true }, proxies: [Matcher], referer: true, default_headers: {\"accept\": \"*/*\"} }, config: OllamaConfig { api_base: \"http://localhost:11434/v1\", api_key: SecretBox<str>([REDACTED]) }, backoff: ExponentialBackoff { current_interval: 500ms, initial_interval: 500ms, randomization_factor: 0.5, multiplier: 1.5, max_interval: 60s, start_time: Instant { tv_sec: 148206, tv_nsec: 74124813 }, max_elapsed_time: Some(900s), clock: SystemClock } }, default_options: Options { embed_model: Some(\"all-minilm:l6-v2\"), prompt_model: None, parallel_tool_calls: None, max_completion_tokens: None, temperature: None, reasoning_effort: None, seed: None, presence_penalty: None, metadata: None, user: None, dimensions: None }, stream_full: true, use_responses_api: false, .. }, vector_size_dense: 384, embedder_sparse: FastEmbedBuilder { batch_size: Some(256) } } } }" returned 0 fragments in 108.534µs
+[2025-11-27T00:36:01Z INFO  ai_agent_rag::web_crawler] retrieve; queries=[(Online, "rust async documentation"), (Online, "rust as ##yn ##c documentation"), (Online, "LLM enhanced query for prompt: Generate an enhanced search query optimized for this source:\nOnline\n\nRaw query and heuristic variants:\n[\"rust async documentation\", \"rust as ##yn ##c documentation\"]\n\nProject context:\nProjectScope { root: \"/test/project\", current_file: Some(\"/test/project/src/main.rs\"), language_distribution: [(Rust, 1.0)] }\nConversation ID:\n39665f9c-e995-4a66-a769-32dc2a2809de")] query_count=3 project_scope=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] }
+[2025-11-27T00:36:01Z INFO  ai_agent_rag::web_crawler] 🕸️ WebCrawlerRetriever.retrieve() called with 3 queries
+[2025-11-27T00:36:01Z INFO  ai_agent_rag::web_crawler]   SearXNG client available: true
+[2025-11-27T00:36:01Z INFO  ai_agent_rag::web_crawler]   Query 1: tier=Online, query=rust async documentation
+[2025-11-27T00:36:01Z INFO  ai_agent_rag::web_crawler]   Query 2: tier=Online, query=rust as ##yn ##c documentation
+[2025-11-27T00:36:01Z INFO  ai_agent_rag::web_crawler]   Query 3: tier=Online, query=LLM enhanced query for prompt: Generate an enhance
+[2025-11-27T00:36:01Z INFO  ai_agent_rag::web_crawler] 🌐 Processing Online tier query: rust async documentation
+[2025-11-27T00:36:01Z INFO  ai_agent_rag::web_crawler] check_semantic_cache; query="rust async documentation" query_len=24
+[2025-11-27T00:36:01Z INFO  ai_agent_rag::web_crawler] perform_web_search; query="rust async documentation" query_len=24
+[2025-11-27T00:36:01Z INFO  ai_agent_rag::web_crawler] Using SearXNG for web search
+[2025-11-27T00:36:01Z INFO  ai_agent_rag::searxng_client] search; query="rust async documentation" query_len=24 endpoint=http://localhost:8888
+[2025-11-27T00:36:05Z WARN  ai_agent_rag::retriever] Source "WebCrawlerRetriever { collection_name: \"test_web_content\", query_cache_collection: \"test_web_query_cache\", cache_prefix: \"test_web_content:\", query_cache_prefix: \"test_web_query:\", searxng_enabled: true }" failed: Failed to send request to SearXNG. Continuing with other sources.
+[2025-11-27T00:36:05Z INFO  ai_agent_rag::retriever] Retrieved 0 total fragments from sources: {1: 0, 3: 0}
+[2025-11-27T00:36:05Z WARN  ai_agent_rag::retriever] No fragments retrieved from any source
+RAG pipeline returned 0 fragments, 0 from web
+
+thread 'test_full_rag_pipeline_with_web_content' (4009414) panicked at crates/rag/tests/rag_integration_tests.rs:271:5:
+RAG pipeline should retrieve content
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test test_full_rag_pipeline_with_web_content ... FAILED
+[2025-11-27T00:36:07Z WARN  ai_agent_rag::retriever] Source "WebCrawlerRetriever { collection_name: \"test_web_content\", query_cache_collection: \"test_web_query_cache\", cache_prefix: \"test_web_content:\", query_cache_prefix: \"test_web_query:\", searxng_enabled: true }" failed: Failed to send request to SearXNG. Continuing with other sources.
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::retriever] Retrieved 3 total fragments from sources: {3: 0, 1: 3}
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::retriever] Stream completed successfully
+[2025-11-27T00:36:07Z WARN  ai_agent_rag::retriever] Source "WebCrawlerRetriever { collection_name: \"test_web_content\", query_cache_collection: \"test_web_query_cache\", cache_prefix: \"test_web_content:\", query_cache_prefix: \"test_web_query:\", searxng_enabled: true }" failed: Failed to send request to SearXNG. Continuing with other sources.
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::retriever] Retrieved 0 total fragments from sources: {1: 0, 3: 0}
+[2025-11-27T00:36:07Z WARN  ai_agent_rag::retriever] No fragments retrieved from any source
+Retrieved 3 fragments with priorities: [1, 1, 1]
+Test cleanup disabled - keeping collections for reuse: ["test_web_content", "test_web_query_cache"]
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::retriever] Source "QdrantRetriever { client: QdrantClient { url: \"http://localhost:16334\", raw_client: Qdrant Config uri: http://localhost:16334, embedder: EmbeddingClient { embedder_dense: GenericOpenAI { client: Client { http_client: Client { accepts: Accepts { gzip: true, brotli: true, zstd: true, deflate: true }, proxies: [Matcher], referer: true, default_headers: {\"accept\": \"*/*\"} }, config: OllamaConfig { api_base: \"http://localhost:11434/v1\", api_key: SecretBox<str>([REDACTED]) }, backoff: ExponentialBackoff { current_interval: 500ms, initial_interval: 500ms, randomization_factor: 0.5, multiplier: 1.5, max_interval: 60s, start_time: Instant { tv_sec: 148201, tv_nsec: 187573538 }, max_elapsed_time: Some(900s), clock: SystemClock } }, default_options: Options { embed_model: Some(\"all-minilm:l6-v2\"), prompt_model: None, parallel_tool_calls: None, max_completion_tokens: None, temperature: None, reasoning_effort: None, seed: None, presence_penalty: None, metadata: None, user: None, dimensions: None }, stream_full: true, use_responses_api: false, .. }, vector_size_dense: 384, embedder_sparse: FastEmbedBuilder { batch_size: Some(256) } } } }" returned 0 fragments in 41.556µs
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] retrieve; queries=[(Online, "http://127.0.0.1:38751/rust/async")] query_count=1 project_scope=ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] }
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] 🕸️ WebCrawlerRetriever.retrieve() called with 1 queries
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler]   SearXNG client available: true
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler]   Query 1: tier=Online, query=http://127.0.0.1:38751/rust/async
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] 🌐 Processing Online tier query: http://127.0.0.1:38751/rust/async
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] check_semantic_cache; query="http://127.0.0.1:38751/rust/async" query_len=33
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] perform_web_search; query="http://127.0.0.1:38751/rust/async" query_len=33
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] Using SearXNG for web search
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::searxng_client] search; query="http://127.0.0.1:38751/rust/async" query_len=33 endpoint=http://localhost:8888
+[2025-11-27T00:36:07Z WARN  ai_agent_rag::retriever] Source "WebCrawlerRetriever { collection_name: \"test_web_content\", query_cache_collection: \"test_web_query_cache\", cache_prefix: \"test_web_content:\", query_cache_prefix: \"test_web_query:\", searxng_enabled: true }" failed: Failed to send request to SearXNG. Continuing with other sources.
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::retriever] Retrieved 0 total fragments from sources: {1: 0, 3: 0}
+[2025-11-27T00:36:07Z WARN  ai_agent_rag::retriever] No fragments retrieved from any source
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::searxng_client] SearXNG search completed: query='http://127.0.0.1:34771/rust/async', found 31000000 results
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] SearXNG returned 5 unique URLs
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] Found 5 URLs to crawl for query: http://127.0.0.1:34771/rust/async
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] crawl_urls_parallel; url_count=5
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://en.wikipedia.org/wiki/HTTP
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://en.wikipedia.org/wiki/HTTP"
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://en.wikipedia.org/wiki/HTTP"
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://developer.mozilla.org/en-US/docs/Web/HTTP
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://developer.mozilla.org/en-US/docs/Web/HTTP"
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://developer.mozilla.org/en-US/docs/Web/HTTP"
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://www.britannica.com/technology/HTTP
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://www.britannica.com/technology/HTTP"
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://www.britannica.com/technology/HTTP"
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://en.wikipedia.org/wiki/HTTP
+test test_priority_based_streaming ... ok
+[2025-11-27T00:36:07Z WARN  ai_agent_rag::retriever] Source "WebCrawlerRetriever { collection_name: \"test_web_content\", query_cache_collection: \"test_web_query_cache\", cache_prefix: \"test_web_content:\", query_cache_prefix: \"test_web_query:\", searxng_enabled: true }" failed: Failed to send request to SearXNG. Continuing with other sources.
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::retriever] Retrieved 0 total fragments from sources: {1: 0, 3: 0}
+[2025-11-27T00:36:07Z WARN  ai_agent_rag::retriever] No fragments retrieved from any source
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://developer.mozilla.org/en-US/docs/Web/HTTP
+[2025-11-27T00:36:07Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://www.britannica.com/technology/HTTP
+[2025-11-27T00:36:07Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::searxng_client] SearXNG search completed: query='rust async documentation', found 3900000 results
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] SearXNG returned 5 unique URLs
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] Found 5 URLs to crawl for query: rust async documentation
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] crawl_urls_parallel; url_count=5
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://rust.facepunch.com/
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://rust.facepunch.com/"
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://rust.facepunch.com/"
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://doc.rust-lang.org/book/ch17-00-async-await.html
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://doc.rust-lang.org/book/ch17-00-async-await.html"
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://doc.rust-lang.org/book/ch17-00-async-await.html"
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://rust-lang.org/
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://rust-lang.org/"
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://rust-lang.org/"
+[2025-11-27T00:36:07Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://rust.facepunch.com/
+[2025-11-27T00:36:07Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://doc.rust-lang.org/book/ch17-00-async-await.html
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://developer.mozilla.org/en-US/docs/Web/HTTP
+[2025-11-27T00:36:08Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://rust-lang.org/
+[2025-11-27T00:36:08Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:08Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://developer.mozilla.org/en-US/docs/Web/HTTP
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Successfully crawled 205888 bytes from https://developer.mozilla.org/en-US/docs/Web/HTTP
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] cache_content; url="https://developer.mozilla.org/en-US/docs/Web/HTTP"
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://en.wikipedia.org/wiki/HTTP
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://doc.rust-lang.org/book/ch17-00-async-await.html
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/"
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://rust-lang.org/
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://rust.facepunch.com/
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://rust-lang.org/
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Successfully crawled 18585 bytes from https://rust-lang.org/
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] cache_content; url="https://rust-lang.org/"
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://doc.rust-lang.org/book/ch17-00-async-await.html
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Successfully crawled 21367 bytes from https://doc.rust-lang.org/book/ch17-00-async-await.html
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] cache_content; url="https://doc.rust-lang.org/book/ch17-00-async-await.html"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://rust-lang.github.io/async-book/
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://rust-lang.github.io/async-book/"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://rust-lang.github.io/async-book/"
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://rust.facepunch.com/
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Successfully crawled 31137 bytes from https://rust.facepunch.com/
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] cache_content; url="https://rust.facepunch.com/"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://store.steampowered.com/app/252490/Rust/
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://store.steampowered.com/app/252490/Rust/"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://store.steampowered.com/app/252490/Rust/"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://rust-lang.github.io/async-book/
+[2025-11-27T00:36:08Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://www.britannica.com/technology/HTTP
+[2025-11-27T00:36:08Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://store.steampowered.com/app/252490/Rust/
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://en.wikipedia.org/wiki/HTTP
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Successfully crawled 403540 bytes from https://en.wikipedia.org/wiki/HTTP
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] cache_content; url="https://en.wikipedia.org/wiki/HTTP"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://www.w3schools.com/whatis/whatis_http.asp
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://www.w3schools.com/whatis/whatis_http.asp"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://www.w3schools.com/whatis/whatis_http.asp"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://www.w3schools.com/whatis/whatis_http.asp
+[2025-11-27T00:36:08Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://rust-lang.github.io/async-book/
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://rust-lang.github.io/async-book/
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Successfully crawled 17334 bytes from https://rust-lang.github.io/async-book/
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] cache_content; url="https://rust-lang.github.io/async-book/"
+[2025-11-27T00:36:08Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://www.britannica.com/technology/HTTP
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Successfully crawled 65339 bytes from https://www.britannica.com/technology/HTTP
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] cache_content; url="https://www.britannica.com/technology/HTTP"
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://www.w3schools.com/whatis/whatis_http.asp
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::searxng_client] SearXNG search completed: query='http://127.0.0.1:38751/rust/async', found 31000000 results
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] SearXNG returned 5 unique URLs
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Found 5 URLs to crawl for query: http://127.0.0.1:38751/rust/async
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] crawl_urls_parallel; url_count=5
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://en.wikipedia.org/wiki/HTTP
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://en.wikipedia.org/wiki/HTTP"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://en.wikipedia.org/wiki/HTTP"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://developer.mozilla.org/en-US/docs/Web/HTTP
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://developer.mozilla.org/en-US/docs/Web/HTTP"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://developer.mozilla.org/en-US/docs/Web/HTTP"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://www.britannica.com/technology/HTTP
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://www.britannica.com/technology/HTTP"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://www.britannica.com/technology/HTTP"
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://www.w3schools.com/whatis/whatis_http.asp
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://www.w3schools.com/whatis/whatis_http.asp"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://www.w3schools.com/whatis/whatis_http.asp"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://www.w3schools.com/whatis/whatis_http.asp
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Successfully crawled 368914 bytes from https://www.w3schools.com/whatis/whatis_http.asp
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] cache_content; url="https://www.w3schools.com/whatis/whatis_http.asp"
+[2025-11-27T00:36:08Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://store.steampowered.com/app/252490/Rust/
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Successfully crawled 410326 bytes from https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] cache_content; url="https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/"
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://developer.mozilla.org/en-US/docs/Web/HTTP" title=None
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://en.wikipedia.org/wiki/HTTP" title=None
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://www.britannica.com/technology/HTTP" title=None
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://www.w3schools.com/whatis/whatis_http.asp" title=None
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/" title=None
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] deduplicate_fragments; input_count=39
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] Deduplicated 39 fragments to 39 unique fragments
+[2025-11-27T00:36:08Z INFO  ai_agent_rag::web_crawler] cache_query_results; query="http://127.0.0.1:34771/rust/async" query_len=33 fragments_count=39
+[2025-11-27T00:36:08Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:08Z INFO  spider::utils] fetch https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] Successfully crawled 410326 bytes from https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] cache_content; url="https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/"
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] Cached query results for: http://127.0.0.1:34771/rust/async
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] Web retrieval complete: 39 total fragments
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::retriever] Source "WebCrawlerRetriever { collection_name: \"test_web_content\", query_cache_collection: \"test_web_query_cache\", cache_prefix: \"test_web_content:\", query_cache_prefix: \"test_web_query:\", searxng_enabled: true }" returned 39 fragments in 11.906923303s
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://en.wikipedia.org/wiki/HTTP" title=None
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::retriever] Retrieved 39 total fragments from sources: {1: 0, 3: 39}
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::retriever] Stream completed successfully
+Task 0 completed with 5 fragments
+Task 1 completed with 0 fragments
+Task 2 completed with 0 fragments
+Test cleanup disabled - keeping collections for reuse: ["test_web_content", "test_web_query_cache"]
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://developer.mozilla.org/en-US/docs/Web/HTTP" title=None
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://www.britannica.com/technology/HTTP" title=None
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://www.w3schools.com/whatis/whatis_http.asp" title=None
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://www.cloudflare.com/learning/ddos/glossary/hypertext-transfer-protocol-http/" title=None
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] deduplicate_fragments; input_count=39
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] Deduplicated 39 fragments to 39 unique fragments
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] cache_query_results; query="http://127.0.0.1:38751/rust/async" query_len=33 fragments_count=39
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] Cached query results for: http://127.0.0.1:38751/rust/async
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] Web retrieval complete: 39 total fragments
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::retriever] Source "WebCrawlerRetriever { collection_name: \"test_web_content\", query_cache_collection: \"test_web_query_cache\", cache_prefix: \"test_web_content:\", query_cache_prefix: \"test_web_query:\", searxng_enabled: true }" returned 39 fragments in 1.618766434s
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::retriever] Retrieved 39 total fragments from sources: {1: 0, 3: 39}
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::retriever] Stream completed successfully
+[2025-11-27T00:36:09Z INFO  spider::utils] fetch https://store.steampowered.com/app/252490/Rust/
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] Successfully crawled 253757 bytes from https://store.steampowered.com/app/252490/Rust/
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] cache_content; url="https://store.steampowered.com/app/252490/Rust/"
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://rust-lang.org/" title=None
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://doc.rust-lang.org/book/ch17-00-async-await.html" title=None
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://rust.facepunch.com/" title=None
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://rust-lang.github.io/async-book/" title=None
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://store.steampowered.com/app/252490/Rust/" title=None
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] deduplicate_fragments; input_count=9
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] Deduplicated 9 fragments to 9 unique fragments
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] cache_query_results; query="rust async documentation" query_len=24 fragments_count=9
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] Cached query results for: rust async documentation
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] 🌐 Processing Online tier query: rust as ##yn ##c documentation
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] check_semantic_cache; query="rust as ##yn ##c documentation" query_len=30
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] perform_web_search; query="rust as ##yn ##c documentation" query_len=30
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] Using SearXNG for web search
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::searxng_client] search; query="rust as ##yn ##c documentation" query_len=30 endpoint=http://localhost:8888
+test test_concurrent_web_requests ... ok
+First request: 10.562931884s (0 fragments)
+Second request: 1.90273918s (5 fragments)
+Test cleanup disabled - keeping collections for reuse: ["test_web_content", "test_web_query_cache"]
+test test_cache_performance ... ok
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::searxng_client] SearXNG search completed: query='rust as ##yn ##c documentation', found 3900000 results
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] SearXNG returned 5 unique URLs
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] Found 5 URLs to crawl for query: rust as ##yn ##c documentation
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] crawl_urls_parallel; url_count=5
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://rust.facepunch.com/
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://rust.facepunch.com/"
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://rust.facepunch.com/"
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://nearform.com/digital-community/async-graphql-with-rust-1/
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://nearform.com/digital-community/async-graphql-with-rust-1/"
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://nearform.com/digital-community/async-graphql-with-rust-1/"
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://rust-lang.org/
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://rust-lang.org/"
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://rust-lang.org/"
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://docs.rs/syn
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://docs.rs/syn"
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://docs.rs/syn"
+[2025-11-27T00:36:09Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://nearform.com/digital-community/async-graphql-with-rust-1/
+[2025-11-27T00:36:10Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://store.steampowered.com/app/252490/Rust/
+[2025-11-27T00:36:10Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://store.steampowered.com/app/252490/Rust/"
+[2025-11-27T00:36:10Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://store.steampowered.com/app/252490/Rust/"
+[2025-11-27T00:36:10Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://docs.rs/syn
+[2025-11-27T00:36:10Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:10Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:10Z INFO  spider::utils] fetch https://docs.rs/syn
+[2025-11-27T00:36:10Z INFO  spider::utils] fetch https://docs.rs/syn
+[2025-11-27T00:36:10Z INFO  ai_agent_rag::web_crawler] Successfully crawled 96323 bytes from https://docs.rs/syn
+[2025-11-27T00:36:10Z INFO  ai_agent_rag::web_crawler] cache_content; url="https://docs.rs/syn"
+[2025-11-27T00:36:10Z INFO  spider::utils] fetch https://nearform.com/digital-community/async-graphql-with-rust-1/
+[2025-11-27T00:36:11Z INFO  spider::utils] fetch https://nearform.com/digital-community/async-graphql-with-rust-1/
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] Successfully crawled 165713 bytes from https://nearform.com/digital-community/async-graphql-with-rust-1/
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] cache_content; url="https://nearform.com/digital-community/async-graphql-with-rust-1/"
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://rust.facepunch.com/" title=None
+[2025-11-27T00:36:11Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://rust-lang.org/" title=None
+[2025-11-27T00:36:11Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://store.steampowered.com/app/252490/Rust/" title=None
+[2025-11-27T00:36:11Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://docs.rs/syn" title=None
+[2025-11-27T00:36:11Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] chunk_content; url="https://nearform.com/digital-community/async-graphql-with-rust-1/" title=None
+[2025-11-27T00:36:11Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] deduplicate_fragments; input_count=9
+[2025-11-27T00:36:11Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:11Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:11Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:11Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:11Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:11Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:11Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:11Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:11Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] Deduplicated 9 fragments to 9 unique fragments
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] cache_query_results; query="rust as ##yn ##c documentation" query_len=30 fragments_count=9
+[2025-11-27T00:36:11Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:11Z INFO  tracing::span] compute_content_hash;
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] Cached query results for: rust as ##yn ##c documentation
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] 🌐 Processing Online tier query: LLM enhanced query for prompt: Generate an enhance
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] check_semantic_cache; query="LLM enhanced query for prompt: Generate an enhanced search query optimized for this source:\nOnline\n\nRaw query and heuristic variants:\n[\"rust async documentation\", \"rust as ##yn ##c documentation\"]\n\nProject context:\nProjectScope { root: \"/test/project\", current_file: Some(\"/test/project/src/main.rs\"), language_distribution: [(Rust, 1.0)] }\nConversation ID:\n39665f9c-e995-4a66-a769-32dc2a2809de" query_len=394
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] perform_web_search; query="LLM enhanced query for prompt: Generate an enhanced search query optimized for this source:\nOnline\n\nRaw query and heuristic variants:\n[\"rust async documentation\", \"rust as ##yn ##c documentation\"]\n\nProject context:\nProjectScope { root: \"/test/project\", current_file: Some(\"/test/project/src/main.rs\"), language_distribution: [(Rust, 1.0)] }\nConversation ID:\n39665f9c-e995-4a66-a769-32dc2a2809de" query_len=394
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] Using SearXNG for web search
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::searxng_client] search; query="LLM enhanced query for prompt: Generate an enhanced search query optimized for this source:\nOnline\n\nRaw query and heuristic variants:\n[\"rust async documentation\", \"rust as ##yn ##c documentation\"]\n\nProject context:\nProjectScope { root: \"/test/project\", current_file: Some(\"/test/project/src/main.rs\"), language_distribution: [(Rust, 1.0)] }\nConversation ID:\n39665f9c-e995-4a66-a769-32dc2a2809de" query_len=394 endpoint=http://localhost:8888
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::searxng_client] SearXNG search completed: query='LLM enhanced query for prompt: Generate an enhanced search query optimized for this source:
+    Online
+    
+    Raw query and heuristic variants:
+    ["rust async documentation", "rust as ##yn ##c documentation"]
+    
+    Project context:
+    ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] }
+    Conversation ID:
+    39665f9c-e995-4a66-a769-32dc2a2809de', found 1210000 results
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] SearXNG returned 5 unique URLs
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] Found 5 URLs to crawl for query: LLM enhanced query for prompt: Generate an enhanced search query optimized for this source:
+    Online
+    
+    Raw query and heuristic variants:
+    ["rust async documentation", "rust as ##yn ##c documentation"]
+    
+    Project context:
+    ProjectScope { root: "/test/project", current_file: Some("/test/project/src/main.rs"), language_distribution: [(Rust, 1.0)] }
+    Conversation ID:
+    39665f9c-e995-4a66-a769-32dc2a2809de
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] crawl_urls_parallel; url_count=5
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://en.m.wikipedia.org/wiki/Large_language_model
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://en.m.wikipedia.org/wiki/Large_language_model"
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://en.m.wikipedia.org/wiki/Large_language_model"
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://www.dnb.com/en-us/resources/ai/what-are-large-language-models-or-llms.html
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://www.dnb.com/en-us/resources/ai/what-are-large-language-models-or-llms.html"
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://www.dnb.com/en-us/resources/ai/what-are-large-language-models-or-llms.html"
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://www.geeksforgeeks.org/artificial-intelligence/large-language-model-llm/
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://www.geeksforgeeks.org/artificial-intelligence/large-language-model-llm/"
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://www.geeksforgeeks.org/artificial-intelligence/large-language-model-llm/"
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://en.m.wikipedia.org/wiki/Large_language_model
+[2025-11-27T00:36:11Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://www.dnb.com/en-us/resources/ai/what-are-large-language-models-or-llms.html
+[2025-11-27T00:36:12Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:12Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://www.geeksforgeeks.org/artificial-intelligence/large-language-model-llm/
+[2025-11-27T00:36:12Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:12Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:12Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:12Z INFO  spider::utils] fetch https://www.geeksforgeeks.org/artificial-intelligence/large-language-model-llm/
+[2025-11-27T00:36:12Z INFO  spider::utils] fetch https://www.geeksforgeeks.org/artificial-intelligence/large-language-model-llm/
+[2025-11-27T00:36:12Z INFO  ai_agent_rag::web_crawler] Successfully crawled 202215 bytes from https://www.geeksforgeeks.org/artificial-intelligence/large-language-model-llm/
+[2025-11-27T00:36:12Z INFO  ai_agent_rag::web_crawler] cache_content; url="https://www.geeksforgeeks.org/artificial-intelligence/large-language-model-llm/"
+[2025-11-27T00:36:12Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://aws.amazon.com/what-is/large-language-model/
+[2025-11-27T00:36:12Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://aws.amazon.com/what-is/large-language-model/"
+[2025-11-27T00:36:12Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://aws.amazon.com/what-is/large-language-model/"
+[2025-11-27T00:36:12Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://aws.amazon.com/what-is/large-language-model/
+[2025-11-27T00:36:12Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:12Z INFO  spider::utils] fetch https://en.m.wikipedia.org/wiki/Large_language_model
+[2025-11-27T00:36:12Z INFO  spider::utils] fetch https://en.m.wikipedia.org/wiki/Large_language_model
+[2025-11-27T00:36:12Z INFO  ai_agent_rag::web_crawler] Successfully crawled 769120 bytes from https://en.m.wikipedia.org/wiki/Large_language_model
+[2025-11-27T00:36:12Z INFO  ai_agent_rag::web_crawler] cache_content; url="https://en.m.wikipedia.org/wiki/Large_language_model"
+[2025-11-27T00:36:12Z INFO  ai_agent_rag::web_crawler] crawl_url; url=https://www.akamai.com/glossary/what-are-llms
+[2025-11-27T00:36:12Z INFO  ai_agent_rag::web_crawler] normalize_url; url="https://www.akamai.com/glossary/what-are-llms"
+[2025-11-27T00:36:12Z INFO  ai_agent_rag::web_crawler] get_cached_content; url="https://www.akamai.com/glossary/what-are-llms"
+[2025-11-27T00:36:12Z INFO  ai_agent_rag::web_crawler] Crawling URL: https://www.akamai.com/glossary/what-are-llms
+[2025-11-27T00:36:12Z INFO  spider::utils] fetch https://aws.amazon.com/what-is/large-language-model/
+[2025-11-27T00:36:12Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:12Z INFO  spider::utils] fetch https://aws.amazon.com/what-is/large-language-model/
+[2025-11-27T00:36:12Z INFO  ai_agent_rag::web_crawler] Successfully crawled 225503 bytes from https://aws.amazon.com/what-is/large-language-model/
+[2025-11-27T00:36:12Z INFO  ai_agent_rag::web_crawler] cache_content; url="https://aws.amazon.com/what-is/large-language-model/"
+[2025-11-27T00:36:22Z INFO  spider::page] error fetching https://www.dnb.com/en-us/resources/ai/what-are-large-language-models-or-llms.html
+[2025-11-27T00:36:22Z INFO  spider::utils] fetch https://www.dnb.com/en-us/resources/ai/what-are-large-language-models-or-llms.html
+[2025-11-27T00:36:22Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:22Z INFO  spider::page] error fetching https://www.akamai.com/glossary/what-are-llms
+[2025-11-27T00:36:22Z INFO  spider::utils] fetch https://www.akamai.com/glossary/what-are-llms
+[2025-11-27T00:36:22Z WARN  hyper_util::client::legacy::connect::http] tcp set_keepalive error: Invalid argument (os error 22)
+[2025-11-27T00:36:31Z WARN  ai_agent_rag::retriever] Timeout waiting for sources after 30s. Using partial results.
+[2025-11-27T00:36:31Z INFO  ai_agent_rag::retriever] Retrieved 0 total fragments from sources: {}
+[2025-11-27T00:36:31Z WARN  ai_agent_rag::retriever] No fragments retrieved from any source
+
+thread 'test_multi_source_retriever_with_web_crawler' (4009415) panicked at crates/rag/tests/rag_integration_tests.rs:58:5:
+Should retrieve fragments from web source
+test test_multi_source_retriever_with_web_crawler ... FAILED
+
+failures:
+
+failures:
+    test_full_rag_pipeline_with_web_content
+    test_multi_source_retriever_with_web_crawler
+
+test result: FAILED. 4 passed; 2 failed; 0 ignored; 0 measured; 2 filtered out; finished in 46.16s
+
+error: test failed, to rerun pass `-p ai-agent-rag --test rag_integration_tests`

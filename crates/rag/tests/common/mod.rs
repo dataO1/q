@@ -4,6 +4,7 @@ pub mod mock_web_server;
 
 use ai_agent_common::{SystemConfig, llm::EmbeddingClient, ProjectScope, Language};
 use ai_agent_storage::{QdrantClient, RedisCache};
+use ai_agent_indexing::IndexingPipeline;
 use anyhow::Result;
 use std::sync::Arc;
 use std::sync::Once;
@@ -19,32 +20,24 @@ pub fn init_test_logging() {
     });
 }
 
-/// Create a test system config with web crawler enabled
+/// Create a test system config by loading from config.dev.toml
 pub fn create_test_config() -> SystemConfig {
-    let mut config = SystemConfig::default();
+    // Try to find the config file relative to the project root
+    let config_paths = [
+        "config.dev.toml",                    // If running from project root
+        "../../../config.dev.toml",          // If running from crates/rag/tests
+        "../../config.dev.toml",             // If running from different context
+        "../config.dev.toml",                // Alternative relative path
+    ];
     
-    // Set test-friendly values
-    config.storage.qdrant_url = "http://localhost:16334".to_string();
-    config.storage.redis_url = Some("redis://localhost:16379".to_string());
-    config.embedding.vector_size = 384;
-    config.embedding.dense_model = "all-minilm:l6-v2".to_string();
+    for path in &config_paths {
+        if std::path::Path::new(path).exists() {
+            return SystemConfig::from_file(path)
+                .unwrap_or_else(|e| panic!("Failed to load config from {}: {}", path, e));
+        }
+    }
     
-    // Enable web crawler with test settings
-    config.rag.web_crawler.enabled = true;
-    config.rag.web_crawler.max_urls_per_query = 3;
-    config.rag.web_crawler.request_timeout_secs = 10;
-    config.rag.web_crawler.content_cache_ttl_secs = 300;
-    config.rag.web_crawler.query_cache_ttl_secs = 60;
-    config.rag.web_crawler.chunk_size = 512;
-    config.rag.web_crawler.chunk_overlap = 50;
-    config.rag.web_crawler.user_agent = "RAGTestAgent/1.0".to_string();
-    config.rag.web_crawler.respect_robots_txt = false;
-    config.rag.web_crawler.web_content_collection = "test_web_content".to_string();
-    config.rag.web_crawler.web_query_cache_collection = "test_web_query_cache".to_string();
-    config.rag.web_crawler.content_cache_prefix = "test_web_content:".to_string();
-    config.rag.web_crawler.query_cache_prefix = "test_web_query:".to_string();
-    
-    config
+    panic!("Could not find config.dev.toml in any of the expected locations: {:?}", config_paths);
 }
 
 /// Create test embedding client
@@ -85,9 +78,76 @@ pub fn create_test_embedding() -> Vec<f32> {
     (0..384).map(|i| (i as f32) / 384.0).collect()
 }
 
-/// Cleanup test collections in Qdrant
-pub async fn cleanup_test_collections(qdrant: &QdrantClient, collections: &[String]) {
-    for collection in collections {
-        let _ = qdrant.delete_collection(collection).await;
+/// Setup test collections by checking if they exist and creating test data if needed
+pub async fn setup_test_collections() -> Result<()> {
+    let config = create_test_config();
+    let qdrant = create_test_qdrant_client()?;
+    
+    // Check if workspace collection exists
+    let workspace_exists = check_collection_exists(&qdrant, "workspace").await;
+    let personal_exists = check_collection_exists(&qdrant, "personal").await;
+    
+    if !workspace_exists || !personal_exists {
+        println!("Creating test collections and indexing test data...");
+        
+        // Create indexing pipeline
+        let embedder = create_test_embedding_client()?;
+        let indexing_pipeline = IndexingPipeline::new(&config, embedder.clone())?;
+        
+        // Index test workspace data
+        if !workspace_exists && !config.indexing.workspace_paths.is_empty() {
+            use ai_agent_common::CollectionTier;
+            for workspace_path in &config.indexing.workspace_paths {
+                println!("Indexing workspace directory: {}", workspace_path.display());
+                indexing_pipeline.index_directory(workspace_path, CollectionTier::Workspace, None).await
+                    .unwrap_or_else(|e| println!("Warning: Failed to index {}: {}", workspace_path.display(), e));
+            }
+        }
+        
+        // Index test personal data  
+        if !personal_exists && !config.indexing.personal_paths.is_empty() {
+            use ai_agent_common::CollectionTier;
+            for personal_path in &config.indexing.personal_paths {
+                println!("Indexing personal directory: {}", personal_path.display());
+                indexing_pipeline.index_directory(personal_path, CollectionTier::Personal, None).await
+                    .unwrap_or_else(|e| println!("Warning: Failed to index {}: {}", personal_path.display(), e));
+            }
+        }
+        
+        println!("Test data indexing completed");
+    } else {
+        println!("Test collections already exist, skipping indexing");
     }
+    
+    Ok(())
+}
+
+/// Check if a collection exists in Qdrant by trying to query it
+async fn check_collection_exists(qdrant: &QdrantClient, collection_name: &str) -> bool {
+    use ai_agent_common::CollectionTier;
+    
+    // Try to query the collection - if it fails, collection doesn't exist
+    let tier = match collection_name {
+        "workspace" => CollectionTier::Workspace,
+        "personal" => CollectionTier::Personal,
+        _ => return false,
+    };
+    
+    let test_project_scope = create_test_project_scope();
+    
+    match qdrant.query_collections(
+        vec![(tier, "test query".to_string())],
+        &test_project_scope,
+        Some(1),
+    ).await {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
+
+/// Cleanup test collections in Qdrant (for future use)
+/// Note: Currently disabled as per requirements - leaving test data for reuse
+pub async fn cleanup_test_collections(_qdrant: &QdrantClient, collections: &[String]) {
+    // Intentionally disabled - keeping test data for reuse as requested
+    println!("Test cleanup disabled - keeping collections for reuse: {:?}", collections);
 }

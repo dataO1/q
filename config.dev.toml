@@ -32,6 +32,7 @@ redis_url = "redis://localhost:16379"       # Test Redis
 max_results = 5
 query_enhancement_model = "qwen2.5:3b"
 classification_model = "phi3:mini"
+query_enhancer_vocab_path = "../../vocab.txt"
 
 [rag.reranking_weights]
 conversation_boost = 1.2

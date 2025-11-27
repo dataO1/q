@@ -127,6 +127,9 @@ pub struct RagConfig {
     pub classification_model: String,
     pub max_results: usize,
     pub web_crawler: WebCrawlerConfig,
+    /// Path to tokenizer vocabulary file for query enhancement
+    #[serde(default = "default_query_enhancer_vocab_path")]
+    pub query_enhancer_vocab_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -760,6 +763,7 @@ impl Default for SystemConfig {
                 classification_model: "phi3:mini".to_string(),
                 max_results: 5,
                 web_crawler: WebCrawlerConfig::default(),
+                query_enhancer_vocab_path: default_query_enhancer_vocab_path(),
             },
             agent_network: AgentNetworkConfig::default() ,
             storage: StorageConfig {
@@ -902,4 +906,8 @@ fn default_searxng_timeout() -> u64 {
 
 fn default_searxng_max_results() -> usize {
     5
+}
+
+fn default_query_enhancer_vocab_path() -> PathBuf {
+    PathBuf::from("vocab.txt")
 }

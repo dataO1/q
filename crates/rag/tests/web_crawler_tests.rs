@@ -5,6 +5,7 @@ mod common;
 use anyhow::Result;
 use ai_agent_common::CollectionTier;
 use ai_agent_rag::web_crawler::WebCrawlerRetriever;
+use ai_agent_rag::retriever::RetrieverSource;
 use common::{
     mock_web_server::create_test_server,
     init_test_logging, create_test_config, create_test_embedding_client,

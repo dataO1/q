@@ -82,6 +82,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use lsh_rs::{LshMem, SignRandomProjections};
 use sha2::{Digest, Sha256};
+use spider::compact_str;
 use spider::website::Website;
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -369,37 +370,62 @@ impl WebCrawlerRetriever {
     async fn crawl_url(&self, url: &str) -> Result<String> {
         let normalized_url = self.normalize_url(url).await?;
 
+        // Check cache first
         if let Some(cached_content) = self.get_cached_content(&normalized_url).await? {
             debug!("Found cached content for URL: {}", normalized_url);
             return Ok(cached_content);
         }
 
         info!("Crawling URL: {}", normalized_url);
-
         let web_config = &self.system_config.rag.web_crawler;
+
         let mut website = Website::new(&normalized_url);
-        website
-            .with_user_agent(Some(&web_config.user_agent))
-            .with_respect_robots_txt(web_config.respect_robots_txt)
-            .with_request_timeout(Some(std::time::Duration::from_secs(web_config.request_timeout_secs)))
-            .with_limit(1);
 
+        // Configure the website BEFORE crawling
+        website.configuration.user_agent = Some(
+                Box::new(compact_str::CompactString::new(&web_config.user_agent)
+        ));
+        website.configuration.respect_robots_txt = web_config.respect_robots_txt;
+        website.configuration.request_timeout = Some(Box::new(std::time::Duration::from_secs(
+            web_config.request_timeout_secs
+        )));
+        website.configuration.subdomains = false;  // Don't crawl subdomains
+        website.configuration.tld = false;  // Don't crawl other TLDs
+        website.configuration.delay = 0;  // No delay for single page
+        website.configuration = Box::new(website.configuration.with_limit(1).clone());  // Only fetch 1 page
+
+        // Now crawl with the configured website
         website.crawl().await;
+        website.scrape().await;
 
+        // Get the pages
         let pages = website.get_pages();
+
         let content = if let Some(pages_vec) = pages {
-            if let Some(page) = pages_vec.first() {
-                page.get_html()
-            } else {
-                warn!("No content found for URL: {}", normalized_url);
-                return Err(anyhow::anyhow!("No content found for URL"));
+            if pages_vec.is_empty() {
+                warn!("No pages found for URL: {}", normalized_url);
+                return Err(anyhow::anyhow!("No pages found for URL"));
             }
+
+            // Get the first (and only) page
+            let page = &pages_vec[0];
+            let html = page.get_html();
+
+            if html.is_empty() {
+                warn!("Empty content for URL: {}", normalized_url);
+                return Err(anyhow::anyhow!("Empty content for URL"));
+            }
+
+            info!("Successfully crawled {} bytes from {}", html.len(), normalized_url);
+            html
         } else {
-            warn!("No pages found for URL: {}", normalized_url);
+            warn!("No pages collection for URL: {}", normalized_url);
             return Err(anyhow::anyhow!("No pages found for URL"));
         };
 
+        // Cache the content
         self.cache_content(&normalized_url, &content).await?;
+
         Ok(content)
     }
 
@@ -423,7 +449,7 @@ impl WebCrawlerRetriever {
     /// Crawl multiple URLs in parallel with concurrency control
     #[instrument(skip(self, urls), fields(url_count = urls.len()))]
     async fn crawl_urls_parallel(&self, urls: Vec<String>) -> Vec<(String, Result<String>)> {
-        let max_concurrent = 3; // Limit concurrent crawls to avoid overwhelming targets
+        let max_concurrent = 10; // Limit concurrent crawls to avoid overwhelming targets
         let semaphore = Arc::new(tokio::sync::Semaphore::new(max_concurrent));
 
         let futures: FuturesUnordered<_> = urls
@@ -491,15 +517,24 @@ impl RetrieverSource for WebCrawlerRetriever {
         queries: Vec<(CollectionTier, String)>,
         project_scope: ProjectScope,
     ) -> Result<Vec<ContextFragment>> {
+        info!("🕸️ WebCrawlerRetriever.retrieve() called with {} queries", queries.len());
+        info!("  SearXNG client available: {}", self.searxng_client.is_some());
+        for (idx, (tier, query)) in queries.iter().enumerate() {
+            info!("  Query {}: tier={:?}, query={}", idx + 1, tier,
+                  query.chars().take(50).collect::<String>());
+        }
         let mut all_fragments = Vec::new();
 
         for (tier, query) in queries {
             if tier != CollectionTier::Online {
-                debug!("Skipping non-online tier: {:?}", tier);
+                warn!("⏭️ Skipping non-online tier: {:?} for query: {}",
+                      tier, query.chars().take(30).collect::<String>());
                 continue;
             }
 
-            debug!("Processing web query: {}", query);
+            info!("🌐 Processing Online tier query: {}",
+              query.chars().take(50).collect::<String>());
+
 
             // Generate embedding for semantic caching
             let query_embeddings = self.embedder.embedder_dense.embed(vec![query.to_string()]).await?;

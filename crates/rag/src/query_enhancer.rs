@@ -1,4 +1,5 @@
 use ai_agent_storage::RedisCache;
+use ai_agent_common::SystemConfig;
 use anyhow::{Context, Result};
 use ai_agent_common::{CollectionTier, ConversationId, ProjectScope};
 use moka::future::Cache;
@@ -46,13 +47,16 @@ fn create_bert_tokenizer(vocab_path: &str) -> tokenizers::Result<Tokenizer> {
 
 impl QueryEnhancer {
 
-    pub async fn new(redis_url: &str) -> anyhow::Result<Self> {
+    pub async fn new(config: &SystemConfig) -> anyhow::Result<Self> {
+        let redis_url = config.storage.redis_url.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Redis URL not configured"))?;
+
         Ok(Self {
             ollama_client: OllamaClient::new(),
             mem_cache: Cache::new(10000),
             redis_client: RedisCache::new(redis_url).await?,
             redis_cache_prefix: "query_enhancer_cache:".to_string(),
-            tokenizer: create_bert_tokenizer(&"vocab.txt") // adjust vocab path
+            tokenizer: create_bert_tokenizer(&config.rag.query_enhancer_vocab_path.to_str().unwrap())
                 .map_err(|e| anyhow::Error::msg(format!("{}", e))).context("Failed to read tokenizers config file")?,
         })
     }

@@ -37,7 +37,7 @@ impl SmartMultiSourceRag {
         let qdrant_client = Arc::new(QdrantClient::new(&config.storage.qdrant_url,embedder.clone())?);
         let redis_client = Arc::new(RedisCache::new(&config.storage.redis_url.as_ref().unwrap()).await?);
         Ok(Arc::new(Self {
-            query_enhancer: QueryEnhancer::new(&config.storage.redis_url.as_ref().unwrap()).await?,
+            query_enhancer: QueryEnhancer::new(config).await?,
             source_router: source_router::SourceRouter::new(&config)?,
             retriever: Arc::new(MultiSourceRetriever::new(qdrant_client, embedder, redis_client, config.clone()).await?),
         }))
