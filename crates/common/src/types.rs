@@ -63,7 +63,6 @@ pub enum CollectionTier {
     System,        // System files (/etc, man pages)
     Personal,      // Personal documents
     Workspace,     // Active projects
-    Dependencies,  // External libraries
     Online,        // Web docs
 }
 

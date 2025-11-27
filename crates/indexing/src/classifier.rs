@@ -100,7 +100,6 @@ impl PathClassifier {
         let mut classifiers: Vec<Box<dyn PathClassifierTrait>> = vec![
             Box::new(SystemPathClassifier::new(&config.system_paths)),       // 100
             Box::new(PersonalPathClassifier::new(&config.personal_paths)),   // 80
-            Box::new(DependenciesClassifier::new()),                         // 70
             Box::new(WorkspacePathClassifier::new(&config.workspace_paths)), // 60
         ];
 
@@ -293,56 +292,6 @@ impl PathClassifierTrait for WorkspacePathClassifier {
     }
 }
 
-/// Classifies dependency/vendor code
-pub struct DependenciesClassifier;
-
-impl DependenciesClassifier {
-    pub fn new() -> Self {
-        Self
-    }
-
-    fn is_dependency_path(&self, path: &Path) -> bool {
-        let dependency_indicators = [
-            "node_modules",
-            "vendor",
-            ".cargo/registry",
-            ".cargo/git",
-            "site-packages",
-            "venv",
-            ".venv",
-            "env",
-            "target/debug/deps",
-            "target/release/deps",
-            ".m2/repository",
-            "go/pkg",
-        ];
-
-        for component in path.components() {
-            if let Some(name) = component.as_os_str().to_str() {
-                for indicator in &dependency_indicators {
-                    if name.contains(indicator) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        false
-    }
-}
-
-#[async_trait]
-impl PathClassifierTrait for DependenciesClassifier {
-    fn priority(&self) -> u8 { 70 }
-
-    async fn classify(&self, path: &Path) -> Option<CollectionTier> {
-        if self.is_dependency_path(path) {
-            Some(CollectionTier::Dependencies)
-        } else {
-            None
-        }
-    }
-}
 
 // ============================================================================
 // Helper Functions
@@ -446,14 +395,6 @@ mod tests {
         assert_eq!(result.tier, CollectionTier::Workspace);
     }
 
-    #[tokio::test]
-    async fn test_classify_dependencies() {
-        let classifier = PathClassifier::new(&test_config());
-        let path = PathBuf::from("/home/user/projects/myapp/node_modules/react/index.js");
-
-        let result = classifier.classify(&path).await.unwrap();
-        assert_eq!(result.tier, CollectionTier::Dependencies);
-    }
 
     #[tokio::test]
     async fn test_detect_language() {

@@ -14,6 +14,7 @@ use common::{
     cleanup_test_collections, create_test_project_scope
 };
 use futures::StreamExt;
+use serial_test::serial;
 use std::collections::HashMap;
 
 // ============================================================================
@@ -21,6 +22,7 @@ use std::collections::HashMap;
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 #[ignore] // Requires test infrastructure
 async fn test_multi_source_retriever_with_web_crawler() -> Result<()> {
     init_test_logging();
@@ -74,6 +76,7 @@ async fn test_multi_source_retriever_with_web_crawler() -> Result<()> {
 }
 
 #[tokio::test]
+#[serial]
 #[ignore] // Requires test infrastructure
 async fn test_priority_based_streaming() -> Result<()> {
     init_test_logging();
@@ -155,6 +158,7 @@ async fn test_priority_based_streaming() -> Result<()> {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 async fn test_source_router_web_intent_detection() -> Result<()> {
     init_test_logging();
 
@@ -184,6 +188,7 @@ async fn test_source_router_web_intent_detection() -> Result<()> {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_source_router_mixed_intent() -> Result<()> {
     init_test_logging();
 
@@ -216,6 +221,7 @@ async fn test_source_router_mixed_intent() -> Result<()> {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 #[ignore] // Requires test infrastructure
 async fn test_full_rag_pipeline_with_web_content() -> Result<()> {
     init_test_logging();
@@ -287,6 +293,7 @@ async fn test_full_rag_pipeline_with_web_content() -> Result<()> {
 }
 
 #[tokio::test]
+#[serial]
 #[ignore] // Requires test infrastructure
 async fn test_rag_graceful_degradation() -> Result<()> {
     init_test_logging();
@@ -341,6 +348,7 @@ async fn test_rag_graceful_degradation() -> Result<()> {
 // ============================================================================
 
 #[tokio::test]
+#[serial]
 #[ignore] // Requires test infrastructure
 async fn test_concurrent_web_requests() -> Result<()> {
     init_test_logging();
@@ -422,6 +430,7 @@ async fn test_concurrent_web_requests() -> Result<()> {
 }
 
 #[tokio::test]
+#[serial]
 #[ignore] // Long-running test, only run explicitly
 async fn test_cache_performance() -> Result<()> {
     init_test_logging();

@@ -3,19 +3,22 @@ use ai_agent_common::SystemConfig;
 use anyhow::{Context, Result};
 use ai_agent_common::{CollectionTier, ConversationId, ProjectScope};
 use moka::future::Cache;
+use ollama_rs::generation::completion::request::GenerationRequest;
+use ollama_rs::Ollama;
 use tokenizers::pre_tokenizers::whitespace::Whitespace;
 use tokenizers::processors::template::TemplateProcessing;
 use tokenizers::{Tokenizer, models::wordpiece::WordPiece, normalizers::BertNormalizer};
 use sha2::{Digest, Sha256};
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
 #[derive(Debug)]
 pub struct QueryEnhancer {
-    ollama_client: OllamaClient,
+    ollama_client: Ollama,
     mem_cache: Cache<String, Vec<String>>,
     redis_client: RedisCache,
     redis_cache_prefix: String,
     tokenizer: Tokenizer,
+    model: String,
 }
 
 fn create_bert_tokenizer(vocab_path: &str) -> tokenizers::Result<Tokenizer> {
@@ -52,12 +55,13 @@ impl QueryEnhancer {
             .ok_or_else(|| anyhow::anyhow!("Redis URL not configured"))?;
 
         Ok(Self {
-            ollama_client: OllamaClient::new(),
+            ollama_client: Ollama::new(&config.embedding.ollama_host, config.embedding.ollama_port),
             mem_cache: Cache::new(10000),
             redis_client: RedisCache::new(redis_url).await?,
             redis_cache_prefix: "query_enhancer_cache:".to_string(),
             tokenizer: create_bert_tokenizer(&config.rag.query_enhancer_vocab_path.to_str().unwrap())
                 .map_err(|e| anyhow::Error::msg(format!("{}", e))).context("Failed to read tokenizers config file")?,
+            model: config.rag.query_enhancement_model.to_string(),
         })
     }
 
@@ -133,59 +137,93 @@ impl QueryEnhancer {
         tier: CollectionTier,
     ) -> Result<Vec<String>> {
         let mut results = Vec::<String>::new();
+        const HEURISTIC_VERSION: u8 = 1;
+        let cache_key = self.compute_cache_key(raw_query, conversation_id, tier, project_scope, HEURISTIC_VERSION);
 
-        const HEURISTIC_VERSION: u8 = 1; // increment on heuristic changes
-
-        let cache_key = self.compute_cache_key(raw_query, conversation_id,tier, project_scope, HEURISTIC_VERSION);
-        debug!("Computed cache key: {}", cache_key);
-
-        // Check in-memory cache first
+        // Check caches...
         if let Some(cached) = self.mem_cache.get(&cache_key).await {
-            debug!("Found in-memory cached result: {:?}", &cached);
+            debug!("Found in-memory cached result");
             return Ok(cached);
         }
 
-        // Check Redis cache
         if let Ok(Some(redis_cached)) = self.redis_get(&cache_key).await {
-            debug!("Found redis cached result: {:?}", &redis_cached);
+            debug!("Found redis cached result");
             self.mem_cache.insert(cache_key.clone(), redis_cached.clone()).await;
             return Ok(redis_cached);
         }
 
-        // Apply heuristics to produce query variants
-        let mut heuristic_variants = self.heuristic_expand(raw_query)?;
+        // Apply heuristics first
+        let heuristic_variants = self.heuristic_expand(raw_query)?;
+        results.extend(heuristic_variants.iter().cloned());
 
-        // TODO: generate structured data and multiple queries here
-        // Compose LLM prompt with heuristic variants + source description + context
-        let prompt = format!(
-            "Generate an enhanced search query optimized for this source:\n{:?}\n\nRaw query and heuristic variants:\n{:?}\n\nProject context:\n{:?}\nConversation ID:\n{}",
-            tier, heuristic_variants, project_scope, conversation_id
-        );
-// Query Ollama LLM for final enhanced query
-        let enhanced = self.ollama_client.query(&prompt).await?;
-        debug!("LLM enhanced query: {}", &enhanced);
+        // ✅ IMPROVED: Concise, focused prompt
+        let prompt = match tier {
+            CollectionTier::Online => {
+                format!(
+                    "Rewrite this search query for better web search results. \
+                    Return ONLY the improved query, no explanation.\n\n\
+                    Original: \"{}\"\n\
+                    Context: {} project{}\n\n\
+                    Improved query:",
+                    raw_query,
+                    project_scope.language_distribution.iter()
+                        .map(|(lang, _weight)| format!("{:?}", lang))  // ✅ Fixed: iter() instead of keys()
+                        .collect::<Vec<_>>()
+                        .join("/"),
+                    project_scope.current_file
+                        .as_ref()
+                        .map(|f| format!(" ({})", f.display()))
+                        .unwrap_or_default()
+                )
+            }
+            CollectionTier::Workspace => {
+                format!(
+                    "Rewrite this code search query for better results in a {} codebase. \
+                    Return ONLY the improved query.\n\n\
+                    Original: \"{}\"\n\n\
+                    Improved query:",
+                    project_scope.language_distribution.first()  // ✅ Fixed: first() instead of keys().next()
+                        .map(|(lang, _weight)| format!("{:?}", lang))
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    raw_query
+                )
+            }
+            CollectionTier::System | CollectionTier::Personal => {
+                format!(
+                    "Improve this search query for technical documentation. \
+                    Return ONLY the query.\n\n\
+                    Original: \"{}\"\n\n\
+                    Improved:",
+                    raw_query
+                )
+            }
+        };
 
-        results.append(&mut heuristic_variants);
-        results.push(enhanced.clone());
-        // Cache enhanced query
-        self.mem_cache.insert(cache_key.clone(),results.clone()).await;
-        let _ = self.redis_set(&cache_key, &enhanced, 86400).await;
+        // Query LLM with timeout protection
+        let request = GenerationRequest::new(self.model.clone(),&prompt);
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.ollama_client.generate(request)
+        ).await {
+            Ok(Ok(enhanced)) => {
+                let response = enhanced.response;
+                debug!("LLM enhanced query: {}",response);
+                results.push(response.clone());
 
+                // Cache the full result set
+                self.mem_cache.insert(cache_key.clone(), results.clone()).await;
+                let _ = self.redis_set(&cache_key,&response, 86400).await;
+            }
+            Ok(Err(e)) => {
+                warn!("LLM enhancement failed: {}. Using heuristics only.", e);
+                // Continue with heuristics only
+            }
+            Err(_) => {
+                warn!("LLM enhancement timed out. Using heuristics only.");
+                // Continue with heuristics only
+            }
+        }
 
         Ok(results)
-    }
-}
-
-#[derive(Debug)]
-pub struct OllamaClient {}
-
-impl OllamaClient {
-    pub fn new() -> Self {
-        Self {}
-    }
-
-    pub async fn query(&self, prompt: &str) -> Result<String> {
-        // Implement actual HTTP or SDK call to Ollama API here.
-        Ok(format!("LLM enhanced query for prompt: {}", prompt))
     }
 }

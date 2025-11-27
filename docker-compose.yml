@@ -59,39 +59,38 @@ services:
       timeout: 3s
       retries: 5
 
-  # SearXNG - Privacy-respecting metasearch engine for web retrieval
   searxng-test:
     image: searxng/searxng:latest
     container_name: searxng-test
     ports:
-      - "8888:8080"  # Map container's 8080 to host's 8888
+      - "8888:8080"
     volumes:
-      - searxng_data:/etc/searxng
-      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro  # Mount custom settings
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     environment:
-      # Base URL for the instance
       - SEARXNG_BASE_URL=http://localhost:8888
-      # Secret key for session encryption (change in production)
       - SEARXNG_SECRET=change_this_secret_key_in_production
-      # Enable JSON format output
       - SEARXNG_SETTINGS_FORMATS=html,json
-      # Disable rate limiting for local development
       - SEARXNG_LIMITER_ENABLED=false
-      # Set instance name
       - SEARXNG_INSTANCE_NAME=AI-RAG-Search
+
+      # ✅ Set proxy headers to avoid bot detection errors
+      - REAL_IP=127.0.0.1
+      - FORWARDED_FOR=127.0.0.1
+
     restart: unless-stopped
+
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/"]
       interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s  # Give SearXNG time to initialize
-    # Resource limits (optional but recommended)
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 512M
+          cpus: '2.0'
+          memory: 1G
         reservations:
           cpus: '0.5'
           memory: 256M
