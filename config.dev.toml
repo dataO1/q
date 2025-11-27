@@ -30,7 +30,7 @@ redis_url = "redis://localhost:16379"       # Test Redis
 
 [rag]
 max_results = 5
-query_enhancement_model = "qwen2.5:3b"
+query_enhancement_model = "qwen2.5:0.5b"
 classification_model = "phi3:mini"
 query_enhancer_vocab_path = "../../vocab.txt"
 

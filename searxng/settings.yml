@@ -58,7 +58,7 @@ engines:
 
   # Bing - Usually works without issues
   - name: bing
-    disabled: true  # Timing out
+    disabled: false  # Timing out
     engine: bing
     shortcut: bi
     weight: 2

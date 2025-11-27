@@ -71,33 +71,89 @@ impl QueryEnhancer {
     fn heuristic_expand(&self, query: &str) -> anyhow::Result<Vec<String>> {
         let mut results = Vec::new();
 
-        // Normalize whitespace
+        // 1. Original normalized query
         let norm = query.trim().to_lowercase();
         results.push(norm.clone());
 
-        // Simple synonym replacement heuristic
+        // 2. Simple synonym replacement heuristic
         if norm.contains("error") {
             results.push(norm.replace("error", "exception"));
             results.push(norm.replace("error", "bug"));
         }
 
-        // Token filter heuristic (remove stopwords)
-        let encoding = self.tokenizer.encode(norm, false)
-            .map_err(|e| anyhow::Error::msg(format!("{}", e)))?;
-        let tokens = encoding.get_tokens();
-        let filtered_tokens: Vec<&str> = tokens.iter()
-            .filter(|t| !self.is_stopword(t))
-            .map(|t| t.as_str())
-            .collect();
-        results.push(filtered_tokens.join(" "));
+        if norm.contains("async") {
+            results.push(norm.replace("async", "asynchronous"));
+        }
 
-        debug!("Computed heuristic variants: {:?}",&results);
+        if norm.contains("function") {
+            results.push(norm.replace("function", "method"));
+        }
+
+        // 3. Token filtering with PROPER WordPiece reconstruction
+        let encoding = self.tokenizer.encode(norm.as_str(), false)
+            .map_err(|e| anyhow::Error::msg(format!("{}", e)))?;
+
+        let tokens = encoding.get_tokens();
+
+        let reconstructed_words = self.reconstruct_from_wordpiece(tokens);
+
+        // Filter stopwords from reconstructed words
+        let filtered_words: Vec<String> = reconstructed_words
+            .into_iter()
+            .filter(|word| !self.is_stopword(word))
+            .collect();
+
+        if !filtered_words.is_empty() {
+            results.push(filtered_words.join(" "));
+        }
+
+        // Deduplicate
+        results.sort();
+        results.dedup();
+
+        debug!("Computed heuristic variants: {:?}", &results);
         Ok(results)
     }
 
+    /// Reconstruct original words from WordPiece tokens
+    /// Example: ["as", "##yn", "##c", "doc"] -> ["async", "doc"]
+    fn reconstruct_from_wordpiece(&self, tokens: &[String]) -> Vec<String> {
+        let mut words = Vec::new();
+        let mut current_word = String::new();
+
+        for token in tokens {
+            // Skip special tokens
+            if token == "[CLS]" || token == "[SEP]" || token == "[PAD]" || token == "[UNK]" {
+                continue;
+            }
+
+            if token.starts_with("##") {
+                // This is a continuation token - merge with current word
+                current_word.push_str(&token[2..]); // Remove "##" prefix
+            } else {
+                // Start of a new word
+                if !current_word.is_empty() {
+                    words.push(current_word.clone());
+                }
+                current_word = token.clone();
+            }
+        }
+
+        // Don't forget the last word
+        if !current_word.is_empty() {
+            words.push(current_word);
+        }
+
+        words
+    }
+
     fn is_stopword(&self, token: &str) -> bool {
-        // Simplified stopword check
-        let stopwords = ["the", "is", "at", "which", "on", "a"];
+        // Expanded stopword list for better filtering
+        let stopwords = [
+            "the", "is", "at", "which", "on", "a", "an",
+            "and", "or", "but", "in", "with", "to", "from",
+            "of", "for", "by", "as", "this", "that", "these", "those"
+        ];
         stopwords.contains(&token)
     }
 
@@ -202,7 +258,7 @@ impl QueryEnhancer {
         // Query LLM with timeout protection
         let request = GenerationRequest::new(self.model.clone(),&prompt);
         match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
+            std::time::Duration::from_secs(30),
             self.ollama_client.generate(request)
         ).await {
             Ok(Ok(enhanced)) => {
