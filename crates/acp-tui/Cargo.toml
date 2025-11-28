@@ -1,0 +1,63 @@
+[package]
+name = "acp-tui"
+version = "0.1.0"
+edition = "2021"
+description = "Terminal User Interface for the Agent Communication Protocol (ACP)"
+license = "MIT"
+repository = "https://github.com/ai-agent-network/acp-tui"
+
+[[bin]]
+name = "acp-tui"
+path = "src/main.rs"
+
+[dependencies]
+# TUI Framework - React/Elm inspired component architecture
+ratatui = "0.29"
+tuirealm = { version = "3", features = ["async-ports"] }
+throbber-widgets-tui = "0.8"
+
+# Async Runtime
+tokio = { workspace = true }
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+
+# API Client Generation
+progenitor = "0.8"
+progenitor-client = "0.8"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# Graph Visualization and Data Structures
+petgraph = { workspace = true }
+
+# Serialization and Utilities
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+clap = { workspace = true }
+
+# Terminal handling
+crossterm = { version = "0.28", features = ["event-stream"] }
+futures = { workspace = true }
+futures-util = "0.3"
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# URL handling for API connection
+url = "2"
+
+# Configuration
+toml = { workspace = true }
+
+# Testing
+tokio-test = { version = "0.4", optional = true }
+
+[build-dependencies]
+progenitor = "0.8"
+anyhow = "1"
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+serde_json = "1"
+openapiv3 = "2"

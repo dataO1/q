@@ -1,13 +1,14 @@
 [workspace]
 members = [
     "crates/common",
-    "crates/indexing",
+    "crates/indexing", 
     "crates/rag",
     "crates/history",
     "crates/agent-network",
     "crates/storage",
     "crates/api",
     "crates/cli",
+    "crates/acp-tui",
 ]
 resolver = "2"
 
