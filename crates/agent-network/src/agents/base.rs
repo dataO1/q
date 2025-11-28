@@ -7,17 +7,9 @@ use ai_agent_common::{AgentType, ConversationId, ProjectScope};
 use async_trait::async_trait;
 use derive_more::Display;
 use async_openai::{
-    Client,
-    types::{
-        CreateChatCompletionRequest, CreateChatCompletionResponse,
-        ChatCompletionRequestMessage, ChatCompletionRequestUserMessage, ChatCompletionRequestSystemMessage,
-        ChatCompletionRequestAssistantMessage, ChatCompletionResponseMessage, ChatCompletionTool,
-        CreateChatCompletionRequestArgs, ChatCompletionRequestToolMessageArgs, Role,
-        ResponseFormat, ResponseFormatJsonSchema, ChatCompletionRequestUserMessageContent,
-        ChatCompletionRequestAssistantMessageContent, ChatCompletionRequestToolMessageContent,
-        ChatCompletionRequestSystemMessageContent, ChatCompletionRequestDeveloperMessageContent
-    },
-    config::OpenAIConfig,
+    config::OpenAIConfig, types::{
+        ChatCompletionRequestAssistantMessage, ChatCompletionRequestAssistantMessageContent, ChatCompletionRequestDeveloperMessageContent, ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage, ChatCompletionRequestSystemMessageContent, ChatCompletionRequestToolMessageArgs, ChatCompletionRequestToolMessageContent, ChatCompletionRequestUserMessage, ChatCompletionRequestUserMessageContent, ChatCompletionResponseMessage, ChatCompletionTool, ChatCompletionToolChoiceOption, CreateChatCompletionRequest, CreateChatCompletionRequestArgs, CreateChatCompletionResponse, ResponseFormat, ResponseFormatJsonSchema, Role
+    }, Client
 };
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -478,7 +470,7 @@ pub trait TypedAgent: Send + Sync {
         }
         let mut messages = self.build_initial_message(context,step, Some(&tools));
 
-        // Convert ToolSet tools to ChatCompletionTool format  
+        // Convert ToolSet tools to ChatCompletionTool format
         let openai_tools = tools.to_openai_tools(&step.required_tools)?;
 
         debug!(target: "agent_execution", "Starting streaming ReAct step '{}'", step.name);
@@ -492,10 +484,10 @@ pub trait TypedAgent: Send + Sync {
         let max_iter = max_iterations.unwrap_or(5);
         let mut tool_executions = Vec::new();
         let mut final_response = String::new();
-        
+
         for iteration in 0..max_iter {
             debug!(target: "agent_execution", "ReAct iteration {}/{} for step '{}'", iteration + 1, max_iter, step.name);
-            
+
             // Build request for this iteration
             let request = if step.formatted {
                 let json_schema = schemars::schema_for!(Self::Output);
@@ -513,6 +505,7 @@ pub trait TypedAgent: Send + Sync {
                             }
                         })
                         .tools(openai_tools.clone())
+                        .tool_choice(ChatCompletionToolChoiceOption::Auto)  // ✅ ADD
                         .build()?
                 } else {
                     CreateChatCompletionRequestArgs::default()
@@ -534,6 +527,7 @@ pub trait TypedAgent: Send + Sync {
                         .model(self.model())
                         .messages(messages.clone())
                         .tools(openai_tools.clone())
+                        .tool_choice(ChatCompletionToolChoiceOption::Auto)  // ✅ ADD
                         .build()?
                 } else {
                     CreateChatCompletionRequestArgs::default()
@@ -543,24 +537,24 @@ pub trait TypedAgent: Send + Sync {
                 }
             };
             let response = self.client().chat().create(request).await?;
-            
+
             if let Some(choice) = response.choices.first() {
                 // Handle text response
                 if let Some(content) = &choice.message.content {
                     final_response.push_str(content);
                     debug!(target: "agent_execution", "Received text response: {}", content.chars().take(100).collect::<String>());
                 }
-                
+
                 // Handle tool calls
                 if let Some(tool_calls) = &choice.message.tool_calls {
                     debug!(target: "agent_execution", "Received {} tool calls", tool_calls.len());
-                    
+
                     for tool_call in tool_calls {
                         let function = &tool_call.function;
                         // Execute tool and get result
                         let tool_execution = tools.execute_tool(&function.name, &function.arguments).await?;
                         tool_executions.push(tool_execution.clone());
-                        
+
                         // Add tool result to conversation
                         messages.push(ChatCompletionRequestMessage::Tool(
                             async_openai::types::ChatCompletionRequestToolMessageArgs::default()
@@ -569,7 +563,7 @@ pub trait TypedAgent: Send + Sync {
                                 .build()?
                         ));
                     }
-                    
+
                     // Messages are captured by closure, no need to update here
                 } else {
                     // No tool calls, we're done
@@ -581,7 +575,7 @@ pub trait TypedAgent: Send + Sync {
         current_span.record("total_tool_executions", tool_executions.len());
         current_span.record("final_response_length", final_response.len());
 
-        debug!(target: "agent_execution", "ReAct step '{}' completed successfully with {} tool executions", 
+        debug!(target: "agent_execution", "ReAct step '{}' completed successfully with {} tool executions",
                step.name, tool_executions.len());
 
         let step_result = StepResult {
@@ -763,7 +757,7 @@ pub trait TypedAgent: Send + Sync {
         let messages_json = serde_json::to_string(&messages.iter().map(|m| {
             let role = match m {
                 ChatCompletionRequestMessage::System(_) => "system",
-                ChatCompletionRequestMessage::User(_) => "user", 
+                ChatCompletionRequestMessage::User(_) => "user",
                 ChatCompletionRequestMessage::Assistant(_) => "assistant",
                 ChatCompletionRequestMessage::Tool(_) => "tool",
                 ChatCompletionRequestMessage::Function(_) => "function",
@@ -778,7 +772,7 @@ pub trait TypedAgent: Send + Sync {
         for (i, msg) in messages.iter().enumerate() {
             let role = match msg {
                 ChatCompletionRequestMessage::System(_) => "system",
-                ChatCompletionRequestMessage::User(_) => "user", 
+                ChatCompletionRequestMessage::User(_) => "user",
                 ChatCompletionRequestMessage::Assistant(_) => "assistant",
                 ChatCompletionRequestMessage::Tool(_) => "tool",
                 ChatCompletionRequestMessage::Function(_) => "function",

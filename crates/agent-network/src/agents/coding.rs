@@ -105,11 +105,11 @@ impl TypedAgent for CodingAgent {
             WorkflowStep {
                 id: "implement_code".to_string(),
                 name: "Code Implementation".to_string(),
-                description: "Generate required code to complete the user prompt. Use `write_file` to save all code. Do NOT output code in text - only use the write_file tool.".to_string(),
-                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(1) }, // Allow multiple writes if needed
+                description: "Generate required code to complete the user prompt. Use `write_file` to write all code to disk. Do NOT output code in text - only use the write_file tool.".to_string(),
+                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(3) }, // Allow multiple writes if needed
                 required_tools: vec!["write_file".to_string()],
                 parameters: HashMap::new(),
-                formatted: true, // Must produce CodingOutput JSON
+                formatted: false, // Must produce CodingOutput JSON
             }
         ]
     }
