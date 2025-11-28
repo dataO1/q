@@ -17,7 +17,7 @@ async-trait = "*"
 petgraph = "*"
 
 # LLM integration
-ollama-rs = "*"
+async-openai = "0.30"
 
 # Serialization
 serde = { version = "*", features = ["derive"] }

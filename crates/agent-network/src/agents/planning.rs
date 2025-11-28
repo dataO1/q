@@ -6,7 +6,7 @@
 use crate::{ agents::{base::TypedAgent, AgentContext}, orchestrator::AgentCapability};
 use ai_agent_common::{AgentType, ErrorRecoveryStrategy};
 use async_trait::async_trait;
-use ollama_rs::Ollama;
+use async_openai::{Client, config::OpenAIConfig};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, instrument};
@@ -50,7 +50,7 @@ pub struct SubtaskSpec {
 pub struct PlanningAgent {
     id: String,
     model: String,
-    client: Ollama,
+    client: Client<OpenAIConfig>,
     system_prompt: String,
     temperature: f32,
     max_tokens: usize,
@@ -64,10 +64,13 @@ impl PlanningAgent {
         system_prompt: String,
         temperature: f32,
         max_tokens: usize,
-        ollama_host: &str,
-        ollama_port: u16,
+        ollama_base_url: Option<&str>,
     ) -> Self {
-        let client = Ollama::new(ollama_host, ollama_port);
+        let base_url = ollama_base_url.unwrap_or("http://localhost:11434/v1");
+        let config = OpenAIConfig::new()
+            .with_api_key("ollama") // Required but unused
+            .with_api_base(base_url);
+        let client = Client::with_config(config);
         let system_prompt = PlanningAgent::build_system_prompt(&system_prompt);
         Self {
             id,
@@ -126,7 +129,7 @@ impl TypedAgent for PlanningAgent {
     fn system_prompt(&self) -> &str { &self.system_prompt }
     fn model(&self) -> &str { &self.model }
     fn temperature(&self) -> f32 { self.temperature }
-    fn client(&self) -> &Ollama { &self.client }
+    fn client(&self) -> &Client<OpenAIConfig> { &self.client }
     type Output = TaskDecompositionPlan;
 
     /// Define planning workflow steps

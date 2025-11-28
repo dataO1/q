@@ -6,7 +6,20 @@
 use ai_agent_common::{AgentType, ConversationId, ProjectScope};
 use async_trait::async_trait;
 use derive_more::Display;
-use ollama_rs::{generation::{chat::{request::ChatMessageRequest, ChatMessage, ChatMessageResponse, MessageRole}, parameters::{FormatType, JsonStructure}, tools::{Tool, ToolInfo}}, Ollama};
+use async_openai::{
+    Client,
+    types::{
+        CreateChatCompletionRequest, CreateChatCompletionResponse,
+        ChatCompletionRequestMessage, ChatCompletionRequestUserMessage, ChatCompletionRequestSystemMessage,
+        ChatCompletionRequestAssistantMessage, ChatCompletionResponseMessage, ChatCompletionTool,
+        CreateChatCompletionRequestArgs, ChatCompletionRequestToolMessageArgs, Role,
+        ResponseFormat, ResponseFormatJsonSchema, ChatCompletionRequestUserMessageContent,
+        ChatCompletionRequestAssistantMessageContent, ChatCompletionRequestToolMessageContent,
+        ChatCompletionRequestSystemMessageContent, ChatCompletionRequestDeveloperMessageContent
+    },
+    config::OpenAIConfig,
+};
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -14,9 +27,8 @@ use tracing::{debug, info, error, warn, instrument, Instrument};
 use std::{collections::{HashMap, HashSet}, sync::Arc};
 use schemars::JsonSchema;
 use anyhow::{Context, Result, anyhow};
-use ollama_rs::coordinator::Coordinator;
 
-use crate::{agents::AgentResult, tools::{ToolExecution, ToolSet}};
+use crate::{agents::AgentResult, tools::{ToolResult, ToolSet, ToolExecution}};
 
 /// ReAct step output for semantic stop conditions
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,7 +118,7 @@ pub trait TypedAgent: Send + Sync {
     fn system_prompt(&self) -> &str;
     fn model(&self) -> &str;
     fn temperature(&self) -> f32;
-    fn client(&self) -> &Ollama;
+    fn client(&self) -> &Client<OpenAIConfig>;
 
     /// Define the workflow steps for this agent
     /// Each agent can define its own sequence of steps, each either OneShot or ReAct
@@ -117,12 +129,62 @@ pub trait TypedAgent: Send + Sync {
         (text.len() / 4).max(1)
     }
 
+    /// Extract content from a ChatCompletionRequestMessage
+    fn extract_message_content(message: &ChatCompletionRequestMessage) -> String {
+        match message {
+            ChatCompletionRequestMessage::System(msg) => {
+                match &msg.content {
+                    ChatCompletionRequestSystemMessageContent::Text(text) => text.clone(),
+                    ChatCompletionRequestSystemMessageContent::Array(_) => {
+                        "[Complex content with multiple parts]".to_string()
+                    }
+                }
+            }
+            ChatCompletionRequestMessage::User(msg) => {
+                match &msg.content {
+                    ChatCompletionRequestUserMessageContent::Text(text) => text.clone(),
+                    ChatCompletionRequestUserMessageContent::Array(_) => {
+                        "[Complex content with multiple parts]".to_string()
+                    }
+                }
+            }
+            ChatCompletionRequestMessage::Assistant(msg) => {
+                match &msg.content {
+                    Some(ChatCompletionRequestAssistantMessageContent::Text(text)) => text.clone(),
+                    Some(ChatCompletionRequestAssistantMessageContent::Array(_)) => {
+                        "[Complex content with multiple parts]".to_string()
+                    }
+                    None => "[No content]".to_string(),
+                }
+            }
+            ChatCompletionRequestMessage::Tool(msg) => {
+                match &msg.content {
+                    ChatCompletionRequestToolMessageContent::Text(text) => text.clone(),
+                    ChatCompletionRequestToolMessageContent::Array(_) => {
+                        "[Complex content with multiple parts]".to_string()
+                    }
+                }
+            }
+            ChatCompletionRequestMessage::Function(msg) => {
+                msg.content.as_ref().map(|c| c.clone()).unwrap_or_else(|| "[No content]".to_string())
+            }
+            ChatCompletionRequestMessage::Developer(msg) => {
+                match &msg.content {
+                    ChatCompletionRequestDeveloperMessageContent::Text(text) => text.clone(),
+                    ChatCompletionRequestDeveloperMessageContent::Array(_) => {
+                        "[Complex content with multiple parts]".to_string()
+                    }
+                }
+            }
+        }
+    }
+
     /// Execute workflow steps sequentially
     async fn execute_workflow(
         &self,
         context: AgentContext,
         workflow_steps: Vec<WorkflowStep>,
-        tools: ToolSet
+        tools: Arc<ToolSet>
     ) -> Result<AgentResult> {
         let mut workflow_state = WorkflowState::new();
         let mut final_result = None;
@@ -142,7 +204,7 @@ pub trait TypedAgent: Send + Sync {
                     self.execute_step_oneshot(&updated_context, step).await
                 }
                 StepExecutionMode::ReAct { max_iterations } => {
-                    self.execute_step_react(&updated_context, step, tools.clone(), *max_iterations).await
+                    self.execute_step_react(&updated_context, step, Arc::clone(&tools), *max_iterations).await
                 }
             };
 
@@ -248,18 +310,35 @@ pub trait TypedAgent: Send + Sync {
         }
         let messages = self.build_initial_message(&context, &step, None);
 
-        // Execute LLM call
-        let json_structure = JsonStructure::new::<Self::Output>();
-        let mut request = ChatMessageRequest::new(self.model().to_string(), messages.clone());
-        if step.formatted{
-            request = request.format(FormatType::StructuredJson(Box::new(json_structure)));
-        }
+        // Execute LLM call - build request with optional structured output
+        let request = if step.formatted {
+            let json_schema = schemars::schema_for!(Self::Output);
+            let schema_value = serde_json::to_value(json_schema).unwrap_or_default();
+            CreateChatCompletionRequestArgs::default()
+                .model(self.model())
+                .messages(messages.clone())
+                .response_format(ResponseFormat::JsonSchema {
+                    json_schema: ResponseFormatJsonSchema {
+                        name: "structured_response".to_string(),
+                        description: Some("Structured response following the provided schema".to_string()),
+                        schema: Some(schema_value),
+                        strict: Some(true),
+                    }
+                })
+                .build()?
+        } else {
+            CreateChatCompletionRequestArgs::default()
+                .model(self.model())
+                .messages(messages.clone())
+                .build()?
+        };
 
         debug!(target: "agent_execution", "Starting LLM call for OneShot step '{}' (model: {}, messages: {}, formatted: {})",
             step.name, self.model(), messages.len(), step.formatted);
 
         // Execute LLM call with enhanced span instrumentation and real-time events
-        let prompt_tokens = Self::estimate_tokens(&messages.iter().map(|m| m.content.clone()).collect::<Vec<_>>().join("\n"));
+        let content_strings: Vec<String> = messages.iter().map(|m| Self::extract_message_content(m)).collect();
+        let prompt_tokens = Self::estimate_tokens(&content_strings.join("\n"));
 
         // Create span with all business attributes upfront - agent info in fields
         let agent_name = format!("{}", self.agent_type());
@@ -287,19 +366,24 @@ pub trait TypedAgent: Send + Sync {
                 step.name, self.model(), prompt_tokens);
 
             // Execute the actual LLM call
-            // let response = self.client().send_chat_messages(request).await?;
-            let response = self.client().send_chat_messages(request).await?;
+            let response = self.client().chat().create(request).await?;
             let duration = start_time.elapsed();
 
+            // Extract content from response
+            let default_content = String::new();
+            let content = response.choices.first()
+                .and_then(|choice| choice.message.content.as_ref())
+                .unwrap_or(&default_content);
+
             // Calculate completion metrics immediately
-            let completion_tokens = Self::estimate_tokens(&response.message.content);
+            let completion_tokens = Self::estimate_tokens(content);
             let latency_per_token = if completion_tokens > 0 {
                 duration.as_millis() / completion_tokens as u128
             } else { 0 };
 
             // Record response received event with details
             info!(target: "llm_inference", "llm_response_received: completion_tokens={}, total_latency_ms={}, latency_per_token_ms={}, response_length={}",
-                completion_tokens, duration.as_millis(), latency_per_token, response.message.content.len());
+                completion_tokens, duration.as_millis(), latency_per_token, content.len());
 
             // Record completion metrics in span
             let current_span = tracing::Span::current();
@@ -307,20 +391,26 @@ pub trait TypedAgent: Send + Sync {
             current_span.record("llm.latency_per_token", &format!("{}ms", latency_per_token));
 
             info!("LLM inference completed for OneShot step '{}' (response: {} chars, completion tokens: {}, latency: {}ms)",
-                step.name, response.message.content.len(), completion_tokens, duration.as_millis());
+                step.name, content.len(), completion_tokens, duration.as_millis());
 
             Ok::<_, anyhow::Error>(response)
         }.instrument(llm_span).await?;
 
+        // Extract final content
+        let final_content = response.choices.first()
+            .and_then(|choice| choice.message.content.as_ref())
+            .unwrap_or(&String::new())
+            .clone();
+
         // Record LLM response and results as span attributes for Jaeger visibility
-        current_span.record("llm.response_content", response.message.content.as_str());
+        current_span.record("llm.response_content", final_content.as_str());
         current_span.record("result.success", true);
-        current_span.record("result.output_length", response.message.content.len());
+        current_span.record("result.output_length", final_content.len());
 
         debug!(target: "agent_execution", "LLM call completed for OneShot step '{}' (response length: {} chars)",
-            step.name, response.message.content.len());
+            step.name, final_content.len());
         debug!(target: "agent_execution", "Response preview: {}",
-            response.message.content.chars().take(200).collect::<String>());
+            final_content.chars().take(200).collect::<String>());
 
         // Parse response
         // let parsed_output = response.message.content
@@ -334,7 +424,7 @@ pub trait TypedAgent: Send + Sync {
         let step_result = StepResult {
             step_id: step.id.clone(),
             success: true,
-            output: Some(response.message.content.clone()),
+            output: Some(final_content),
             error: None,
             tool_executions: vec![], // OneShot doesn't use tools
         };
@@ -362,7 +452,7 @@ pub trait TypedAgent: Send + Sync {
         &self,
         context: &AgentContext,
         step: &WorkflowStep,
-        mut tools: ToolSet,
+        tools: Arc<ToolSet>,
         max_iterations: Option<usize>
     ) -> Result<StepResult> {
         // Record comprehensive input details as span attributes for Jaeger visibility
@@ -386,75 +476,140 @@ pub trait TypedAgent: Send + Sync {
         if let Some(history_context) = &context.history_context {
             debug!(target: "agent_execution", "History context: {} chars", history_context.len());
         }
-        let messages = self.build_initial_message(context,step, Some(&tools));
+        let mut messages = self.build_initial_message(context,step, Some(&tools));
 
-        // Create Coordinator with tools
-        let mut coordinator = Coordinator::new(
-            self.client().clone(),
-            self.model().to_string(),
-            vec![] // Start with empty history
-        )
-            .add_tool(tools.write_file);
-            // .add_tool(tools.read_file)
-            // .add_tool(tools.list_directory)
-            // .add_tool(tools.create_directory)
-            // .add_tool(tools.file_exists)
-            // .add_tool(tools.file_metadata)
-            // .add_tool(tools.delete_file);
-        let json_structure = JsonStructure::new::<Self::Output>();
-        if step.formatted{
-            coordinator = coordinator.format(FormatType::StructuredJson(Box::new(json_structure)));
-        }
+        // Convert ToolSet tools to ChatCompletionTool format  
+        let openai_tools = tools.to_openai_tools(&step.required_tools)?;
 
-        debug!(target: "agent_execution", "Starting Coordinator chat for step '{}'", step.name);
+        debug!(target: "agent_execution", "Starting streaming ReAct step '{}'", step.name);
         if step.required_tools.is_empty() {
-            info!(target: "agent_execution", "Using Coordinator for ReAct step '{}' with no tools", step.name);
+            info!(target: "agent_execution", "ReAct step '{}' with no tools", step.name);
         } else {
-            info!(target: "agent_execution", "Using Coordinator for ReAct step '{}' with tools: {}", step.name, step.required_tools.join(", "));
+            info!(target: "agent_execution", "ReAct step '{}' with tools: {}", step.name, step.required_tools.join(", "));
         }
-        // Execute the coordinator chat
-        // let start_time = std::time::Instant::now();
-        let response = coordinator
-            .chat(messages).await
-            .map_err(|e| anyhow::anyhow!("Coordinator chat failed: {}", e))?;
-        // let duration = start_time.elapsed();
-        //
-        // current_span.record("final_response_length", response.len());
 
-        // debug!(target: "agent_execution", "Coordinator completed for step '{}' (duration: {}ms, response length: {} chars)",
-            // step.name, duration.as_millis(), response.len());
+        // Execute ReAct loop with streaming
+        let max_iter = max_iterations.unwrap_or(5);
+        let mut tool_executions = Vec::new();
+        let mut final_response = String::new();
+        
+        for iteration in 0..max_iter {
+            debug!(target: "agent_execution", "ReAct iteration {}/{} for step '{}'", iteration + 1, max_iter, step.name);
+            
+            // Build request for this iteration
+            let request = if step.formatted {
+                let json_schema = schemars::schema_for!(Self::Output);
+                let schema_value = serde_json::to_value(json_schema).unwrap_or_default();
+                if !openai_tools.is_empty() {
+                    CreateChatCompletionRequestArgs::default()
+                        .model(self.model())
+                        .messages(messages.clone())
+                        .response_format(ResponseFormat::JsonSchema {
+                            json_schema: ResponseFormatJsonSchema {
+                                name: "structured_response".to_string(),
+                                description: Some("Structured response following the provided schema".to_string()),
+                                schema: Some(schema_value),
+                                strict: Some(true),
+                            }
+                        })
+                        .tools(openai_tools.clone())
+                        .build()?
+                } else {
+                    CreateChatCompletionRequestArgs::default()
+                        .model(self.model())
+                        .messages(messages.clone())
+                        .response_format(ResponseFormat::JsonSchema {
+                            json_schema: ResponseFormatJsonSchema {
+                                name: "structured_response".to_string(),
+                                description: Some("Structured response following the provided schema".to_string()),
+                                schema: Some(schema_value),
+                                strict: Some(true),
+                            }
+                        })
+                        .build()?
+                }
+            } else {
+                if !openai_tools.is_empty() {
+                    CreateChatCompletionRequestArgs::default()
+                        .model(self.model())
+                        .messages(messages.clone())
+                        .tools(openai_tools.clone())
+                        .build()?
+                } else {
+                    CreateChatCompletionRequestArgs::default()
+                        .model(self.model())
+                        .messages(messages.clone())
+                        .build()?
+                }
+            };
+            let response = self.client().chat().create(request).await?;
+            
+            if let Some(choice) = response.choices.first() {
+                // Handle text response
+                if let Some(content) = &choice.message.content {
+                    final_response.push_str(content);
+                    debug!(target: "agent_execution", "Received text response: {}", content.chars().take(100).collect::<String>());
+                }
+                
+                // Handle tool calls
+                if let Some(tool_calls) = &choice.message.tool_calls {
+                    debug!(target: "agent_execution", "Received {} tool calls", tool_calls.len());
+                    
+                    for tool_call in tool_calls {
+                        let function = &tool_call.function;
+                        // Execute tool and get result
+                        let tool_execution = tools.execute_tool(&function.name, &function.arguments).await?;
+                        tool_executions.push(tool_execution.clone());
+                        
+                        // Add tool result to conversation
+                        messages.push(ChatCompletionRequestMessage::Tool(
+                            async_openai::types::ChatCompletionRequestToolMessageArgs::default()
+                                .content(tool_execution.result.output)
+                                .tool_call_id(tool_call.id.clone())
+                                .build()?
+                        ));
+                    }
+                    
+                    // Messages are captured by closure, no need to update here
+                } else {
+                    // No tool calls, we're done
+                    break;
+                }
+            }
+        }
 
-        // For now, we'll create a simplified tool execution tracking
-        // In the future, we could extract tool calls from the coordinator's history
-        let tool_executions = vec![]; // TODO: Extract from coordinator if needed
+        current_span.record("total_tool_executions", tool_executions.len());
+        current_span.record("final_response_length", final_response.len());
+
+        debug!(target: "agent_execution", "ReAct step '{}' completed successfully with {} tool executions", 
+               step.name, tool_executions.len());
 
         let step_result = StepResult {
             step_id: step.id.clone(),
             success: true,
-            output: Some(response.message.content),
+            output: Some(final_response),
             error: None,
             tool_executions,
         };
 
-        debug!(target: "agent_execution", "ReAct step '{}' completed successfully using Coordinator", step.name);
         Ok(step_result)
     }
 
     /// Execute a single ReAct workflow step
     #[instrument(name = "agent_react_step", skip(self, context, step), fields())]
-    fn build_initial_message(&self,context: &AgentContext, step: &WorkflowStep, tools: Option<&ToolSet>)-> Vec<ChatMessage>{
+    fn build_initial_message(&self,context: &AgentContext, step: &WorkflowStep, tools: Option<&Arc<ToolSet>>)-> Vec<ChatCompletionRequestMessage>{
 
         let current_span = tracing::Span::current();
         // Build messages for this specific step
-        let mut messages = vec![
+        let mut messages: Vec<ChatCompletionRequestMessage> = vec![
         ];
 
         // step instructions
-        messages.push(ChatMessage::system(format!("# STEP: {}\n{}\n\n# INSTRUCTIONS:\n{}",
+        messages.push(ChatCompletionRequestSystemMessage::from(format!("# STEP: {}\n{}\n\n# INSTRUCTIONS:\n{}",
             step.name,
             step.description,
             self.system_prompt()
-        )));
+        )).into());
 
         if !context.dependency_outputs.is_empty() {
             let mut dependency_msg = format!("# PREVIOUS TASK OUTPUTS ({} tasks completed):\n\n", context.dependency_outputs.len());
@@ -484,7 +639,7 @@ pub trait TypedAgent: Send + Sync {
                 dependency_msg.push_str(&format!("{}\n\n", output_content));
             }
 
-            messages.push(ChatMessage::system(dependency_msg));
+            messages.push(ChatCompletionRequestSystemMessage::from(dependency_msg).into());
         }
 
         // // Add workflow state if available
@@ -558,7 +713,7 @@ pub trait TypedAgent: Send + Sync {
                 };
             };
             if accumulated_instructions != ""{
-                messages.push(ChatMessage::system(accumulated_instructions.clone()));
+                messages.push(ChatCompletionRequestSystemMessage::from(accumulated_instructions.clone()).into());
             }
 
             debug!(target: "agent_execution", "Accumulated Tool instructions: {} for step: {}",accumulated_instructions, step.name);
@@ -580,7 +735,7 @@ pub trait TypedAgent: Send + Sync {
                     estimated_tokens, rag_context)
             };
 
-            messages.push(ChatMessage::system(header));
+            messages.push(ChatCompletionRequestSystemMessage::from(header).into());
         }
 
         // Add history context if available (for cases where it's separate from RAG)
@@ -597,23 +752,40 @@ pub trait TypedAgent: Send + Sync {
                     estimated_tokens, history_context)
             };
 
-            messages.push(ChatMessage::system(header));
+            messages.push(ChatCompletionRequestSystemMessage::from(header).into());
         }
 
         // Add main user prompt
-        messages.push(ChatMessage::user(format!("# USER PROMPT (YOUR MAIN TASK):\n{}", context.description)));
+        messages.push(ChatCompletionRequestUserMessage::from(format!("# USER PROMPT (YOUR MAIN TASK):\n{}", context.description)).into());
 
         // Record LLM messages as span attributes for Jaeger visibility
         current_span.record("llm.messages_sent", messages.len());
         let messages_json = serde_json::to_string(&messages.iter().map(|m| {
-            serde_json::json!({"role": format!("{:?}", m.role), "content": m.content})
+            let role = match m {
+                ChatCompletionRequestMessage::System(_) => "system",
+                ChatCompletionRequestMessage::User(_) => "user", 
+                ChatCompletionRequestMessage::Assistant(_) => "assistant",
+                ChatCompletionRequestMessage::Tool(_) => "tool",
+                ChatCompletionRequestMessage::Function(_) => "function",
+                ChatCompletionRequestMessage::Developer(_) => "developer",
+            };
+            serde_json::json!({"role": role, "content": Self::extract_message_content(m)})
         }).collect::<Vec<_>>()).unwrap_or_default();
         current_span.record("llm.messages_json", messages_json.as_str());
 
         // Also log for console debugging
         debug!(target: "agent_execution", "Sending {} messages to LLM", messages.len());
         for (i, msg) in messages.iter().enumerate() {
-            debug!(target: "agent_execution", "Message {}: Role={:?}, Content length: {}", i + 1, msg.role, msg.content.len());
+            let role = match msg {
+                ChatCompletionRequestMessage::System(_) => "system",
+                ChatCompletionRequestMessage::User(_) => "user", 
+                ChatCompletionRequestMessage::Assistant(_) => "assistant",
+                ChatCompletionRequestMessage::Tool(_) => "tool",
+                ChatCompletionRequestMessage::Function(_) => "function",
+                ChatCompletionRequestMessage::Developer(_) => "developer",
+            };
+            let content = Self::extract_message_content(msg);
+            debug!(target: "agent_execution", "Message {}: Role={}, Content length: {}", i + 1, role, content.len());
         }
         messages
     }
@@ -628,7 +800,7 @@ pub trait Agent: Send + Sync {
     fn agent_type(&self) -> AgentType;
     fn system_prompt(&self) -> &str;
     fn model(&self) -> &str;
-    fn client(&self) -> &Ollama;
+    fn client(&self) -> &Client<OpenAIConfig>;
 
     // Execute with type-erased result
     async fn execute(&self, context: AgentContext) -> Result<AgentResult>;
@@ -644,13 +816,13 @@ where
     fn agent_type(&self) -> AgentType { TypedAgent::agent_type(self) }
     fn system_prompt(&self) -> &str { TypedAgent::system_prompt(self) }
     fn model(&self) -> &str { TypedAgent::model(self) }
-    fn client(&self) -> &Ollama { TypedAgent::client(self) }
+    fn client(&self) -> &Client<OpenAIConfig> { TypedAgent::client(self) }
 
     #[instrument(name = "agent_workflow_execution", skip(self, context), fields(agent_id = %self.id(), agent_type = %self.agent_type()))]
     async fn execute(&self, context: AgentContext) -> Result<AgentResult> {
         // All agents use workflow execution
         let workflow_steps = self.define_workflow_steps(&context);
-        let tools = ToolSet::new(&context.clone().project_scope.unwrap().root);
+        let tools = Arc::new(ToolSet::new(&context.clone().project_scope.unwrap().root));
         self.execute_workflow(context, workflow_steps, tools).await
     }
 

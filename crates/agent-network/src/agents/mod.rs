@@ -12,7 +12,6 @@ pub mod writing;
 pub use base::{Agent, AgentContext, ConversationMessage};
 pub use coding::CodingAgent;
 pub use evaluator::EvaluatorAgent;
-use ollama_rs::generation::chat::ChatMessageResponse;
 pub use planning::{PlanningAgent};
 pub use pool::{AgentPool, PoolStatistics};
 use serde::{Deserialize, Serialize};
@@ -49,9 +48,15 @@ pub struct AgentResult {
 }
 
 impl AgentResult {
-    /// Create new agent result
-    pub fn from_response(agent_id: &str, response: ChatMessageResponse) -> anyhow::Result<Self> {
-        let output = serde_json::from_str(&response.message.content)?;
+    /// Create new agent result from conversation message
+    pub fn from_message(agent_id: &str, message: &ConversationMessage) -> anyhow::Result<Self> {
+        let content = match message {
+            ConversationMessage::Assistant(content) => content,
+            ConversationMessage::User(content) => content,
+            ConversationMessage::System(content) => content,
+        };
+        
+        let output = serde_json::from_str(content)?;
         Ok(Self {
             agent_id: agent_id.to_string(),
             output,

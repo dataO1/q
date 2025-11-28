@@ -9,7 +9,8 @@ use anyhow::Result;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{debug, info, warn, instrument};
 use anyhow::anyhow;
-use ollama_rs::generation::tools::Tool;
+use async_openai::types::{ChatCompletionTool, ChatCompletionToolType, FunctionObject};
+use crate::tools::{Tool,ToolResult, TypedTool};
 use serde::{Deserialize, Serialize};
 
 pub const FILESYSTEM_PREAMBLE: &str = r#"
@@ -137,14 +138,15 @@ impl ReadFileTool {
     }
 }
 
-impl Tool for ReadFileTool {
-    type Params = ReadParam;
+#[async_trait]
+impl TypedTool for ReadFileTool {
+    type Params = ListDirParam;
 
-    fn name() -> &'static str {
+    fn name(&self) -> &str {
         "read_file"
     }
 
-    fn description() -> &'static str  {
+    fn description(&self) -> &str {
         "Read the contents of a file. Provide a relative path."
     }
 
@@ -155,11 +157,10 @@ impl Tool for ReadFileTool {
         file_size = tracing::field::Empty,
         error = tracing::field::Empty
     ))]
-    fn call(
-        &mut self,
+    async fn call(
+        &self,
         parameters: Self::Params
-    ) -> impl std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send + Sync {
-        async move {
+    ) -> Result<ToolResult> {
             let current_span = tracing::Span::current();
             current_span.record("path", parameters.path.as_str());
 
@@ -169,7 +170,10 @@ impl Tool for ReadFileTool {
                     let error_msg = format!("Path access error: {}", e);
                     current_span.record("success", false);
                     current_span.record("error", error_msg.as_str());
-                    return Ok(format!("Error: {}", error_msg));
+                    return Ok(ToolResult {
+                        success: false,
+                        output: format!("Error: {}", error_msg),
+                    });
                 }
             };
 
@@ -179,14 +183,19 @@ impl Tool for ReadFileTool {
                     let error_msg = format!("Error reading file: {}", e);
                     current_span.record("success", false);
                     current_span.record("error", error_msg.as_str());
-                    return Ok(error_msg);
+                    return Ok(ToolResult {
+                    success: false,
+                    output: error_msg,
+                });
                 }
             };
             current_span.record("success", true);
             current_span.record("file_size", contents.len());
 
-            Ok(contents)
-        }
+            Ok(ToolResult {
+                success: true,
+                output: contents,
+            })
     }
 }
 
@@ -204,14 +213,14 @@ impl WriteFileTool {
     }
 }
 
-impl Tool for WriteFileTool {
+#[async_trait]
+impl TypedTool for WriteFileTool {
     type Params = WriteParam;
-
-    fn name() -> &'static str {
+    fn name(&self) -> &str {
         "write_file"
     }
 
-    fn description() -> &'static str {
+    fn description(&self) -> &str {
         "Write content to a file. Creates parent directories if needed. Provide relative path and content."
     }
 
@@ -222,11 +231,10 @@ impl Tool for WriteFileTool {
         content_size = tracing::field::Empty,
         error = tracing::field::Empty
     ))]
-    fn call(
-        &mut self,
+    async fn call(
+        &self,
         parameters: Self::Params
-    ) -> impl std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send + Sync {
-        async move {
+    ) -> Result<ToolResult> {
             let current_span = tracing::Span::current();
             current_span.record("path", parameters.path.as_str());
             current_span.record("content_size", parameters.content.len());
@@ -237,7 +245,10 @@ impl Tool for WriteFileTool {
                     let error_msg = format!("Path access error: {}", e);
                     current_span.record("success", false);
                     current_span.record("error", error_msg.as_str());
-                    return Ok(format!("Error: {}", error_msg));
+                    return Ok(ToolResult {
+                        success: false,
+                        output: format!("Error: {}", error_msg),
+                    });
                 }
             };
 
@@ -246,7 +257,10 @@ impl Tool for WriteFileTool {
                     let error_msg = format!("Error creating parent directories: {}", e);
                     current_span.record("success", false);
                     current_span.record("error", error_msg.as_str());
-                    return Ok(error_msg);
+                    return Ok(ToolResult {
+                    success: false,
+                    output: error_msg,
+                });
                 }
             }
 
@@ -254,12 +268,17 @@ impl Tool for WriteFileTool {
                 let error_msg = format!("Error writing file: {}", e);
                 current_span.record("success", false);
                 current_span.record("error", error_msg.as_str());
-                return Ok(error_msg);
+                return Ok(ToolResult {
+                    success: false,
+                    output: error_msg,
+                });
             };
             current_span.record("success", true);
 
-            Ok(format!("Wrote {} bytes to {}", parameters.content.len(), target_path.display()))
-        }
+            Ok(ToolResult {
+                success: true,
+                output: format!("Wrote {} bytes to {}", parameters.content.len(), target_path.display()),
+            })
     }
 }
 
@@ -277,14 +296,15 @@ impl ListDirectoryTool {
     }
 }
 
-impl Tool for ListDirectoryTool {
+#[async_trait]
+impl TypedTool for ListDirectoryTool {
     type Params = ListDirParam;
 
-    fn name() -> &'static str {
+    fn name(&self) -> &str {
         "list_directory"
     }
 
-    fn description() -> &'static str {
+    fn description(&self) -> &str {
         "List the contents of a directory. Provide a relative path to a directory."
     }
 
@@ -295,11 +315,10 @@ impl Tool for ListDirectoryTool {
         entry_count = tracing::field::Empty,
         error = tracing::field::Empty
     ))]
-    fn call(
-        &mut self,
+    async fn call(
+        &self,
         parameters: Self::Params
-    ) -> impl std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send + Sync {
-        async move {
+    ) -> Result<ToolResult> {
             let current_span = tracing::Span::current();
             current_span.record("path", parameters.path.as_str());
 
@@ -309,7 +328,10 @@ impl Tool for ListDirectoryTool {
                     let error_msg = format!("Path access error: {}", e);
                     current_span.record("success", false);
                     current_span.record("error", error_msg.as_str());
-                    return Ok(format!("Error: {}", error_msg));
+                    return Ok(ToolResult {
+                        success: false,
+                        output: format!("Error: {}", error_msg),
+                    });
                 }
             };
 
@@ -319,7 +341,10 @@ impl Tool for ListDirectoryTool {
                     let error_msg = format!("Error reading directory: {}", e);
                     current_span.record("success", false);
                     current_span.record("error", error_msg.as_str());
-                    return Ok(error_msg);
+                    return Ok(ToolResult {
+                    success: false,
+                    output: error_msg,
+                });
                 }
             };
             let mut listing = Vec::new();
@@ -336,8 +361,10 @@ impl Tool for ListDirectoryTool {
             current_span.record("success", true);
             current_span.record("entry_count", listing.len());
 
-            Ok(listing.join("\n"))
-        }
+            Ok(ToolResult {
+                success: true,
+                output: listing.join("\n"),
+            })
     }
 }
 
@@ -355,14 +382,15 @@ impl CreateDirectoryTool {
     }
 }
 
-impl Tool for CreateDirectoryTool {
+#[async_trait]
+impl TypedTool for CreateDirectoryTool {
     type Params = CreateDirParam;
 
-    fn name() -> &'static str {
+    fn name(&self) -> &str {
         "create_directory"
     }
 
-    fn description() -> &'static str {
+    fn description(&self) -> &str {
         "Create a directory and all parent directories if they don't exist. Provide a relative path."
     }
 
@@ -372,11 +400,10 @@ impl Tool for CreateDirectoryTool {
         success = tracing::field::Empty,
         error = tracing::field::Empty
     ))]
-    fn call(
-        &mut self,
+    async fn call(
+        &self,
         parameters: Self::Params
-    ) -> impl std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send + Sync {
-        async move {
+    ) -> Result<ToolResult> {
             let current_span = tracing::Span::current();
             current_span.record("path", parameters.path.as_str());
 
@@ -386,7 +413,10 @@ impl Tool for CreateDirectoryTool {
                     let error_msg = format!("Path access error: {}", e);
                     current_span.record("success", false);
                     current_span.record("error", error_msg.as_str());
-                    return Ok(format!("Error: {}", error_msg));
+                    return Ok(ToolResult {
+                        success: false,
+                        output: format!("Error: {}", error_msg),
+                    });
                 }
             };
 
@@ -394,12 +424,17 @@ impl Tool for CreateDirectoryTool {
                 let error_msg = format!("Error creating directory: {}", e);
                 current_span.record("success", false);
                 current_span.record("error", error_msg.as_str());
-                return Ok(error_msg);
+                return Ok(ToolResult {
+                    success: false,
+                    output: error_msg,
+                });
             };
             current_span.record("success", true);
 
-            Ok(format!("Created directory: {}", target_path.display()))
-        }
+            Ok(ToolResult {
+                success: true,
+                output: format!("Created directory: {}", target_path.display()),
+            })
     }
 }
 
@@ -417,14 +452,15 @@ impl DeleteFileTool {
     }
 }
 
-impl Tool for DeleteFileTool {
+#[async_trait]
+impl TypedTool for DeleteFileTool {
     type Params = DeleteFileParam;
 
-    fn name() -> &'static str {
+    fn name(&self) -> &str {
         "delete_file"
     }
 
-    fn description() -> &'static str {
+    fn description(&self) -> &str {
         "Delete a file. Provide a relative path to the file to delete."
     }
 
@@ -434,11 +470,10 @@ impl Tool for DeleteFileTool {
         success = tracing::field::Empty,
         error = tracing::field::Empty
     ))]
-    fn call(
-        &mut self,
+    async fn call(
+        &self,
         parameters: Self::Params
-    ) -> impl std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send + Sync {
-        async move {
+    ) -> Result<ToolResult> {
             let current_span = tracing::Span::current();
             current_span.record("path", parameters.path.as_str());
 
@@ -448,7 +483,10 @@ impl Tool for DeleteFileTool {
                     let error_msg = format!("Path access error: {}", e);
                     current_span.record("success", false);
                     current_span.record("error", error_msg.as_str());
-                    return Ok(format!("Error: {}", error_msg));
+                    return Ok(ToolResult {
+                        success: false,
+                        output: format!("Error: {}", error_msg),
+                    });
                 }
             };
 
@@ -456,12 +494,17 @@ impl Tool for DeleteFileTool {
                 let error_msg = format!("Error deleting file: {}", e);
                 current_span.record("success", false);
                 current_span.record("error", error_msg.as_str());
-                return Ok(error_msg);
+                return Ok(ToolResult {
+                    success: false,
+                    output: error_msg,
+                });
             };
             current_span.record("success", true);
 
-            Ok(format!("Deleted file: {}", target_path.display()))
-        }
+            Ok(ToolResult {
+                success: true,
+                output: format!("Deleted file: {}", target_path.display()),
+            })
     }
 }
 
@@ -479,14 +522,15 @@ impl FileExistsTool {
     }
 }
 
-impl Tool for FileExistsTool {
+#[async_trait]
+impl TypedTool for FileExistsTool {
     type Params = FileExistsParam;
 
-    fn name() -> &'static str {
+    fn name(&self) -> &str {
         "file_exists"
     }
 
-    fn description() -> &'static str {
+    fn description(&self) -> &str {
         "Check if a file or directory exists. Provide a relative path."
     }
 
@@ -497,11 +541,10 @@ impl Tool for FileExistsTool {
         exists = tracing::field::Empty,
         error = tracing::field::Empty
     ))]
-    fn call(
-        &mut self,
+    async fn call(
+        &self,
         parameters: Self::Params
-    ) -> impl std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send + Sync {
-        async move {
+    ) -> Result<ToolResult> {
             let current_span = tracing::Span::current();
             current_span.record("path", parameters.path.as_str());
 
@@ -511,7 +554,10 @@ impl Tool for FileExistsTool {
                     let error_msg = format!("Path access error: {}", e);
                     current_span.record("success", false);
                     current_span.record("error", error_msg.as_str());
-                    return Ok(format!("Error: {}", error_msg));
+                    return Ok(ToolResult {
+                        success: false,
+                        output: format!("Error: {}", error_msg),
+                    });
                 }
             };
 
@@ -519,8 +565,10 @@ impl Tool for FileExistsTool {
             current_span.record("success", true);
             current_span.record("exists", exists);
 
-            Ok(format!("Exists: {}", exists))
-        }
+            Ok(ToolResult {
+                success: true,
+                output: format!("Exists: {}", exists),
+            })
     }
 }
 
@@ -538,14 +586,15 @@ impl FileMetadataTool {
     }
 }
 
-impl Tool for FileMetadataTool {
+#[async_trait]
+impl TypedTool for FileMetadataTool {
     type Params = FileMetaParam;
 
-    fn name() -> &'static str {
+    fn name(&self) -> &str {
         "file_metadata"
     }
 
-    fn description() -> &'static str  {
+    fn description(&self) -> &str  {
         "Get metadata information about a file or directory (size, type, permissions). Provide a relative path."
     }
 
@@ -557,11 +606,10 @@ impl Tool for FileMetadataTool {
         is_dir = tracing::field::Empty,
         error = tracing::field::Empty
     ))]
-    fn call(
-        &mut self,
+    async fn call(
+        &self,
         parameters: Self::Params
-    ) -> impl std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send + Sync {
-        async move {
+    ) -> Result<ToolResult> {
             let current_span = tracing::Span::current();
             current_span.record("path", parameters.path.as_str());
 
@@ -571,7 +619,10 @@ impl Tool for FileMetadataTool {
                     let error_msg = format!("Path access error: {}", e);
                     current_span.record("success", false);
                     current_span.record("error", error_msg.as_str());
-                    return Ok(format!("Error: {}", error_msg));
+                    return Ok(ToolResult {
+                        success: false,
+                        output: format!("Error: {}", error_msg),
+                    });
                 }
             };
 
@@ -581,20 +632,25 @@ impl Tool for FileMetadataTool {
                     let error_msg = format!("Error getting file metadata: {}", e);
                     current_span.record("success", false);
                     current_span.record("error", error_msg.as_str());
-                    return Ok(error_msg);
+                    return Ok(ToolResult {
+                    success: false,
+                    output: error_msg,
+                });
                 }
             };
             current_span.record("success", true);
             current_span.record("file_size", metadata.len());
             current_span.record("is_dir", metadata.is_dir());
 
-            Ok(format!(
-                "Size: {} bytes\nIs Directory: {}\nReadonly: {}",
-                metadata.len(),
-                metadata.is_dir(),
-                metadata.permissions().readonly()
-            ))
-        }
+            Ok(ToolResult {
+                success: true,
+                output: format!(
+                    "Size: {} bytes\nIs Directory: {}\nReadonly: {}",
+                    metadata.len(),
+                    metadata.is_dir(),
+                    metadata.permissions().readonly()
+                ),
+            })
     }
 }
 

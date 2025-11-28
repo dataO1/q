@@ -1,7 +1,9 @@
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use tracing::debug;
-use ollama_rs::generation::tools::Tool;
+use serde::{Deserialize, Serialize};
+use schemars::JsonSchema;
+use crate::tools::{Tool, ToolResult, TypedTool};
 
 #[derive(Debug, Clone)]
 pub struct LspTool {
@@ -36,57 +38,51 @@ impl LspTool {
     }
 }
 
-impl Tool for LspTool {
-    type Params = Value;
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LspParams {
+    pub command: String,
+    pub context: Option<String>,
+    pub code: Option<String>,
+    pub position: Option<usize>,
+}
 
-    fn name() -> &'static str {
+#[async_trait::async_trait]
+impl TypedTool for LspTool {
+    type Params = LspParams;
+    fn name(&self) -> &str {
         "lsp"
     }
 
-    fn description() -> &'static str {
+    fn description(&self) -> &str {
         "Language Server Protocol tool for code analysis and completion"
     }
 
-    fn call(
-        &mut self,
-        parameters: Self::Params
-    ) -> impl std::future::Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>> + Send + Sync {
-        async move {
-        let command = parameters.get("command")
-            .and_then(Value::as_str)
-            .ok_or_else(|| anyhow!("Missing 'command' field"))?;
+    async fn call(&self, params: Self::Params) -> Result<ToolResult> {
+        let result = match params.command.as_str() {
+                "completions" => {
+                    let context = params.context.unwrap_or_default();
+                    self.completions(&context).await?
+                }
+                "diagnostics" => {
+                    let code = params.code.unwrap_or_default();
+                    self.diagnostics(&code).await?
+                }
+                "symbols" => {
+                    let code = params.code.unwrap_or_default();
+                    self.symbols(&code).await?
+                }
+                "type_info" => {
+                    let code = params.code.unwrap_or_default();
+                    let position = params.position.unwrap_or(0);
+                    self.type_info(&code, position).await?
+                }
+                _ => return Err(anyhow!("Unknown LSP command: {}", params.command)),
+            };
 
-        match command {
-            "completions" => {
-                let context = parameters.get("context")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                self.completions(context).await.map_err(|e| e.into())
-            }
-            "diagnostics" => {
-                let code = parameters.get("code")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                self.diagnostics(code).await.map_err(|e| e.into())
-            }
-            "symbols" => {
-                let code = parameters.get("code")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                self.symbols(code).await.map_err(|e| e.into())
-            }
-            "type_info" => {
-                let code = parameters.get("code")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let position = parameters.get("position")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0) as usize;
-                self.type_info(code, position).await.map_err(|e| e.into())
-            }
-            _ => Err(anyhow!("Unknown LSP command: {}", command).into()),
-        }
-        }
+        Ok(ToolResult {
+            success: true,
+            output: result,
+        })
     }
 }
 
@@ -96,9 +92,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_lsp_tool_call() {
-        let mut tool = LspTool::new();
-        let params = json!({ "command": "completions", "context": "fn main() { pri" });
+        let tool = LspTool::new();
+        let params = LspParams {
+            command: "completions".to_string(),
+            context: Some("fn main() { pri".to_string()),
+            code: None,
+            position: None,
+        };
         let result = tool.call(params).await.unwrap();
-        assert!(result.contains("Completions"));
+        assert!(result.success);
+        assert!(result.output.contains("Completions"));
     }
 }

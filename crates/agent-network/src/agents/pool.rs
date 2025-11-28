@@ -38,8 +38,7 @@ impl AgentPool {
                     config.system_prompt.clone(),
                     config.temperature,
                     config.max_tokens,
-                    "http://localhost",
-                    11434
+                    Some("http://localhost:11434/v1"),
                 )),
                 AgentType::Planning => Arc::new(PlanningAgent::new(
                     config.id.clone(),
@@ -47,8 +46,7 @@ impl AgentPool {
                     config.system_prompt.clone(),
                     config.temperature,
                     config.max_tokens,
-                    "http://localhost",
-                    11434
+                    Some("http://localhost:11434/v1"),
                 )),
                 // AgentType::Writing => Arc::new(WritingAgent::new(
                 //     config.id.clone(),
@@ -71,8 +69,7 @@ impl AgentPool {
                         config.temperature,
                         config.max_tokens,
                         quality_strategy,
-                        "http://localhost",
-                        11434
+                        Some("http://localhost:11434/v1"),
                     ))
                 }
                 _ => {
