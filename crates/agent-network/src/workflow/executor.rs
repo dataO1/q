@@ -9,17 +9,16 @@ use crate::hitl::{ApprovalRequest, AuditEvent, AuditLogger, DefaultApprovalQueue
 use crate::workflow::{TaskNode, TaskResult, WorkflowGraph, DependencyType};
 use crate::agents::{AgentPool, AgentContext};
 use crate::tools::ToolSet;
-use crate::status_stream::StatusStream;
 use crate::coordination::CoordinationManager;
 use crate::filelocks::FileLockManager;
-use ai_agent_common::{ConversationId, ProjectScope};
+use ai_agent_common::{ConversationId, ProjectScope, StatusEvent};
 use petgraph::algo::toposort;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use std::collections::{HashMap, VecDeque, BTreeMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, broadcast};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -28,8 +27,6 @@ pub struct WorkflowExecutor {
     /// Agent pool for task execution
     agent_pool: Arc<AgentPool>,
 
-    /// Status stream for event broadcasting
-    status_stream: Arc<StatusStream>,
 
     /// Task coordination manager
     coordination: Arc<CoordinationManager>,
@@ -107,11 +104,10 @@ impl WorkflowExecutor {
     /// Create a new workflow executor
     pub fn new(
         agent_pool: Arc<AgentPool>,
-        status_stream: Arc<StatusStream>,
         coordination: Arc<CoordinationManager>,
         file_locks: Arc<FileLockManager>,
     ) -> Self {
-        Self::with_config(agent_pool, status_stream, coordination, file_locks, ExecutorConfig::default())
+        Self::with_config(agent_pool, coordination, file_locks, ExecutorConfig::default())
     }
 
 
@@ -134,19 +130,17 @@ impl WorkflowExecutor {
     /// Create executor with custom configuration
     pub fn with_config(
         agent_pool: Arc<AgentPool>,
-        status_stream: Arc<StatusStream>,
         coordination: Arc<CoordinationManager>,
         file_locks: Arc<FileLockManager>,
         config: ExecutorConfig,
     ) -> Self {
         Self {
             agent_pool,
-            status_stream,
             coordination,
             file_locks,
             config,
-            approval_queue: None,  // ADD
-            audit_logger: None,    // ADD
+            approval_queue: None,
+            audit_logger: None,
             context_provider: None
         }
     }
@@ -162,13 +156,14 @@ impl WorkflowExecutor {
     }
 
     /// Execute workflow with wave-based parallel execution
-    #[instrument(name = "workflow_execution", skip(self, graph), fields(task_count = %graph.node_count()))]
+    #[instrument(name = "workflow_execution", skip(self, graph, status_sender), fields(task_count = %graph.node_count()))]
     pub async fn execute_with_hitl(&self,
             graph: WorkflowGraph,
             approval_queue: Arc<DefaultApprovalQueue>,
             audit_logger: Arc<AuditLogger>,
             project_scope: ProjectScope,
             conversation_id: ConversationId,
+            status_sender: Arc<broadcast::Sender<StatusEvent>>,
         ) -> AgentNetworkResult<Vec<TaskResult>> {
         let start_time = Instant::now();
         info!("Starting workflow execution: {} tasks", graph.node_count());
@@ -201,6 +196,7 @@ impl WorkflowExecutor {
                 Arc::clone(&audit_logger),
                 project_scope.clone(),
                 conversation_id.clone(),
+                Arc::clone(&status_sender),
             ).await?;
 
             for result in wave_results {
@@ -242,6 +238,7 @@ impl WorkflowExecutor {
         audit_logger: Arc<AuditLogger>,
         project_scope: ProjectScope,
         conversation_id: ConversationId,
+        status_sender: Arc<broadcast::Sender<StatusEvent>>,
     ) -> AgentNetworkResult<Vec<TaskResult>> {
         debug!("Executing wave {}: {} parallel tasks", wave.wave_index, wave.task_indices.len());
         // Log wave information with structured fields
@@ -257,7 +254,6 @@ impl WorkflowExecutor {
         for task_idx in &wave.task_indices {
             let task = graph[*task_idx].clone();
             let agent_pool = Arc::clone(&self.agent_pool);
-            let status_stream = Arc::clone(&self.status_stream);
             let coordination = Arc::clone(&self.coordination);
             let file_locks = Arc::clone(&self.file_locks);
             let timeout = self.config.task_timeout;
@@ -269,7 +265,7 @@ impl WorkflowExecutor {
 
             let project_scope = project_scope.clone();
             let conversation_id = conversation_id.clone();
-
+            let status_sender = Arc::clone(&status_sender);
 
             let previous_results_clone = previous_results.clone();
 
@@ -286,7 +282,6 @@ impl WorkflowExecutor {
                     execute_task_with_retry(
                         task.clone(),
                         agent_pool,
-                        status_stream,
                         coordination,
                         file_locks,
                         approval_queue,
@@ -297,6 +292,7 @@ impl WorkflowExecutor {
                         wave_index,
                         project_scope,
                         conversation_id,
+                        status_sender,
                         &previous_results_clone
                     )
                     .await
@@ -424,6 +420,7 @@ async fn execute_single_task(
     file_locks: Arc<FileLockManager>,
     project_scope: ProjectScope,
     conversation_id: ConversationId,
+    status_sender: Arc<broadcast::Sender<StatusEvent>>,
     previous_results: &HashMap<String, TaskResult>
 ) -> AgentNetworkResult<TaskResult> {
     // Get agent
@@ -515,7 +512,7 @@ async fn execute_single_task(
 
     // Execute agent
     info!("Starting agent execution");
-    match agent.execute(agent_context).await {
+    match agent.execute(agent_context, status_sender).await {
         Ok(result) => {
             info!("Agent execution completed successfully (tool executions: {})", result.tool_executions.len());
 
@@ -546,7 +543,7 @@ async fn execute_single_task(
     }
 }
 
-#[instrument(name = "task_retry_execution", skip(task, agent_pool, status_stream, coordination, file_locks), fields(
+#[instrument(name = "task_retry_execution", skip(task, agent_pool, coordination, file_locks), fields(
     task_id = %task.task_id,
     agent_id = %task.agent_id,
 ))]
@@ -554,10 +551,9 @@ async fn execute_single_task(
 async fn execute_task_with_retry(
     task: TaskNode,
     agent_pool: Arc<AgentPool>,
-    status_stream: Arc<StatusStream>,
     coordination: Arc<CoordinationManager>,
     file_locks: Arc<FileLockManager>,
-    approval_queue: Arc<DefaultApprovalQueue>,  // ADD THIS PARAMETER
+    approval_queue: Arc<DefaultApprovalQueue>,
     audit_logger: Arc<AuditLogger>,
     context_provider: Option<Arc<crate::rag::ContextProvider>>,
     timeout: Duration,
@@ -565,6 +561,7 @@ async fn execute_task_with_retry(
     wave_index: usize,
     project_scope: ProjectScope,
     conversation_id: ConversationId,
+    status_sender: Arc<broadcast::Sender<StatusEvent>>,
     previous_results: &HashMap<String, TaskResult>
 ) -> AgentNetworkResult<TaskResult> {
 
@@ -581,12 +578,7 @@ async fn execute_task_with_retry(
     // Register task
     coordination.register_task(task_id.clone(), agent_id.clone()).await?;
 
-    // Emit task started event
-    status_stream.emit_task_started(
-        task_id.clone(),
-        agent_id.clone(),
-        format!("Task started in wave {}", wave_index),
-    );
+    // Task started (status events will be handled in future phases)
 
     let mut retries = 0;
     let mut last_error = None;
@@ -600,6 +592,7 @@ async fn execute_task_with_retry(
             Arc::clone(&file_locks),
             project_scope.clone(),
             conversation_id.clone(),
+            Arc::clone(&status_sender),
             previous_results
         ))
         .await;
@@ -654,11 +647,7 @@ async fn execute_task_with_retry(
                     }
                 }
 
-                status_stream.emit_task_completed(
-                    task_id.clone(),
-                    agent_id.clone(),
-                    "Task completed successfully".to_string(),
-                );
+                // Task completed (status events will be handled in future phases)
                 return Ok(task_result);
             }
             Ok(Err(e)) => {
@@ -698,11 +687,7 @@ async fn execute_task_with_retry(
         .update_task_status(&task_id, crate::coordination::TaskStatus::Failed)
         .await?;
 
-    status_stream.emit_task_failed(
-        task_id.clone(),
-        agent_id.clone(),
-        format!("Task failed after {} retries: {}", retries, error_msg),
-    );
+    // Task failed (status events will be handled in future phases)
     debug!("Task completed successfully");
     Ok(TaskResult {
         task_id,

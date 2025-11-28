@@ -1,12 +1,11 @@
 use ai_agent_common::SystemConfig;
-use ai_agent_network::orchestrator::Orchestrator;
+use ai_agent_network::execution_manager::ExecutionManager;
 use axum::{
     Router, 
     routing::{get, post},
     middleware::from_fn,
 };
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
 use anyhow::Result;
 use tracing::{info, instrument};
 use tower_http::{
@@ -15,7 +14,6 @@ use tower_http::{
 };
 
 use crate::{
-    types::StatusEvent,
     routes::{
         execute::execute_task,
         stream::websocket_handler,
@@ -27,11 +25,8 @@ use crate::{
 /// Shared application state
 #[derive(Clone)]
 pub struct AppState {
-    /// The orchestrator from agent-network crate
-    pub orchestrator: Arc<RwLock<Orchestrator>>,
-    
-    /// Broadcast channel for status events
-    pub status_broadcaster: broadcast::Sender<StatusEvent>,
+    /// The execution manager from agent-network crate
+    pub execution_manager: Arc<ExecutionManager>,
     
     /// System configuration loaded at startup
     pub config: SystemConfig,
@@ -48,16 +43,12 @@ impl AcpServer {
         info!("Initializing ACP server with config from {:?}", 
                std::env::current_dir().unwrap_or_default());
         
-        // Create orchestrator with full system config
-        let orchestrator = Orchestrator::new(config.clone()).await?;
-        let orchestrator = Arc::new(RwLock::new(orchestrator));
-        
-        // Create broadcast channel for status events (capacity: 1000)
-        let (status_broadcaster, _) = broadcast::channel(1000);
+        // Create execution manager with full system config
+        let execution_manager = ExecutionManager::new(config.clone()).await?;
+        let execution_manager = Arc::new(execution_manager);
         
         let state = AppState {
-            orchestrator,
-            status_broadcaster,
+            execution_manager,
             config, // Store entire config for server lifetime
         };
         

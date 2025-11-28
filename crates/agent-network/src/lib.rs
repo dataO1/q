@@ -11,6 +11,7 @@
 // Module declarations
 pub mod error;
 pub mod orchestrator;
+pub mod execution_manager;
 pub mod workflow;
 pub mod agents;
 pub mod tools;
@@ -19,7 +20,6 @@ pub mod conflict;
 pub mod filelocks;
 pub mod coordination;
 pub mod sharedcontext;
-pub mod status_stream;
 pub mod token_budget;
 pub mod acp;
 pub mod rag;
@@ -29,9 +29,9 @@ pub mod rag;
 // Public re-exports for convenience
 pub use error::{AgentNetworkError};
 pub use orchestrator::Orchestrator;
+pub use execution_manager::ExecutionManager;
 pub use workflow::{WorkflowBuilder, WorkflowExecutor, WorkflowGraph, TaskNode, TaskResult};
 pub use agents::{Agent, AgentResult};
-pub use status_stream::{StatusEvent, StatusEventType};
 
 // Version constant
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

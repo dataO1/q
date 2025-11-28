@@ -1,7 +1,7 @@
 //! ACP (Agent Communication Protocol) server
 
 use crate::{
-    error::AgentNetworkResult, orchestrator::Orchestrator
+    error::AgentNetworkResult, execution_manager::ExecutionManager
 };
 use ai_agent_common::{ConversationId, ProjectScope, SystemConfig};
 use ai_agent_rag::context_manager::ContextManager;
@@ -13,10 +13,9 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 pub struct AcpServer {
-    orchestrator: Arc<RwLock<Orchestrator>>,
+    execution_manager: Arc<ExecutionManager>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -38,15 +37,15 @@ pub struct HealthResponse {
 
 pub async fn start_server(config: SystemConfig) -> AgentNetworkResult<()> {
 
-    let orchestrator = Orchestrator::new(config.clone()).await?;
-    let orchestrator = std::sync::Arc::new(tokio::sync::RwLock::new(orchestrator));
+    let execution_manager = ExecutionManager::new(config.clone()).await?;
+    let execution_manager = std::sync::Arc::new(execution_manager);
 
 
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/execute", post(execute_query))
         .route("/status", get(status_stream))
-        .with_state(orchestrator);
+        .with_state(execution_manager);
 
     // TODO: Week 7 - Complete ACP server implementation
     // - Add WebSocket support for streaming
@@ -71,12 +70,11 @@ async fn health_check() -> Json<HealthResponse> {
 }
 
 async fn execute_query(
-    State(orchestrator): State<Arc<RwLock<Orchestrator>>>,
+    State(execution_manager): State<Arc<ExecutionManager>>,
     Json(request): Json<ExecuteRequest>,
 ) -> Json<ExecuteResponse> {
-    let orchestrator = orchestrator.read().await;
     if let Ok(project_scope) = ContextManager::detect_project_scope(request.cwd).await{
-        match orchestrator.execute_query(&request.query, project_scope,ConversationId::new()).await {
+        match execution_manager.execute_query(&request.query, project_scope,ConversationId::new()).await {
             Ok(result) => Json(ExecuteResponse {
                 result,
                 success: true,

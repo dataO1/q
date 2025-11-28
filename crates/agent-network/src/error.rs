@@ -147,6 +147,11 @@ impl AgentNetworkError {
         Self::QueryExecution(msg.into())
     }
 
+    /// Create a DAG construction error
+    pub fn dag_construction(msg: impl Into<String>) -> Self {
+        Self::DagConstruction(msg.into())
+    }
+
     /// Check if error is retryable
     pub fn is_retryable(&self) -> bool {
         matches!(

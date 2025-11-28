@@ -161,41 +161,127 @@ pub struct MessageMetadata {
     pub code_snippets: Vec<String>,
 }
 
-/// Status events for streaming
+/// Real-time status event for WebSocket streaming  
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum StatusEvent {
-    TaskStarted {
-        task_id: String,
-        description: String,
+pub struct StatusEvent {
+    /// Unique identifier for this execution
+    pub execution_id: String,
+    
+    /// When this event occurred
+    pub timestamp: DateTime<Utc>,
+    
+    /// Source that generated this event
+    pub source: EventSource,
+    
+    /// The actual event data
+    pub event: EventType,
+}
+
+/// Source of a status event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EventSource {
+    /// Event from the orchestrator
+    Orchestrator,
+    
+    /// Event from a specific agent
+    Agent { 
+        agent_id: String, 
+        agent_type: AgentType 
     },
-    Decomposition {
-        subtasks: Vec<String>,
+    
+    /// Event from a tool being used by an agent
+    Tool { 
+        tool_name: String, 
+        agent_id: String 
     },
-    Delegation {
-        agent: String,
-        subtask: String,
+    
+    /// Event from workflow/DAG execution
+    Workflow { 
+        node_id: String, 
+        wave: usize 
     },
-    Progress {
-        agent: String,
-        progress: f32,
-        message: String,
+    
+    /// Event from human-in-the-loop system
+    Hitl { 
+        request_id: String 
     },
-    SubtaskComplete {
-        agent: String,
-        subtask: String,
-        result: String,
+}
+
+/// Types of events that can occur during execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EventType {
+    /// Execution has started
+    ExecutionStarted { 
+        query: String 
     },
-    AwaitingApproval {
-        task: String,
-        reason: String,
+    
+    /// Execution completed successfully
+    ExecutionCompleted { 
+        result: String 
     },
-    Complete {
-        result: String,
+    
+    /// Execution failed with an error
+    ExecutionFailed { 
+        error: String 
     },
-    Error {
-        agent: Option<String>,
-        error: String,
+    
+    /// An agent has started working
+    AgentStarted { 
+        context_size: usize 
+    },
+    
+    /// Agent is thinking/processing (streaming thoughts)
+    AgentThinking { 
+        thought: String 
+    },
+    
+    /// Agent has completed its task
+    AgentCompleted { 
+        result: String 
+    },
+    
+    /// Agent failed to complete its task
+    AgentFailed { 
+        error: String 
+    },
+    
+    /// A tool has started executing
+    ToolStarted { 
+        args: serde_json::Value 
+    },
+    
+    /// Tool execution completed
+    ToolCompleted { 
+        result: serde_json::Value 
+    },
+    
+    /// Tool execution failed
+    ToolFailed { 
+        error: String 
+    },
+    
+    /// Human-in-the-loop approval requested
+    HitlRequested { 
+        task_description: String,
+        risk_level: String,
+    },
+    
+    /// Human-in-the-loop decision received
+    HitlCompleted { 
+        approved: bool,
+        reason: Option<String>,
+    },
+    
+    /// Workflow step started
+    WorkflowStepStarted { 
+        step_name: String 
+    },
+    
+    /// Workflow step completed
+    WorkflowStepCompleted { 
+        step_name: String 
     },
 }
 
@@ -415,3 +501,4 @@ impl fmt::Display for QualityStrategy {
         }
     }
 }
+

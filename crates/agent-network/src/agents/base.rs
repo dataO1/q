@@ -3,7 +3,7 @@
 //! Defines the core Agent trait that all specialized agents implement,
 //! along with context types for passing information to agents.
 
-use ai_agent_common::{AgentType, ConversationId, ProjectScope};
+use ai_agent_common::{AgentType, ConversationId, ProjectScope, StatusEvent, EventSource, EventType};
 use async_trait::async_trait;
 use derive_more::Display;
 use async_openai::{
@@ -14,9 +14,10 @@ use async_openai::{
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, broadcast};
 use tracing::{debug, info, error, warn, instrument, Instrument};
 use std::{collections::{HashMap, HashSet}, sync::Arc};
+use chrono;
 use schemars::JsonSchema;
 use anyhow::{Context, Result, anyhow};
 
@@ -176,14 +177,56 @@ pub trait TypedAgent: Send + Sync {
         &self,
         context: AgentContext,
         workflow_steps: Vec<WorkflowStep>,
-        tools: Arc<ToolSet>
+        tools: Arc<ToolSet>,
+        status_sender: Arc<broadcast::Sender<StatusEvent>>,
     ) -> Result<AgentResult> {
+        // Emit agent started event
+        let conversation_id = context.conversation_id
+            .as_ref()
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        
+        let agent_started_event = StatusEvent {
+            execution_id: conversation_id.clone(),
+            timestamp: chrono::Utc::now(),
+            source: EventSource::Agent { 
+                agent_id: self.id().to_string(), 
+                agent_type: self.agent_type() 
+            },
+            event: EventType::AgentStarted { 
+                context_size: context.description.len() + 
+                    context.rag_context.as_ref().map(|c| c.len()).unwrap_or(0) +
+                    context.history_context.as_ref().map(|c| c.len()).unwrap_or(0)
+            },
+        };
+        
+        if let Err(_) = status_sender.send(agent_started_event) {
+            debug!("No subscribers for agent started event");
+        }
+
         let mut workflow_state = WorkflowState::new();
         let mut final_result = None;
         let mut all_tool_executions = Vec::new();
 
         for (step_index, step) in workflow_steps.iter().enumerate() {
             debug!("Executing workflow step {}/{}: {}", step_index + 1, workflow_steps.len(), step.name);
+
+            // Emit workflow step started event
+            let step_started_event = StatusEvent {
+                execution_id: conversation_id.clone(),
+                timestamp: chrono::Utc::now(),
+                source: EventSource::Agent { 
+                    agent_id: self.id().to_string(), 
+                    agent_type: self.agent_type() 
+                },
+                event: EventType::WorkflowStepStarted { 
+                    step_name: step.name.clone()
+                },
+            };
+            
+            if let Err(_) = status_sender.send(step_started_event) {
+                debug!("No subscribers for workflow step started event");
+            }
 
             // Update context with workflow state for this step
             let mut updated_context = context.clone();
@@ -214,6 +257,23 @@ pub trait TypedAgent: Send + Sync {
                     final_result = Some(result.output.unwrap_or_default());
 
                     debug!("Step '{}' completed successfully", step.name);
+                    
+                    // Emit workflow step completed event
+                    let step_completed_event = StatusEvent {
+                        execution_id: conversation_id.clone(),
+                        timestamp: chrono::Utc::now(),
+                        source: EventSource::Agent { 
+                            agent_id: self.id().to_string(), 
+                            agent_type: self.agent_type() 
+                        },
+                        event: EventType::WorkflowStepCompleted { 
+                            step_name: step.name.clone()
+                        },
+                    };
+                    
+                    if let Err(_) = status_sender.send(step_completed_event) {
+                        debug!("No subscribers for workflow step completed event");
+                    }
                 }
                 Err(e) => {
                     let error_msg = format!("Workflow step '{}' failed: {}", step.name, e);
@@ -228,6 +288,23 @@ pub trait TypedAgent: Send + Sync {
                     };
                     workflow_state.add_step_result(failed_result);
 
+                    // Emit agent failed event
+                    let agent_failed_event = StatusEvent {
+                        execution_id: conversation_id.clone(),
+                        timestamp: chrono::Utc::now(),
+                        source: EventSource::Agent { 
+                            agent_id: self.id().to_string(), 
+                            agent_type: self.agent_type() 
+                        },
+                        event: EventType::AgentFailed { 
+                            error: error_msg.clone()
+                        },
+                    };
+                    
+                    if let Err(_) = status_sender.send(agent_failed_event) {
+                        debug!("No subscribers for agent failed event");
+                    }
+
                     return Err(anyhow!(error_msg));
                 }
             }
@@ -235,7 +312,7 @@ pub trait TypedAgent: Send + Sync {
         let final_result = serde_json::from_str(&final_result.unwrap_or_default());
 
         // Create final agent result combining all workflow steps
-        Ok(AgentResult {
+        let agent_result = AgentResult {
             agent_id: self.id().to_string(),
             output: final_result.unwrap_or_default(),
             confidence: 0.8, // Workflow completion confidence
@@ -246,7 +323,26 @@ pub trait TypedAgent: Send + Sync {
                 workflow_steps.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(" → ")
             )),
             tool_executions: all_tool_executions,
-        })
+        };
+
+        // Emit agent completed event
+        let agent_completed_event = StatusEvent {
+            execution_id: conversation_id.clone(),
+            timestamp: chrono::Utc::now(),
+            source: EventSource::Agent { 
+                agent_id: self.id().to_string(), 
+                agent_type: self.agent_type() 
+            },
+            event: EventType::AgentCompleted { 
+                result: agent_result.reasoning.clone().unwrap_or_default()
+            },
+        };
+        
+        if let Err(_) = status_sender.send(agent_completed_event) {
+            debug!("No subscribers for agent completed event");
+        }
+
+        Ok(agent_result)
     }
 
     /// Execute a single OneShot workflow step
@@ -797,7 +893,11 @@ pub trait Agent: Send + Sync {
     fn client(&self) -> &Client<OpenAIConfig>;
 
     // Execute with type-erased result
-    async fn execute(&self, context: AgentContext) -> Result<AgentResult>;
+    async fn execute(
+        &self, 
+        context: AgentContext,
+        status_sender: Arc<broadcast::Sender<StatusEvent>>,
+    ) -> Result<AgentResult>;
 }
 
 // Blanket implementation: any TypedAgent automatically becomes an Agent
@@ -812,12 +912,16 @@ where
     fn model(&self) -> &str { TypedAgent::model(self) }
     fn client(&self) -> &Client<OpenAIConfig> { TypedAgent::client(self) }
 
-    #[instrument(name = "agent_workflow_execution", skip(self, context), fields(agent_id = %self.id(), agent_type = %self.agent_type()))]
-    async fn execute(&self, context: AgentContext) -> Result<AgentResult> {
+    #[instrument(name = "agent_workflow_execution", skip(self, context, status_sender), fields(agent_id = %self.id(), agent_type = %self.agent_type()))]
+    async fn execute(
+        &self, 
+        context: AgentContext,
+        status_sender: Arc<broadcast::Sender<StatusEvent>>,
+    ) -> Result<AgentResult> {
         // All agents use workflow execution
         let workflow_steps = self.define_workflow_steps(&context);
         let tools = Arc::new(ToolSet::new(&context.clone().project_scope.unwrap().root));
-        self.execute_workflow(context, workflow_steps, tools).await
+        self.execute_workflow(context, workflow_steps, tools, status_sender).await
     }
 
 }
