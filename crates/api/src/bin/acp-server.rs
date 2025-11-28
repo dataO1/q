@@ -3,19 +3,15 @@
 //! Initializes the orchestrator, loads configuration, and starts the ACP server.
 //! Supports both interactive and one-shot modes.
 
-use ai_agent_common::{AgentNetworkConfig, SystemConfig};
-use ai_agent_network::{
-    Orchestrator, VERSION,
-};
+use ai_agent_common::SystemConfig;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
 use tracing::{error, info};
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
 #[command(name = "agent-network")]
-#[command(version = VERSION)]
+#[command(version = "0.1.0")]
 #[command(author = "Agent Network Contributors")]
 #[command(about = "Dynamic multi-agent orchestration framework")]
 struct Cli {
@@ -80,7 +76,7 @@ async fn main() -> Result<()> {
     let log_level = cli.log_level.as_deref().unwrap_or("info");
     ai_agent_common::init_tracing_with_level(log_level)?;
 
-    info!("Agent-Network v{} starting", VERSION);
+    info!("ACP Server v0.1.0 starting");
 
     // Load configuration
     let config = SystemConfig::load_config(&cli.config).map_err(|e| {
@@ -160,7 +156,10 @@ async fn execute_via_acp(query: &str, cwd: &str, server_url: &str) -> Result<()>
 /// Start the ACP server
 async fn start_server(config: SystemConfig) -> Result<()> {
     info!("Starting ACP server on {}:{}", config.agent_network.acp.host, config.agent_network.acp.port);
-    ai_agent_network::acp::start_server(config).await?;
+    
+    // Use the comprehensive ACP server with OpenAPI documentation
+    let server = ai_agent_api::AcpServer::new(config).await?;
+    server.run().await?;
 
     Ok(())
 }

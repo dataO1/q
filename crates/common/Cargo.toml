@@ -22,6 +22,7 @@ tracing = "*"
 fastembed = "*"
 derive_builder = "*"
 derive_more = {version = "*", features = ["display"]}
+utoipa = { version = "5", features = ["chrono"] }
 
 # OpenTelemetry dependencies for tracing
 opentelemetry = { version = "*", features = ["trace", "metrics"] }

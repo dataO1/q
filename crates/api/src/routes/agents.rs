@@ -1,10 +1,66 @@
 use axum::{Json, extract::State};
+use serde_json::json;
 use crate::{
     types::{CapabilitiesResponse, AgentCapability},
     server::AppState,
 };
 
-/// List system capabilities and available agent types
+/// Get system capabilities and agent discovery
+/// 
+/// Returns information about available agents, supported features, and API capabilities.
+/// Use this endpoint for agent discovery and capability negotiation.
+/// 
+/// ## Agent Types
+/// 
+/// Each agent type specializes in different kinds of tasks:
+/// - **Coding**: Code analysis, implementation, debugging, refactoring
+/// - **Planning**: Task decomposition, workflow planning, architecture design
+/// - **Writing**: Documentation, explanations, summaries, communication
+/// - **Evaluator**: Code review, quality assessment, testing strategies
+/// 
+/// ## Features
+/// 
+/// The API supports various advanced features:
+/// - `real_time_streaming`: WebSocket status updates during execution
+/// - `multi_agent_orchestration`: Automatic task routing to appropriate agents
+/// - `dag_workflow_execution`: Complex workflow with dependency management
+/// - `human_in_the_loop`: Human approval for sensitive operations
+/// - `smart_rag_integration`: Context-aware information retrieval
+/// - `context_aware_execution`: Project-specific tool and approach selection
+/// 
+/// ## Usage
+/// 
+/// Use this information to:
+/// - Discover available agent capabilities
+/// - Determine which agents can handle specific tasks
+/// - Check API feature support before making requests
+/// - Display agent options in client interfaces
+#[utoipa::path(
+    get,
+    path = "/capabilities",
+    tag = "discovery", 
+    summary = "Get system capabilities",
+    description = "Discover available agents, features, and API capabilities",
+    responses(
+        (status = 200, description = "System capabilities", body = CapabilitiesResponse,
+         example = json!({
+             "agents": [
+                 {
+                     "agent_type": "Coding",
+                     "description": "Analyzes code, implements features, fixes bugs",
+                     "tools": ["file_reader", "file_writer", "lsp_client"]
+                 },
+                 {
+                     "agent_type": "Planning", 
+                     "description": "Decomposes tasks and plans workflows",
+                     "tools": ["task_planner", "dependency_analyzer"]
+                 }
+             ],
+             "features": ["real_time_streaming", "multi_agent_orchestration"],
+             "version": "1.0.0"
+         }))
+    )
+)]
 pub async fn list_capabilities(
     State(state): State<AppState>,
 ) -> Json<CapabilitiesResponse> {

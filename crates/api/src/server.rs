@@ -4,6 +4,7 @@ use axum::{
     Router, 
     routing::{get, post},
     middleware::from_fn,
+    response::Json,
 };
 use std::sync::Arc;
 use anyhow::Result;
@@ -20,7 +21,10 @@ use crate::{
         agents::list_capabilities,
     },
     middleware::logging::logging_middleware,
+    openapi::ApiDoc,
 };
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 /// Shared application state
 #[derive(Clone)]
@@ -60,11 +64,15 @@ impl AcpServer {
         Router::new()
             // Core ACP endpoints
             .route("/execute", post(execute_task))
-            .route("/stream/:execution_id", get(websocket_handler))
+            .route("/stream/{execution_id}", get(websocket_handler))
             
             // Discovery and health endpoints
             .route("/capabilities", get(list_capabilities))
             .route("/health", get(health_check))
+            
+            // API documentation endpoints
+            .merge(SwaggerUi::new("/docs")
+                .url("/api-doc/openapi.json", ApiDoc::openapi()))
             
             // Apply state and middleware
             .with_state(self.state.clone())
@@ -104,12 +112,33 @@ impl AcpServer {
 }
 
 /// Health check endpoint
-async fn health_check() -> axum::Json<crate::types::HealthResponse> {
+/// 
+/// Returns the current status and health of the ACP API server.
+/// Use this endpoint to verify server availability and operational status.
+/// 
+/// ## Response
+/// 
+/// Returns health information including:
+/// - Server status ("healthy" indicates full functionality)
+/// - Optional status message with additional details
+/// - Timestamp when the check was performed
+#[utoipa::path(
+    get,
+    path = "/health",
+    tag = "health",
+    summary = "Check server health",
+    description = "Verify the API server is running and healthy",
+    responses(
+        (status = 200, description = "Server is healthy", body = crate::types::HealthResponse)
+    )
+)]
+pub async fn health_check() -> Json<crate::types::HealthResponse> {
     use chrono::Utc;
     
-    axum::Json(crate::types::HealthResponse {
+    Json(crate::types::HealthResponse {
         status: "healthy".to_string(),
         message: Some("ACP server is running".to_string()),
         timestamp: Utc::now(),
     })
 }
+

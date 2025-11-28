@@ -3,6 +3,10 @@ name = "ai-agent-api"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "acp-server"
+path = "src/bin/acp-server.rs"
+
 [dependencies]
 ai-agent-common = { path = "../common" }
 ai-agent-network = { path = "../agent-network" }
@@ -16,9 +20,13 @@ serde_json = "*"
 anyhow = "*"
 futures = "*"
 futures-util = "*"
+clap = { version = "*", features = ["derive"] }
 async-stream = "*"
 rig-core = "*"
 reqwest = { version = "*", features = ["json", "rustls-tls"] }
 uuid = { version = "*", features = ["v4"] }
 chrono = { version = "*", features = ["serde"] }
 tracing = "*"
+utoipa = { version = "5.4", features = ["axum_extras", "chrono"] }
+utoipa-swagger-ui = { version = "9.0", features = ["axum"] }
+utoipa-axum = "0.2"

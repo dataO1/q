@@ -87,7 +87,7 @@ impl ProjectScope{
 
 
 /// Agent type enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Display, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Display, Hash, utoipa::ToSchema)]
 pub enum AgentType {
     Orchestrator,
     Coding,
