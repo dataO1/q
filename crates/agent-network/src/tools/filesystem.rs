@@ -38,28 +38,36 @@ impl FilesystemBase {
     }
 
     fn resolve_secure_path(&self, relative_path: &str) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
-        // 1. Sanitize input: Remove leading '/' to force relative logic if agent messes up
         let relative_path = relative_path.trim_start_matches('/');
-
-        // 2. Resolve absolute path
         let target_path = self.base_path.join(relative_path);
 
-        // 3. Security Check (Canonicalize to prevent ../../ escapes)
         let canonical_target = if target_path.exists() {
             std::fs::canonicalize(&target_path)?
         } else {
-            // For new files, we check the parent directory
-            let parent = target_path.parent().unwrap_or(&self.base_path);
-            let canonical_parent = std::fs::canonicalize(parent)?;
-            // Ensure parent is safe
-            if !canonical_parent.starts_with(&self.base_path) {
-                return Err("Access denied".into());
+            // Find the first existing ancestor
+            let mut ancestor = target_path.parent();
+            while let Some(p) = ancestor {
+                if p.exists() {
+                    let canonical_ancestor = std::fs::canonicalize(p)?;
+
+                    // Security check on the existing ancestor
+                    if !canonical_ancestor.starts_with(&self.base_path) {
+                        return Err("Access denied".into());
+                    }
+
+                    // Build the full path from the safe ancestor
+                    let remainder = target_path.strip_prefix(p)
+                        .map_err(|_| "Path resolution error")?;
+                    return Ok(canonical_ancestor.join(remainder));
+                }
+                ancestor = p.parent();
             }
-            // Construct the full path safely
-            canonical_parent.join(target_path.file_name().unwrap())
+
+            // If no ancestor exists (shouldn't happen if base_path is valid), fall back
+            return Err("No valid parent directory found".into());
         };
 
-        // 4. Final Verify
+        // Final security check
         if !canonical_target.starts_with(&self.base_path) {
             return Err(format!("Access denied: {} is outside the workspace", relative_path).into());
         }

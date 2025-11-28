@@ -64,7 +64,7 @@ impl Default for ExecutorConfig {
     fn default() -> Self {
         Self {
             max_concurrent_tasks: 16,
-            task_timeout: Duration::from_secs(500),
+            task_timeout: Duration::from_secs(5000),
             collect_metrics: true,
             max_retries: 3,
         }
@@ -454,7 +454,7 @@ async fn execute_single_task(
                 }
             }
 
-            // Add tool executions 
+            // Add tool executions
             let tool_executions_json = serde_json::to_value(&task_result.tool_executions)?;
             dep_output.insert("tool_executions".to_string(), tool_executions_json);
 

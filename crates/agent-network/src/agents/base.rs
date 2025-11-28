@@ -16,7 +16,7 @@ use schemars::JsonSchema;
 use anyhow::{Context, Result, anyhow};
 use ollama_rs::coordinator::Coordinator;
 
-use crate::{agents::AgentResult, tools::{filesystem::FILESYSTEM_PREAMBLE, DynamicTool, ToolExecution, ToolSet}};
+use crate::{agents::AgentResult, tools::{ToolExecution, ToolSet}};
 
 /// ReAct step output for semantic stop conditions
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -370,6 +370,7 @@ pub trait TypedAgent: Send + Sync {
         current_span.record("step.description", step.description.as_str());
         current_span.record("context.description", context.description.as_str());
 
+        current_span.record("Task description:",&context.description);
         if let Some(rag_context) = &context.rag_context {
             current_span.record("rag_context.length", rag_context.len());
         }
@@ -387,56 +388,22 @@ pub trait TypedAgent: Send + Sync {
         }
         let messages = self.build_initial_message(context,step, Some(&tools));
 
-        // Dynamically add required tools for this step
-        for tool_name in &step.required_tools {
-            tools.ensure_filesystem_tool(tool_name);
-            debug!(target: "agent_execution", "Ensured tool '{}' is available for step '{}'", tool_name, step.name);
-        }
-
         // Create Coordinator with tools
         let mut coordinator = Coordinator::new(
             self.client().clone(),
             self.model().to_string(),
             vec![] // Start with empty history
-        );
+        )
+            .add_tool(tools.write_file);
+            // .add_tool(tools.read_file)
+            // .add_tool(tools.list_directory)
+            // .add_tool(tools.create_directory)
+            // .add_tool(tools.file_exists)
+            // .add_tool(tools.file_metadata)
+            // .add_tool(tools.delete_file);
         let json_structure = JsonStructure::new::<Self::Output>();
         if step.formatted{
             coordinator = coordinator.format(FormatType::StructuredJson(Box::new(json_structure)));
-        }
-
-        // Dynamically add tools based on required_tools for this step
-        for tool_name in &step.required_tools {
-            if let Some(dynamic_tool) = tools.get_tool(tool_name) {
-                match dynamic_tool {
-                    DynamicTool::WriteFile(tool) => {
-                        coordinator = coordinator.add_tool(tool.as_ref().clone());
-                    }
-                    DynamicTool::ReadFile(tool) => {
-                        coordinator = coordinator.add_tool(tool.as_ref().clone());
-                    }
-                    DynamicTool::ListDirectory(tool) => {
-                        coordinator = coordinator.add_tool(tool.as_ref().clone());
-                    }
-                    DynamicTool::CreateDirectory(tool) => {
-                        coordinator = coordinator.add_tool(tool.as_ref().clone());
-                    }
-                    DynamicTool::FileExists(tool) => {
-                        coordinator = coordinator.add_tool(tool.as_ref().clone());
-                    }
-                    DynamicTool::FileMetadata(tool) => {
-                        coordinator = coordinator.add_tool(tool.as_ref().clone());
-                    }
-                    DynamicTool::DeleteFile(tool) => {
-                        coordinator = coordinator.add_tool(tool.as_ref().clone());
-                    }
-                    DynamicTool::Lsp(tool) => {
-                        coordinator = coordinator.add_tool(tool.as_ref().clone());
-                    }
-                }
-                debug!(target: "agent_execution", "Added tool '{}' to coordinator for step '{}'", tool_name, step.name);
-            } else {
-                warn!(target: "agent_execution", "Required tool '{}' not found for step '{}'", tool_name, step.name);
-            }
         }
 
         debug!(target: "agent_execution", "Starting Coordinator chat for step '{}'", step.name);
@@ -480,12 +447,14 @@ pub trait TypedAgent: Send + Sync {
         let current_span = tracing::Span::current();
         // Build messages for this specific step
         let mut messages = vec![
-            ChatMessage::system(format!("# STEP: {}\n{}\n\n# INSTRUCTIONS:\n{}",
-                step.name,
-                step.description,
-                self.system_prompt()
-            ))
         ];
+
+        // step instructions
+        messages.push(ChatMessage::system(format!("# STEP: {}\n{}\n\n# INSTRUCTIONS:\n{}",
+            step.name,
+            step.description,
+            self.system_prompt()
+        )));
 
         if !context.dependency_outputs.is_empty() {
             let mut dependency_msg = format!("# PREVIOUS TASK OUTPUTS ({} tasks completed):\n\n", context.dependency_outputs.len());
@@ -515,66 +484,66 @@ pub trait TypedAgent: Send + Sync {
                 dependency_msg.push_str(&format!("{}\n\n", output_content));
             }
 
-            messages.push(ChatMessage::user(dependency_msg));
+            messages.push(ChatMessage::system(dependency_msg));
         }
 
-        // Add workflow state if available
-        if let Some(workflow_state_value) = context.metadata.get("workflow_state") {
-            // Try to parse the workflow state for better formatting
-            if let Ok(workflow_state) = serde_json::from_value::<WorkflowState>(workflow_state_value.clone()) {
-                let mut workflow_msg = format!("# WORKFLOW CONTEXT (Step {} of workflow):\n\n", workflow_state.step_results.len() + 1);
-
-                if !workflow_state.step_results.is_empty() {
-                    workflow_msg.push_str("## Previous Steps:\n");
-                    for (i, step_result) in workflow_state.step_results.iter().enumerate() {
-                        let status_icon = if step_result.success { "✅" } else { "❌" };
-                        workflow_msg.push_str(&format!(
-                            "- Step {}: {} {} {}\n",
-                            i + 1,
-                            step_result.step_id,
-                            status_icon,
-                            step_result.error.as_ref().unwrap_or(&"Completed".to_string())
-                        ));
-                    }
-                    workflow_msg.push_str("\n");
-                }
-
-                if !workflow_state.shared_context.is_empty() {
-                    workflow_msg.push_str("## Shared Context:\n");
-                    for (key, value) in &workflow_state.shared_context {
-                        workflow_msg.push_str(&format!("- {}: {}\n", key, value.chars().take(100).collect::<String>()));
-                    }
-                    workflow_msg.push_str("\n");
-                }
-
-                messages.push(ChatMessage::user(workflow_msg));
-            } else {
-                // Fallback to raw JSON if parsing fails
-                messages.push(ChatMessage::user(format!("# WORKFLOW CONTEXT:\n{}",
-                    serde_json::to_string_pretty(workflow_state_value).unwrap_or_default())));
-            }
-        }
-
-        // Add step parameters
-        if !step.parameters.is_empty() {
-            let mut params_msg = format!("# STEP PARAMETERS (from {} definition):\n", step.name);
-
-            // Format parameters with better readability
-            for (key, value) in &step.parameters {
-                let value_str = match value {
-                    serde_json::Value::String(s) => format!("\"{}\"", s),
-                    serde_json::Value::Number(n) => n.to_string(),
-                    serde_json::Value::Bool(b) => b.to_string(),
-                    serde_json::Value::Array(arr) => format!("{} items", arr.len()),
-                    serde_json::Value::Object(obj) => format!("{} fields", obj.len()),
-                    serde_json::Value::Null => "null".to_string(),
-                };
-
-                params_msg.push_str(&format!("- {}: {}\n", key, value_str));
-            }
-
-            messages.push(ChatMessage::user(params_msg));
-        }
+        // // Add workflow state if available
+        // if let Some(workflow_state_value) = context.metadata.get("workflow_state") {
+        //     // Try to parse the workflow state for better formatting
+        //     if let Ok(workflow_state) = serde_json::from_value::<WorkflowState>(workflow_state_value.clone()) {
+        //         let mut workflow_msg = format!("# WORKFLOW CONTEXT (Step {} of workflow):\n\n", workflow_state.step_results.len() + 1);
+        //
+        //         if !workflow_state.step_results.is_empty() {
+        //             workflow_msg.push_str("## Previous Steps:\n");
+        //             for (i, step_result) in workflow_state.step_results.iter().enumerate() {
+        //                 let status_icon = if step_result.success { "✅" } else { "❌" };
+        //                 workflow_msg.push_str(&format!(
+        //                     "- Step {}: {} {} {}\n",
+        //                     i + 1,
+        //                     step_result.step_id,
+        //                     status_icon,
+        //                     step_result.error.as_ref().unwrap_or(&"Completed".to_string())
+        //                 ));
+        //             }
+        //             workflow_msg.push_str("\n");
+        //         }
+        //
+        //         if !workflow_state.shared_context.is_empty() {
+        //             workflow_msg.push_str("## Shared Context:\n");
+        //             for (key, value) in &workflow_state.shared_context {
+        //                 workflow_msg.push_str(&format!("- {}: {}\n", key, value.chars().take(100).collect::<String>()));
+        //             }
+        //             workflow_msg.push_str("\n");
+        //         }
+        //
+        //         messages.push(ChatMessage::user(workflow_msg));
+        //     } else {
+        //         // Fallback to raw JSON if parsing fails
+        //         messages.push(ChatMessage::user(format!("# WORKFLOW CONTEXT:\n{}",
+        //             serde_json::to_string_pretty(workflow_state_value).unwrap_or_default())));
+        //     }
+        // }
+        //
+        // // Add step parameters
+        // if !step.parameters.is_empty() {
+        //     let mut params_msg = format!("# STEP PARAMETERS (from {} definition):\n", step.name);
+        //
+        //     // Format parameters with better readability
+        //     for (key, value) in &step.parameters {
+        //         let value_str = match value {
+        //             serde_json::Value::String(s) => format!("\"{}\"", s),
+        //             serde_json::Value::Number(n) => n.to_string(),
+        //             serde_json::Value::Bool(b) => b.to_string(),
+        //             serde_json::Value::Array(arr) => format!("{} items", arr.len()),
+        //             serde_json::Value::Object(obj) => format!("{} fields", obj.len()),
+        //             serde_json::Value::Null => "null".to_string(),
+        //         };
+        //
+        //         params_msg.push_str(&format!("- {}: {}\n", key, value_str));
+        //     }
+        //
+        //     messages.push(ChatMessage::user(params_msg));
+        // }
         // Add Tools instructions per tool type
         if let Some(tools) = tools{
 
@@ -583,12 +552,14 @@ pub trait TypedAgent: Send + Sync {
             for tool_name in &step.required_tools {
                 if let Some(tool_instruction) = tools.get_tool_type_instructions(tool_name){
                     if tools_instructions.insert(tool_instruction.clone()){
-                        accumulated_instructions += &format!("# RELEVANT TOOLS USAGE CONTEXT :\n");
+                        accumulated_instructions += &format!("# RELEVANT TOOLS USAGE INSTRUCTIONS :\n");
                         accumulated_instructions += &tool_instruction ;
                     }
                 };
             };
-            messages.push(ChatMessage::user(accumulated_instructions.clone()));
+            if accumulated_instructions != ""{
+                messages.push(ChatMessage::system(accumulated_instructions.clone()));
+            }
 
             debug!(target: "agent_execution", "Accumulated Tool instructions: {} for step: {}",accumulated_instructions, step.name);
         }
@@ -609,7 +580,7 @@ pub trait TypedAgent: Send + Sync {
                     estimated_tokens, rag_context)
             };
 
-            messages.push(ChatMessage::user(header));
+            messages.push(ChatMessage::system(header));
         }
 
         // Add history context if available (for cases where it's separate from RAG)
@@ -626,11 +597,11 @@ pub trait TypedAgent: Send + Sync {
                     estimated_tokens, history_context)
             };
 
-            messages.push(ChatMessage::user(header));
+            messages.push(ChatMessage::system(header));
         }
 
         // Add main user prompt
-        messages.push(ChatMessage::user(format!("# USER PROMPT:\n{}", context.description)));
+        messages.push(ChatMessage::user(format!("# USER PROMPT (YOUR MAIN TASK):\n{}", context.description)));
 
         // Record LLM messages as span attributes for Jaeger visibility
         current_span.record("llm.messages_sent", messages.len());

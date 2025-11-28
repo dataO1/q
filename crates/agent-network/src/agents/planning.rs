@@ -136,15 +136,15 @@ impl TypedAgent for PlanningAgent {
 
         // Multi-step workflow for planning: analysis, then planning
         vec![
-            WorkflowStep {
-                id: "analyze_structure".to_string(),
-                name: "Project Structure Analysis".to_string(),
-                description: "Analyze the project structure using available tools to understand the codebase layout and existing files. Output this concise analysis.".to_string(),
-                execution_mode: StepExecutionMode::OneShot , // Needs filesystem tool
-                required_tools: vec!["read_file".to_string()],
-                parameters: HashMap::new(),
-                formatted: false,
-            },
+            // WorkflowStep {
+            //     id: "analyze_structure".to_string(),
+            //     name: "Project Structure Analysis".to_string(),
+            //     description: "Analyze the project structure using available tools to understand the codebase layout and existing files. Output this concise analysis.".to_string(),
+            //     execution_mode: StepExecutionMode::OneShot , // Needs filesystem tool
+            //     required_tools: vec!["read_file".to_string()],
+            //     parameters: HashMap::new(),
+            //     formatted: false,
+            // },
             WorkflowStep {
                 id: "generate_plan".to_string(),
                 name: "Task Decomposition Planning".to_string(),

@@ -56,109 +56,47 @@ impl ToolExecution {
     }
 }
 
-/// Enum to hold different tool types for dynamic access
-#[derive(Debug, Clone)]
-pub enum DynamicTool {
-    WriteFile(Arc<WriteFileTool>),
-    ReadFile(Arc<ReadFileTool>),
-    ListDirectory(Arc<ListDirectoryTool>),
-    CreateDirectory(Arc<CreateDirectoryTool>),
-    FileExists(Arc<FileExistsTool>),
-    FileMetadata(Arc<FileMetadataTool>),
-    DeleteFile(Arc<DeleteFileTool>),
-    Lsp(Arc<LspTool>),
-}
-
-impl DynamicTool {
-    /// Convert to the actual tool reference that coordinator expects
-    pub fn as_tool_ref(&self) -> Box<dyn std::any::Any + Send + Sync> {
-        match self {
-            DynamicTool::WriteFile(tool) => Box::new(tool.as_ref().clone()),
-            DynamicTool::ReadFile(tool) => Box::new(tool.as_ref().clone()),
-            DynamicTool::ListDirectory(tool) => Box::new(tool.as_ref().clone()),
-            DynamicTool::CreateDirectory(tool) => Box::new(tool.as_ref().clone()),
-            DynamicTool::FileExists(tool) => Box::new(tool.as_ref().clone()),
-            DynamicTool::FileMetadata(tool) => Box::new(tool.as_ref().clone()),
-            DynamicTool::DeleteFile(tool) => Box::new(tool.as_ref().clone()),
-            DynamicTool::Lsp(tool) => Box::new(tool.as_ref().clone()),
-        }
-    }
-}
 
 /// Collection of available tools
 #[derive(Debug, Clone)]
 pub struct ToolSet {
-    pub write_file: Arc<WriteFileTool>,
-    pub lsp: Arc<LspTool>,
-    // HashMap for dynamic tool access
-    pub tools: HashMap<String, DynamicTool>,
-    // Base path for creating filesystem tools
-    pub base_path: String,
+    pub write_file: WriteFileTool,
+    pub read_file: ReadFileTool,
+    pub list_directory: ListDirectoryTool,
+    pub create_directory: CreateDirectoryTool,
+    pub file_exists: FileExistsTool,
+    pub file_metadata: FileMetadataTool,
+    pub delete_file: DeleteFileTool,
+    // pub lsp: Arc<LspTool>,
 }
 
 impl ToolSet {
     pub fn new(path: &str) -> Self {
         Self {
-            write_file: Arc::new(WriteFileTool::new(path)),
-            lsp: Arc::new(LspTool::new()),
-            tools: HashMap::new(),
-            base_path: path.to_string(),
+            write_file: WriteFileTool::new(path),
+            read_file: ReadFileTool::new(path),
+            list_directory: ListDirectoryTool::new(path),
+            create_directory: CreateDirectoryTool::new(path),
+            file_exists: FileExistsTool::new(path),
+            file_metadata: FileMetadataTool::new(path),
+            delete_file: DeleteFileTool::new(path),
+            // lsp: Arc::new(LspTool::new()),
         }
     }
 
-    /// Get a tool by name for dynamic assignment
-    pub fn get_tool(&self, name: &str) -> Option<&DynamicTool> {
-        self.tools.get(name)
-    }
-
-    /// Create and add filesystem tools based on name
-    pub fn ensure_filesystem_tool(&mut self, tool_name: &str) {
-        if self.tools.contains_key(tool_name) {
-            return; // Tool already exists
-        }
-
-        match tool_name {
-            "write_file" => {
-                let tool = Arc::new(WriteFileTool::new(&self.base_path));
-                self.tools.insert(tool_name.to_string(), DynamicTool::WriteFile(tool));
-            }
-            "read_file" => {
-                let tool = Arc::new(ReadFileTool::new(&self.base_path));
-                self.tools.insert(tool_name.to_string(), DynamicTool::ReadFile(tool));
-            }
-            "list_directory" => {
-                let tool = Arc::new(ListDirectoryTool::new(&self.base_path));
-                self.tools.insert(tool_name.to_string(), DynamicTool::ListDirectory(tool));
-            }
-            "create_directory" => {
-                let tool = Arc::new(CreateDirectoryTool::new(&self.base_path));
-                self.tools.insert(tool_name.to_string(), DynamicTool::CreateDirectory(tool));
-            }
-            "file_exists" => {
-                let tool = Arc::new(FileExistsTool::new(&self.base_path));
-                self.tools.insert(tool_name.to_string(), DynamicTool::FileExists(tool));
-            }
-            "file_metadata" => {
-                let tool = Arc::new(FileMetadataTool::new(&self.base_path));
-                self.tools.insert(tool_name.to_string(), DynamicTool::FileMetadata(tool));
-            }
-            "delete_file" => {
-                let tool = Arc::new(DeleteFileTool::new(&self.base_path));
-                self.tools.insert(tool_name.to_string(), DynamicTool::DeleteFile(tool));
-            }
-            "lsp" => {
-                let tool = Arc::new(LspTool::new());
-                self.tools.insert(tool_name.to_string(), DynamicTool::Lsp(tool));
-            }
-            _ => {
-                // Unknown tool - could log a warning or handle gracefully
-            }
-        }
-    }
 
     /// Get all available tool names
     pub fn available_tools(&self) -> Vec<String> {
-        self.tools.keys().cloned().collect()
+        vec![
+            "write_file".to_string(),
+            "read_file".to_string(),
+            "list_directory".to_string(),
+            "create_directory".to_string(),
+            "file_exists".to_string(),
+            "file_metadata".to_string(),
+            "delete_file".to_string(),
+            "lsp".to_string(),
+        ]
     }
 
     pub fn get_tool_type_instructions(&self,tool_name: &str ) ->Option<String>{
