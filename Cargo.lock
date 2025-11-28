@@ -57,10 +57,13 @@ version = "0.1.0"
 dependencies = [
  "ai-agent-common",
  "ai-agent-network",
+ "ai-agent-rag",
  "anyhow",
  "async-stream",
  "axum 0.8.7",
+ "chrono",
  "futures",
+ "futures-util",
  "reqwest 0.12.24",
  "rig-core",
  "serde",
@@ -68,6 +71,8 @@ dependencies = [
  "tokio",
  "tower 0.5.2",
  "tower-http",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

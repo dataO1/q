@@ -6,14 +6,19 @@ edition = "2021"
 [dependencies]
 ai-agent-common = { path = "../common" }
 ai-agent-network = { path = "../agent-network" }
+ai-agent-rag = { path = "../rag" }
 tokio = { version = "*", features = ["full"] }
 axum = { version = "*", features = ["ws"] }
 tower = "*"
 tower-http = { version = "*", features = ["trace", "cors"] }
-serde = "*"
+serde = { version = "*", features = ["derive"] }
 serde_json = "*"
 anyhow = "*"
 futures = "*"
+futures-util = "*"
 async-stream = "*"
 rig-core = "*"
 reqwest = { version = "*", features = ["json", "rustls-tls"] }
+uuid = { version = "*", features = ["v4"] }
+chrono = { version = "*", features = ["serde"] }
+tracing = "*"
