@@ -24,6 +24,10 @@ pub enum Error {
     #[error("WebSocket error: {0}")]
     WebSocket(#[from] WebSocketError),
 
+    /// General connection errors
+    #[error("Connection error: {0}")]
+    Connection(String),
+
     /// UI and terminal errors
     #[error("UI error: {0}")]
     Ui(#[from] UiError),
@@ -35,6 +39,10 @@ pub enum Error {
     /// Serialization/deserialization errors
     #[error("Serialization error: {0}")]
     Serde(#[from] serde_json::Error),
+
+    /// Generic anyhow errors
+    #[error("Anyhow error: {0}")]
+    Anyhow(#[from] anyhow::Error),
 
     /// Generic error with context
     #[error("Application error: {message}")]
@@ -168,6 +176,13 @@ pub enum WebSocketError {
     ReconnectFailed {
         /// Number of failed attempts
         attempts: usize,
+    },
+
+    /// Failed to send message
+    #[error("Failed to send WebSocket message: {message}")]
+    SendError {
+        /// Error message
+        message: String,
     },
 }
 

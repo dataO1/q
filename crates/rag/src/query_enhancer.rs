@@ -238,7 +238,8 @@ impl QueryEnhancer {
                     Return ONLY the improved query.\n\n\
                     Original: \"{}\"\n\n\
                     Improved query:",
-                    project_scope.language_distribution.first()  // ✅ Fixed: first() instead of keys().next()
+                    project_scope.language_distribution.iter()
+                        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
                         .map(|(lang, _weight)| format!("{:?}", lang))
                         .unwrap_or_else(|| "unknown".to_string()),
                     raw_query

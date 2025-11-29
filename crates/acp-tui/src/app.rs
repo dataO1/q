@@ -474,14 +474,18 @@ impl App {
                 self.status_line.handle_message(StatusLineMessage::Warning(
                     format!("Could not detect project context: {}", e)
                 ));
-                // Create a default project scope
-                crate::client::ProjectScope {
+                // Create a default project scope using generated API types
+                crate::client::types::ProjectScope {
                     root: std::env::current_dir()
                         .unwrap_or_default()
                         .to_string_lossy()
                         .to_string(),
                     current_file: None,
-                    language_distribution: std::collections::HashMap::new(),
+                    language_distribution: {
+                        let mut map = std::collections::HashMap::new();
+                        map.insert("Unknown".to_string(), 1.0);
+                        map
+                    }
                 }
             }
         };

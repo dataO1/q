@@ -18,7 +18,7 @@
 //!
 //! ```text
 //! ┌─────────────────────┐
-//! │   REST Endpoints    │ <- /execute, /capabilities, /health
+//! │   REST Endpoints    │ <- /query, /capabilities, /health
 //! ├─────────────────────┤
 //! │   WebSocket Stream  │ <- /stream/{conversation_id}
 //! ├─────────────────────┤
@@ -34,7 +34,7 @@
 //!
 //! ### Basic Query Execution
 //!
-//! 1. **POST** `/execute` - Start async execution with project context
+//! 1. **POST** `/query` - Start async execution with project context
 //! 2. Connect to **WebSocket** `/stream/{conversation_id}` for live updates
 //! 3. Receive **StatusEvent** messages as agents work
 //! 4. Get final results from **ExecutionCompleted** event

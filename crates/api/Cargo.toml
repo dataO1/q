@@ -8,7 +8,7 @@ name = "acp-server"
 path = "src/bin/acp-server.rs"
 
 [dependencies]
-ai-agent-common = { path = "../common" }
+ai-agent-common = { path = "../common", features = ["openapi"] }
 ai-agent-network = { path = "../agent-network" }
 ai-agent-rag = { path = "../rag" }
 tokio = { version = "*", features = ["full"] }
@@ -27,6 +27,6 @@ reqwest = { version = "*", features = ["json", "rustls-tls"] }
 uuid = { version = "*", features = ["v4"] }
 chrono = { version = "*", features = ["serde"] }
 tracing = "*"
-utoipa = { version = "5.4", features = ["axum_extras", "chrono"] }
-utoipa-swagger-ui = { version = "9.0", features = ["axum"] }
-utoipa-axum = "0.2"
+utoipa = { version = "4.2.2", features = ["axum_extras", "chrono"] }
+utoipa-swagger-ui = { version = "4", features = ["axum"] }
+utoipa-axum = "0.1"

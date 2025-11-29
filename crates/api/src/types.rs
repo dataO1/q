@@ -6,12 +6,15 @@ use serde_json::json;
 use utoipa::ToSchema;
 use ai_agent_common::AgentType;
 
+// Re-export ProjectScope to avoid qualified references in OpenAPI
+pub use ai_agent_common::ProjectScope;
+
 /// Request to execute a query
 /// 
 /// Starts asynchronous query execution with the multi-agent system.
 /// Returns immediately with a conversation_id for tracking progress.
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct ExecuteRequest {
+pub struct QueryRequest {
     /// The user's natural language query or request
     /// 
     /// Can be any natural language instruction for the agents to process.
@@ -25,16 +28,7 @@ pub struct ExecuteRequest {
     /// Must be detected client-side and includes project root, languages,
     /// key files, and other contextual information needed by agents.
     /// This determines which tools and approaches agents can use.
-    #[schema(value_type = Object, example = json!({
-        "root": "/home/user/my-project",
-        "languages": ["rust", "typescript"],
-        "frameworks": ["axum", "react"],
-        "key_files": [
-            {"path": "src/main.rs", "purpose": "Application entry point"},
-            {"path": "src/auth.rs", "purpose": "Authentication logic"}
-        ]
-    }))]
-    pub project_scope: ai_agent_common::ProjectScope,
+    pub project_scope: ProjectScope,
     
     /// Optional conversation ID for maintaining context across multiple queries
     /// 
@@ -50,13 +44,13 @@ pub struct ExecuteRequest {
 /// Returned immediately when a query execution starts. The actual processing
 /// happens asynchronously in the background.
 #[derive(Debug, Serialize, ToSchema)]
-pub struct ExecuteResponse {
-    /// Conversation ID for tracking this execution (same as conversation_id)
+pub struct QueryResponse {
+    /// Conversation ID for tracking this execution
     /// 
     /// Use this ID to subscribe to the WebSocket stream for real-time updates.
     /// This is the conversation identifier, not just a single execution.
     #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
-    pub execution_id: String,
+    pub conversation_id: String,
     
     /// WebSocket URL path for streaming status updates
     /// 

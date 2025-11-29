@@ -132,7 +132,7 @@ async fn execute_via_acp(query: &str, cwd: &str, server_url: &str) -> Result<()>
     };
 
     let response = client
-        .post(format!("{}/execute", server_url))
+        .post(format!("{}/query", server_url))
         .json(&request)
         .send()
         .await?;

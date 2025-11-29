@@ -68,15 +68,18 @@ pub enum CollectionTier {
 
 /// Project scope information
 #[derive(Debug, Clone, Serialize, Deserialize, MoreDisplay)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[display("Project Root: {}, Current File: {:?}, Language Distribution: {:?}", root, current_file, language_distribution)]
 pub struct ProjectScope {
     pub root: String,
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub current_file: Option<PathBuf>,
-    pub language_distribution: Vec<(Language,f32)>
+    pub language_distribution: std::collections::HashMap<String, f32>
 }
 
 impl ProjectScope{
-    pub fn new(root: String, current_file: Option<PathBuf>, language_distribution: Vec<(Language,f32)>)->Self{
+    pub fn new(root: String, current_file: Option<PathBuf>, language_distribution: std::collections::HashMap<String, f32>)->Self{
         Self{
             root,
             current_file,

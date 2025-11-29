@@ -1,4 +1,4 @@
 
 pub mod agents;
-pub mod execute;
+pub mod query;
 pub mod stream;

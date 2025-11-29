@@ -5,7 +5,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use std::time::Duration;
-use tracing::{error, instrument, warn};
+use tracing::{debug, error, instrument};
 
 // Include the generated API client
 include!(concat!(env!("OUT_DIR"), "/acp_client.rs"));
@@ -92,8 +92,8 @@ impl AcpClient {
     
     /// Execute a query
     #[instrument(skip(self, project_scope), fields(query = %query))]
-    pub async fn query(&self, query: &str, project_scope: ProjectScope) -> Result<QueryResponse> {
-        let request = QueryRequest {
+    pub async fn query(&self, query: &str, project_scope: types::ProjectScope) -> Result<types::QueryResponse> {
+        let request = types::QueryRequest {
             query: query.to_string(),
             project_scope,
             conversation_id: None,
@@ -175,8 +175,8 @@ pub async fn test_connection(server_url: &str) -> Result<HealthResponse> {
         .context("Health check failed")
 }
 
-/// Detect project scope from current directory
-pub fn detect_project_scope() -> Result<ProjectScope> {
+/// Detect project scope from current directory using generated API types
+pub fn detect_project_scope() -> Result<types::ProjectScope> {
     let current_dir = std::env::current_dir()
         .context("Failed to get current directory")?;
     
@@ -185,9 +185,9 @@ pub fn detect_project_scope() -> Result<ProjectScope> {
     // Simple language detection based on file extensions
     let language_distribution = detect_languages(&current_dir)?;
     
-    Ok(ProjectScope {
+    Ok(types::ProjectScope {
         root,
-        current_file: None,
+        current_file: None, // Generated type expects Option<String>, not Option<PathBuf>
         language_distribution,
     })
 }
@@ -262,22 +262,53 @@ fn extract_error_body(error: &progenitor_client::Error<types::ErrorResponse>) ->
     // Convert the error to a string and try to parse useful information
     let error_str = error.to_string();
     
-    // For now, extract what we can from the error string
-    // The progenitor error typically contains response details
-    if let Some(start) = error_str.find("Response { url:") {
-        // Try to extract any meaningful error text from the error string
-        if error_str.contains("422") {
-            // For 422 errors, the server sends plain text error messages
-            // We can't easily get the body from progenitor::Error directly,
-            // but we can at least indicate it's a validation error
-            return Ok("Invalid or incomplete request data - check required fields".to_string());
+    // Enhanced error body extraction with detailed logging
+    debug!("Extracting error body from: {}", error_str);
+    
+    // Try to extract structured error response first
+    match error {
+        progenitor_client::Error::ErrorResponse(response_value) => {
+            // This is a structured ErrorResponse - extract the error message
+            debug!("Extracted structured error response: {:?}", response_value);
+            // For now, just return a generic message since we have the structured error
+            return Ok("Server returned structured error response".to_string());
+        }
+        progenitor_client::Error::UnexpectedResponse(ref _response) => {
+            // For unexpected responses, we need to extract info from the string representation
+            debug!("Processing unexpected response: {}", error_str);
+            
+            // Check if this contains error details - progenitor includes response body in error string
+            if let Some(content_start) = error_str.find("content-length\": \"") {
+                if let Some(content_end) = error_str[content_start..].find("\", \"") {
+                    let content_length_str = &error_str[content_start + "content-length\": \"".len()..content_start + content_end];
+                    if let Ok(content_length) = content_length_str.parse::<usize>() {
+                        if content_length > 0 {
+                            // There's content, but progenitor doesn't expose it directly
+                            // For now, provide contextual help based on status code
+                            if error_str.contains("422") {
+                                return Ok("Request validation failed. This usually means required fields are missing. Please check that your request includes both 'query' text and 'project_scope' with root path and language distribution.".to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _ => {
+            debug!("Other error type: {:?}", error);
         }
     }
     
-    // Try to parse JSON error response if present
-    if error_str.contains("ErrorResponse") {
-        // This suggests the server returned a JSON ErrorResponse
-        return Ok("Server returned a structured error response".to_string());
+    // Enhanced fallback parsing for various error patterns
+    if error_str.contains("422") {
+        return Ok("Request validation failed - missing or invalid required fields (query, project_scope.root, project_scope.language_distribution)".to_string());
+    }
+    
+    if error_str.contains("400") {
+        return Ok("Bad request - invalid JSON format or malformed data".to_string());
+    }
+    
+    if error_str.contains("500") {
+        return Ok("Internal server error - the agent network encountered an unexpected problem".to_string());
     }
     
     // Fallback: try to extract any useful information from the error string

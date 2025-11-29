@@ -3,6 +3,8 @@
 //! This module contains the core data structures used throughout the application,
 //! including state models, event types, and view models for the UI components.
 
+pub mod tree;
+
 use chrono::{DateTime, Utc};
 use petgraph::Graph;
 use serde::{Deserialize, Serialize};

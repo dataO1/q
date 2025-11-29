@@ -3,6 +3,10 @@ name = "ai-agent-common"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["openapi"]
+openapi = ["utoipa"]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -22,7 +26,7 @@ tracing = "*"
 fastembed = "*"
 derive_builder = "*"
 derive_more = {version = "*", features = ["display"]}
-utoipa = { version = "5", features = ["chrono"] }
+utoipa = { version = "4.2.2", features = ["chrono"], optional = true }
 
 # OpenTelemetry dependencies for tracing
 opentelemetry = { version = "*", features = ["trace", "metrics"] }

@@ -61,7 +61,3 @@ schemars = { version = "*", features = ["chrono04"] }
 
 [dev-dependencies]
 tokio-test = "*"
-
-[[bin]]
-name = "agent-network"
-path = "src/main.rs"

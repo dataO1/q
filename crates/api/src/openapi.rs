@@ -8,7 +8,7 @@ use serde_json::json;
 use crate::types::*;
 
 /// OpenAPI specification for the ACP API
-#[derive(OpenApi)]
+#[derive(utoipa::OpenApi)]
 #[openapi(
     info(
         title = "Agent Communication Protocol (ACP) API",
@@ -29,7 +29,7 @@ multiple AI agents in complex workflows. Key features:
 
 ## Usage Pattern
 
-1. **Execute Query**: POST `/execute` with query and project context
+1. **Execute Query**: POST `/query` with query and project context
 2. **Get conversation_id**: Response contains ID for tracking
 3. **Connect WebSocket**: Connect to `/stream/{conversation_id}` for updates
 4. **Receive Events**: Get real-time progress as agents work
@@ -73,24 +73,25 @@ standard for agent interoperability and communication.
         license(
             name = "MIT",
             url = "https://opensource.org/licenses/MIT"
-        ),
-        terms_of_service = "https://agentcommunicationprotocol.dev/terms"
+        )
     ),
     paths(
-        crate::routes::execute::execute_task,
+        crate::routes::query::query_task,
         crate::routes::agents::list_capabilities,
         crate::server::health_check
     ),
     components(schemas(
-        ExecuteRequest,
-        ExecuteResponse,
+        QueryRequest,
+        QueryResponse,
         CapabilitiesResponse,
         AgentCapability,
         HealthResponse,
-        ErrorResponse
+        ErrorResponse,
+        crate::types::ProjectScope,
+        ai_agent_common::AgentType
     )),
     tags(
-        (name = "execution", description = "Query execution endpoints"),
+        (name = "query", description = "Query execution endpoints"),
         (name = "discovery", description = "Agent capability discovery"), 
         (name = "health", description = "System health and status"),
         (name = "streaming", description = "Real-time status streaming (WebSocket)")
@@ -106,9 +107,8 @@ pub struct ApiDoc;
 #[derive(utoipa::ToSchema)]
 #[schema(
     title = "StatusEvent",
-    description = "Real-time status event streamed via WebSocket",
     example = json!({
-        "execution_id": "550e8400-e29b-41d4-a716-446655440000",
+        "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
         "timestamp": "2024-01-15T14:30:00Z",
         "source": {
             "type": "agent",
@@ -123,7 +123,7 @@ pub struct ApiDoc;
 )]
 pub struct StatusEventDoc {
     /// Conversation/execution ID
-    pub execution_id: String,
+    pub conversation_id: String,
     /// Event timestamp
     pub timestamp: String,
     /// Event source information

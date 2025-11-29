@@ -32,19 +32,19 @@
 #![warn(clippy::unwrap_used)]
 #![warn(clippy::expect_used)]
 
-// pub mod app;
+pub mod app;
 pub mod client;
-// pub mod components;
+pub mod components;
 pub mod config;
 pub mod error;
 // pub mod events;
 pub mod models;
 // pub mod ui;
 pub mod utils;
-// pub mod websocket;
+pub mod websocket;
 
 // Re-export main types for convenience
-// pub use app::App;
+pub use app::App;
 pub use config::Config;
 pub use error::{Error, Result};
 pub use models::AppState;

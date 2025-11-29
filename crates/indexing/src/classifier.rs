@@ -3,41 +3,41 @@ use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use anyhow::Result;
 use mime_guess;
-use ai_agent_common::types::Language;
 use std::collections::HashMap;
 use tokio::fs;
 use tokio_stream::wrappers::ReadDirStream;
 use tokio_stream::StreamExt;
 
-/// Mapping file extensions to Language enum for supported tree-sitter languages
-fn extension_to_language(ext: &str) -> Option<Language> {
+/// Mapping file extensions to language names (no longer restricted to enum)
+fn extension_to_language(ext: &str) -> Option<String> {
     match ext {
-        "rs" => Some(Language::Rust),
-        "py" => Some(Language::Python),
-        "js" => Some(Language::JavaScript),
-        "ts" => Some(Language::TypeScript),
-        "java" => Some(Language::Java),
-        "c" => Some(Language::C),
-        "cpp" | "cc" | "cxx" | "hpp" | "h" => Some(Language::Cpp),
-        "go" => Some(Language::Go),
-        "hs" => Some(Language::Haskell),
-        "lua" => Some(Language::Lua),
-        "yaml" | "yml" => Some(Language::YAML),
-        "sh" | "bash" => Some(Language::Bash),
-        "html" | "htm" => Some(Language::HTML),
-        "json" => Some(Language::JSON),
-        "rb" => Some(Language::Ruby),
-        "adoc" => Some(Language::Asciidoc),
-        "xml" => Some(Language::XML),
-        "md" => Some(Language::Markdown),
-        "yarn" => Some(Language::Yarn),
+        "rs" => Some("Rust".to_string()),
+        "py" => Some("Python".to_string()),
+        "js" => Some("JavaScript".to_string()),
+        "ts" => Some("TypeScript".to_string()),
+        "java" => Some("Java".to_string()),
+        "c" => Some("C".to_string()),
+        "cpp" | "cc" | "cxx" | "hpp" | "h" => Some("Cpp".to_string()),
+        "go" => Some("Go".to_string()),
+        "hs" => Some("Haskell".to_string()),
+        "lua" => Some("Lua".to_string()),
+        "yaml" | "yml" => Some("YAML".to_string()),
+        "toml" => Some("TOML".to_string()), // Added TOML support
+        "sh" | "bash" => Some("Bash".to_string()),
+        "html" | "htm" => Some("HTML".to_string()),
+        "json" => Some("JSON".to_string()),
+        "rb" => Some("Ruby".to_string()),
+        "adoc" => Some("Asciidoc".to_string()),
+        "xml" => Some("XML".to_string()),
+        "md" => Some("Markdown".to_string()),
+        "yarn" => Some("Yarn".to_string()),
         _ => None,
     }
 }
 
 /// Detects language distribution within project_root by counting mapped file extensions
-pub async fn detect_languages(project_root: &Path) -> Vec<(Language, f32)> {
-    let mut language_counts: HashMap<Language, usize> = HashMap::new();
+pub async fn detect_languages(project_root: &Path) -> Vec<(String, f32)> {
+    let mut language_counts: HashMap<String, usize> = HashMap::new();
     let mut total_files = 0;
 
     let mut dirs_to_visit = vec![project_root.to_path_buf()];
@@ -137,7 +137,7 @@ impl PathClassifier {
 #[derive(Debug, Clone)]
 pub struct ClassificationResult {
     pub tier: CollectionTier,
-    pub languages: Vec<(Language,f32)>,
+    pub languages: Vec<(String, f32)>,
     pub file_type: String,
     pub project_root: Option<PathBuf>,
     pub mime_type: Option<String>,

@@ -1,6 +1,6 @@
 //! Terminal utilities and helpers
 
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,

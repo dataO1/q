@@ -26,7 +26,8 @@ impl ContextManager {
 
         let current_file = if path.is_file() {Some(path)} else {None};
         // Language distribution detection through indexing classifier
-        let language_distribution = classifier::detect_languages(&root).await;
+        let language_vec = classifier::detect_languages(&root).await;
+        let language_distribution = language_vec.into_iter().collect();
 
         Ok(ProjectScope {
             root:root_path,

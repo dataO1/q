@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ai_agent_common::{CollectionTier, ProjectScope, Language};
+use ai_agent_common::{CollectionTier, ProjectScope};
 use futures::StreamExt;
 use ai_agent_rag::retriever::{MultiSourceRetriever};
 use std::collections::HashMap;
@@ -13,7 +13,7 @@ async fn test_multisource_retriever_stream() -> Result<()> {
     let project_scope = ProjectScope::new(
         "/test/project".to_string(),
         Some(std::path::PathBuf::from("/test/project/src/main.rs")),
-        vec![(Language::Rust, 1.0)]
+        vec![("Rust".to_string(), 1.0)]
     );
 
     // Note: This test needs to be fully rewritten with proper initialization

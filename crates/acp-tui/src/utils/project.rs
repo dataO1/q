@@ -1,6 +1,6 @@
 //! Project detection and analysis utilities
 
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 

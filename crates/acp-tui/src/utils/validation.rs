@@ -1,6 +1,6 @@
 //! Input validation utilities
 
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 use url::Url;
 
 /// Validate a server URL

@@ -2,7 +2,7 @@
 
 pub mod mock_web_server;
 
-use ai_agent_common::{SystemConfig, llm::EmbeddingClient, ProjectScope, Language};
+use ai_agent_common::{SystemConfig, llm::EmbeddingClient, ProjectScope};
 use ai_agent_storage::{QdrantClient, RedisCache};
 use ai_agent_indexing::IndexingPipeline;
 use anyhow::Result;
@@ -69,7 +69,7 @@ pub fn create_test_project_scope() -> ProjectScope {
     ProjectScope::new(
         "/test/project".to_string(),
         Some(std::path::PathBuf::from("/test/project/src/main.rs")),
-        vec![(Language::Rust, 1.0)]
+        vec![("Rust".to_string(), 1.0)]
     )
 }
 

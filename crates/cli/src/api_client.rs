@@ -8,14 +8,14 @@ pub struct ApiClient {
 }
 
 #[derive(Serialize)]
-struct ExecuteRequest {
+struct QueryRequest {
     query: String,
     conversation_id: Option<String>,
 }
 
 #[derive(Deserialize)]
-struct ExecuteResponse {
-    task_id: String,
+struct QueryResponse {
+    conversation_id: String,
     stream_url: String,
 }
 
@@ -27,10 +27,10 @@ impl ApiClient {
         })
     }
 
-    pub async fn execute_query(&self, query: &str) -> Result<String> {
-        let url = format!("{}/execute", self.base_url);
+    pub async fn query(&self, query: &str) -> Result<String> {
+        let url = format!("{}/query", self.base_url);
 
-        let request = ExecuteRequest {
+        let request = QueryRequest {
             query: query.to_string(),
             conversation_id: None,
         };
@@ -49,7 +49,7 @@ impl ApiClient {
         Ok(body)
     }
 
-    pub async fn stream_status(&self, task_id: &str) -> Result<()> {
+    pub async fn stream_status(&self, conversation_id: &str) -> Result<()> {
         // TODO: Implement SSE streaming
         todo!("Implement status streaming")
     }
