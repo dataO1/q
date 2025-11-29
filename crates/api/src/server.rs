@@ -16,15 +16,15 @@ use tower_http::{
 
 use crate::{
     routes::{
-        execute::execute_task,
+        query::query_task,
         stream::websocket_handler,
         agents::list_capabilities,
     },
     middleware::logging::logging_middleware,
     openapi::ApiDoc,
+    types::HealthResponse,
 };
 use utoipa::OpenApi;
-use utoipa_swagger_ui::SwaggerUi;
 
 /// Shared application state
 #[derive(Clone)]
@@ -63,16 +63,15 @@ impl AcpServer {
     pub fn router(&self) -> Router {
         Router::new()
             // Core ACP endpoints
-            .route("/execute", post(execute_task))
-            .route("/stream/{execution_id}", get(websocket_handler))
+            .route("/query", post(query_task))
+            .route("/stream/{conversation_id}", get(websocket_handler))
             
             // Discovery and health endpoints
             .route("/capabilities", get(list_capabilities))
             .route("/health", get(health_check))
             
-            // API documentation endpoints
-            .merge(SwaggerUi::new("/docs")
-                .url("/api-doc/openapi.json", ApiDoc::openapi()))
+            // OpenAPI spec endpoint
+            .route("/api-doc/openapi.json", get(serve_openapi_spec))
             
             // Apply state and middleware
             .with_state(self.state.clone())
@@ -126,19 +125,27 @@ impl AcpServer {
     get,
     path = "/health",
     tag = "health",
-    summary = "Check server health",
-    description = "Verify the API server is running and healthy",
     responses(
-        (status = 200, description = "Server is healthy", body = crate::types::HealthResponse)
+        (status = 200, description = "Server is healthy", body = HealthResponse)
     )
 )]
-pub async fn health_check() -> Json<crate::types::HealthResponse> {
+#[instrument]
+pub async fn health_check() -> Json<HealthResponse> {
     use chrono::Utc;
     
-    Json(crate::types::HealthResponse {
+    info!("Health check requested");
+    
+    Json(HealthResponse {
         status: "healthy".to_string(),
         message: Some("ACP server is running".to_string()),
         timestamp: Utc::now(),
     })
+}
+
+/// Serve the OpenAPI specification
+#[instrument]
+pub async fn serve_openapi_spec() -> Json<utoipa::openapi::OpenApi> {
+    info!("OpenAPI specification requested");
+    Json(ApiDoc::openapi())
 }
 

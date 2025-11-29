@@ -4,29 +4,26 @@
 //! with ACP servers. Features include real-time orchestration visualization, live
 //! status updates via WebSocket, and a React-like component architecture.
 
-// mod app;
+mod app;
 mod client;
-// mod components;
+mod components;
 mod config;
-// mod events;
+mod error;
 mod models;
-// mod ui;
-// mod websocket;
+mod utils;
+mod websocket;
 
 use anyhow::{Context, Result};
-// use app::App;
 use clap::{Arg, Command};
 use config::Config;
-use std::env;
 use tracing::{info, warn};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_appender::{non_blocking, rolling};
+use std::path::Path;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    init_tracing()?;
-    
-    // Parse command line arguments
+    // Parse command line arguments first to get log configuration
     let matches = Command::new("acp-tui")
         .version("0.1.0")
         .about("Terminal User Interface for Agent Communication Protocol")
@@ -52,7 +49,19 @@ async fn main() -> Result<()> {
                 .help("Log level (trace, debug, info, warn, error)")
                 .default_value("info"),
         )
+        .arg(
+            Arg::new("log-file")
+                .long("log-file")
+                .value_name("FILE")
+                .help("Log file path (default: ./acp-tui.log)")
+                .default_value("./acp-tui.log"),
+        )
         .get_matches();
+
+    // Initialize tracing with parsed arguments
+    let log_file = matches.get_one::<String>("log-file").unwrap();
+    let log_level = matches.get_one::<String>("log-level").unwrap();
+    init_tracing(log_file, log_level)?;
 
     // Load configuration
     let config = Config::load(
@@ -67,31 +76,43 @@ async fn main() -> Result<()> {
     // Test connectivity to ACP server
     test_connectivity(&config).await?;
 
-    // TODO: Initialize and run the application
-    // let mut app = App::new(config).await?;
-    // app.run().await?;
-    
-    println!("ACP TUI client initialized successfully!");
-    println!("Server: {}", config.server_url);
-    println!("This is a placeholder - the full TUI will be implemented next.");
+    // Initialize and run the application
+    let mut app = app::App::new(config).await?;
+    app.run().await?;
 
     info!("ACP TUI client shutting down");
     Ok(())
 }
 
-fn init_tracing() -> Result<()> {
-    // Set up tracing with environment filter
+fn init_tracing(log_file: &str, log_level: &str) -> Result<()> {
+    // Set up tracing with environment filter, fallback to command line or default
     let filter = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new(log_level))
         .or_else(|_| EnvFilter::try_new("info"))
         .context("Failed to create tracing filter")?;
+
+    // Create file appender for daily rolling logs
+    let file_appender = rolling::daily(
+        std::path::Path::new(log_file).parent().unwrap_or(std::path::Path::new(".")),
+        std::path::Path::new(log_file).file_stem().unwrap_or(std::ffi::OsStr::new("acp-tui"))
+    );
+    
+    // Use non-blocking writer to prevent I/O from affecting TUI performance
+    let (non_blocking_appender, _guard) = non_blocking(file_appender);
+    
+    // Keep the guard alive for the duration of the program
+    // Note: In a real application, you'd want to store this guard properly
+    std::mem::forget(_guard);
 
     tracing_subscriber::registry()
         .with(
             fmt::layer()
-                .with_target(false)
+                .with_target(true)
                 .with_thread_ids(true)
                 .with_file(true)
-                .with_line_number(true),
+                .with_line_number(true)
+                .with_ansi(false)  // Disable ANSI colors for clean file output
+                .with_writer(non_blocking_appender),
         )
         .with(filter)
         .try_init()

@@ -1,5 +1,6 @@
 use axum::{Json, extract::State};
 use serde_json::json;
+use tracing::{info, instrument};
 use crate::{
     types::{CapabilitiesResponse, AgentCapability},
     server::AppState,
@@ -38,9 +39,7 @@ use crate::{
 #[utoipa::path(
     get,
     path = "/capabilities",
-    tag = "discovery", 
-    summary = "Get system capabilities",
-    description = "Discover available agents, features, and API capabilities",
+    tag = "discovery",
     responses(
         (status = 200, description = "System capabilities", body = CapabilitiesResponse,
          example = json!({
@@ -61,6 +60,7 @@ use crate::{
          }))
     )
 )]
+#[instrument(skip(state))]
 pub async fn list_capabilities(
     State(state): State<AppState>,
 ) -> Json<CapabilitiesResponse> {
@@ -100,6 +100,13 @@ pub async fn list_capabilities(
         "tool_integration".to_string(),
         "conflict_resolution".to_string(),
     ];
+
+    info!(
+        agent_count = %agents.len(),
+        feature_count = %features.len(),
+        version = "0.1.0",
+        "Returning system capabilities"
+    );
 
     Json(CapabilitiesResponse {
         agents,

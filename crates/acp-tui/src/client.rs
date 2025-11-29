@@ -3,63 +3,21 @@
 //! Provides a wrapper around the generated OpenAPI client with additional
 //! functionality for the TUI application.
 
-use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use anyhow::{anyhow, Context, Result};
 use std::time::Duration;
+use tracing::{error, instrument, warn};
 
 // Include the generated API client
 include!(concat!(env!("OUT_DIR"), "/acp_client.rs"));
 
+// Re-export the generated types for convenience
+pub use types::*;
+
 /// High-level ACP client wrapper
+#[derive(Clone)]
 pub struct AcpClient {
     inner: Client,
     base_url: String,
-}
-
-/// Health check response
-#[derive(Debug, Serialize, Deserialize)]
-pub struct HealthResponse {
-    pub status: String,
-    pub message: Option<String>,
-    pub timestamp: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-/// Execute request
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ExecuteRequest {
-    pub query: String,
-    pub project_scope: Option<ProjectScope>,
-}
-
-/// Project scope information  
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProjectScope {
-    pub root: String,
-    pub current_file: Option<std::path::PathBuf>,
-    pub language_distribution: Vec<(String, f32)>,
-}
-
-/// Execute response
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ExecuteResponse {
-    pub conversation_id: String,
-    pub message: Option<String>,
-}
-
-/// Agent capability information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentCapability {
-    pub agent_type: String,
-    pub description: String,
-    pub tools: Vec<String>,
-}
-
-/// Capabilities response
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CapabilitiesResponse {
-    pub agents: Vec<AgentCapability>,
-    pub features: Vec<String>,
-    pub version: String,
 }
 
 impl AcpClient {
@@ -79,68 +37,119 @@ impl AcpClient {
     }
     
     /// Test connection to the ACP server
+    #[instrument(skip(self))]
     pub async fn health_check(&self) -> Result<HealthResponse> {
-        // Use direct reqwest since generated client might not have health endpoint
-        let url = format!("{}/health", self.base_url);
-        let response = reqwest::get(&url)
+        let response = self.inner.health_check()
             .await
+            .map_err(|e| {
+                error!("Health check failed: {}", e);
+                match e.status() {
+                    Some(status) if status.is_server_error() => {
+                        anyhow!("Server error during health check: {} ({})", e, status)
+                    },
+                    Some(status) if status.is_client_error() => {
+                        anyhow!("Client error during health check: {} ({})", e, status)
+                    },
+                    Some(status) => {
+                        anyhow!("Unexpected response during health check: {} ({})", e, status)
+                    },
+                    None => {
+                        anyhow!("Network error during health check: {}", e)
+                    }
+                }
+            })
             .context("Failed to connect to ACP server")?;
         
-        if !response.status().is_success() {
-            anyhow::bail!("Health check failed: HTTP {}", response.status());
-        }
-        
-        let health = response
-            .json::<HealthResponse>()
-            .await
-            .context("Failed to parse health response")?;
-        
-        Ok(health)
+        Ok(response.into_inner())
     }
     
     /// Get server capabilities
+    #[instrument(skip(self))]
     pub async fn get_capabilities(&self) -> Result<CapabilitiesResponse> {
-        let url = format!("{}/capabilities", self.base_url);
-        let response = reqwest::get(&url)
+        let response = self.inner.list_capabilities()
             .await
-            .context("Failed to get capabilities")?;
+            .map_err(|e| {
+                error!("Capabilities request failed: {}", e);
+                match e.status() {
+                    Some(status) if status.is_server_error() => {
+                        anyhow!("Server error getting capabilities: {} ({})", e, status)
+                    },
+                    Some(status) if status.is_client_error() => {
+                        anyhow!("Client error getting capabilities: {} ({})", e, status)
+                    },
+                    Some(status) => {
+                        anyhow!("Unexpected response getting capabilities: {} ({})", e, status)
+                    },
+                    None => {
+                        anyhow!("Network error getting capabilities: {}", e)
+                    }
+                }
+            })
+            .context("Failed to get server capabilities")?;
         
-        if !response.status().is_success() {
-            anyhow::bail!("Get capabilities failed: HTTP {}", response.status());
-        }
-        
-        let capabilities = response
-            .json::<CapabilitiesResponse>()
-            .await
-            .context("Failed to parse capabilities response")?;
-        
-        Ok(capabilities)
+        Ok(response.into_inner())
     }
     
     /// Execute a query
-    pub async fn execute_query(&self, request: ExecuteRequest) -> Result<ExecuteResponse> {
-        let url = format!("{}/execute", self.base_url);
-        let client = reqwest::Client::new();
+    #[instrument(skip(self, project_scope), fields(query = %query))]
+    pub async fn query(&self, query: &str, project_scope: ProjectScope) -> Result<QueryResponse> {
+        let request = QueryRequest {
+            query: query.to_string(),
+            project_scope,
+            conversation_id: None,
+        };
         
-        let response = client
-            .post(&url)
-            .json(&request)
-            .send()
+        let response = self.inner.query_task(&request)
             .await
+            .map_err(|e| {
+                error!("Query execution failed: {}", e);
+                match e.status() {
+                    Some(status) if status.as_u16() == 400 => {
+                        anyhow!("Invalid query request: Check your query syntax and project context")
+                    },
+                    Some(status) if status.as_u16() == 401 => {
+                        anyhow!("Authentication failed: Check your API credentials")
+                    },
+                    Some(status) if status.as_u16() == 403 => {
+                        anyhow!("Permission denied: You don't have access to execute queries")
+                    },
+                    Some(status) if status.as_u16() == 404 => {
+                        anyhow!("API endpoint not found: Check your server URL")
+                    },
+                    Some(status) if status.as_u16() == 422 => {
+                        // Try to extract the actual validation error message from response body
+                        match extract_error_body(&e) {
+                            Ok(body) if !body.is_empty() => {
+                                anyhow!("Validation error: {}", body)
+                            },
+                            _ => {
+                                anyhow!("Validation error: Request data is invalid or incomplete")
+                            }
+                        }
+                    },
+                    Some(status) if status.as_u16() == 500 => {
+                        anyhow!("Server error: The agent network encountered an internal error")
+                    },
+                    Some(status) if status.as_u16() == 503 => {
+                        anyhow!("Service unavailable: Agent network is temporarily down")
+                    },
+                    Some(status) if status.is_server_error() => {
+                        anyhow!("Server error during query execution: {} ({})", e, status)
+                    },
+                    Some(status) if status.is_client_error() => {
+                        anyhow!("Client error during query execution: {} ({})", e, status)
+                    },
+                    Some(status) => {
+                        anyhow!("Unexpected response during query execution: {} ({})", e, status)
+                    },
+                    None => {
+                        anyhow!("Network error during query execution: {}", e)
+                    }
+                }
+            })
             .context("Failed to execute query")?;
         
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-            anyhow::bail!("Execute query failed: HTTP {} - {}", status, error_text);
-        }
-        
-        let execute_response = response
-            .json::<ExecuteResponse>()
-            .await
-            .context("Failed to parse execute response")?;
-        
-        Ok(execute_response)
+        Ok(response.into_inner())
     }
     
     /// Get WebSocket URL for streaming
@@ -156,9 +165,14 @@ impl AcpClient {
 }
 
 /// Test connection to ACP server
+#[instrument(fields(server_url = %server_url))]
 pub async fn test_connection(server_url: &str) -> Result<HealthResponse> {
-    let client = AcpClient::new(server_url)?;
-    client.health_check().await
+    let client = AcpClient::new(server_url)
+        .context("Failed to create ACP client")?;
+    
+    client.health_check()
+        .await
+        .context("Health check failed")
 }
 
 /// Detect project scope from current directory
@@ -178,7 +192,7 @@ pub fn detect_project_scope() -> Result<ProjectScope> {
     })
 }
 
-fn detect_languages(dir: &std::path::Path) -> Result<Vec<(String, f32)>> {
+fn detect_languages(dir: &std::path::Path) -> Result<std::collections::HashMap<String, f32>> {
     use std::collections::HashMap;
     
     let mut file_counts: HashMap<String, usize> = HashMap::new();
@@ -202,15 +216,15 @@ fn detect_languages(dir: &std::path::Path) -> Result<Vec<(String, f32)>> {
     }
     
     if total_files == 0 {
-        return Ok(vec![("Unknown".to_string(), 1.0)]);
+        let mut result = HashMap::new();
+        result.insert("Unknown".to_string(), 1.0);
+        return Ok(result);
     }
     
-    let mut languages: Vec<(String, f32)> = file_counts
+    let languages: HashMap<String, f32> = file_counts
         .into_iter()
         .map(|(lang, count)| (lang, count as f32 / total_files as f32))
         .collect();
-    
-    languages.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     
     Ok(languages)
 }
@@ -237,4 +251,76 @@ fn extension_to_language(ext: &str) -> &'static str {
         "xml" => "XML",
         _ => "Unknown",
     }
+}
+
+/// Extract error response body text from progenitor Error
+/// 
+/// Attempts to extract the actual error message from the HTTP response body.
+/// This is particularly useful for validation errors (422) that contain specific
+/// field-level error descriptions.
+fn extract_error_body(error: &progenitor_client::Error<types::ErrorResponse>) -> Result<String> {
+    // Convert the error to a string and try to parse useful information
+    let error_str = error.to_string();
+    
+    // For now, extract what we can from the error string
+    // The progenitor error typically contains response details
+    if let Some(start) = error_str.find("Response { url:") {
+        // Try to extract any meaningful error text from the error string
+        if error_str.contains("422") {
+            // For 422 errors, the server sends plain text error messages
+            // We can't easily get the body from progenitor::Error directly,
+            // but we can at least indicate it's a validation error
+            return Ok("Invalid or incomplete request data - check required fields".to_string());
+        }
+    }
+    
+    // Try to parse JSON error response if present
+    if error_str.contains("ErrorResponse") {
+        // This suggests the server returned a JSON ErrorResponse
+        return Ok("Server returned a structured error response".to_string());
+    }
+    
+    // Fallback: try to extract any useful information from the error string
+    if let Some(msg) = extract_meaningful_error_text(&error_str) {
+        Ok(msg)
+    } else {
+        Ok("Error details not available".to_string())
+    }
+}
+
+/// Extract meaningful error text from a complex error string
+fn extract_meaningful_error_text(error_str: &str) -> Option<String> {
+    // Look for common error patterns and extract useful information
+    
+    // Check for validation error patterns
+    if error_str.contains("missing field") {
+        if let Some(start) = error_str.find("missing field") {
+            if let Some(end) = error_str[start..].find("at line") {
+                return Some(error_str[start..start + end].trim().to_string());
+            }
+        }
+    }
+    
+    // Check for deserialization errors
+    if error_str.contains("Failed to deserialize") {
+        if let Some(start) = error_str.find("Failed to deserialize") {
+            if let Some(end) = error_str[start..].find("at line") {
+                return Some(error_str[start..start + end].trim().to_string());
+            }
+        }
+    }
+    
+    // Check for other common validation patterns
+    if error_str.contains("invalid") || error_str.contains("required") {
+        // Try to extract a meaningful snippet
+        let words: Vec<&str> = error_str.split_whitespace().collect();
+        for window in words.windows(8) {
+            let phrase = window.join(" ");
+            if phrase.contains("invalid") || phrase.contains("required") || phrase.contains("missing") {
+                return Some(phrase);
+            }
+        }
+    }
+    
+    None
 }

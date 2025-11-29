@@ -3,23 +3,31 @@ use axum::{
     response::Response,
 };
 use futures_util::{sink::SinkExt, stream::StreamExt};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, warn, instrument};
 use crate::server::AppState;
 
 /// WebSocket handler for streaming status updates
+#[instrument(skip(ws, state), fields(conversation_id = %conversation_id))]
 pub async fn websocket_handler(
     ws: WebSocketUpgrade,
     Path(conversation_id): Path<String>,
     State(state): State<AppState>,
 ) -> Response {
-    info!("WebSocket connection requested for conversation: {}", conversation_id);
+    info!(
+        conversation_id = %conversation_id,
+        "WebSocket connection upgrade requested"
+    );
     
     ws.on_upgrade(move |socket| handle_socket(socket, conversation_id, state))
 }
 
 /// Handle individual WebSocket connection (unidirectional streaming)
+#[instrument(skip(socket, state), fields(conversation_id = %conversation_id))]
 async fn handle_socket(socket: WebSocket, conversation_id: String, state: AppState) {
-    info!("WebSocket connection established for conversation: {}", conversation_id);
+    info!(
+        conversation_id = %conversation_id,
+        "WebSocket connection established, starting status stream"
+    );
     
     let (mut sender, _) = socket.split(); // Remove receiver - unidirectional only
     
