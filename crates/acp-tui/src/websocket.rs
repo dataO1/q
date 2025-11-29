@@ -208,9 +208,8 @@ impl ConnectionHandler {
     async fn connect(&mut self) {
         self.connection_state = ConnectionState::Connecting;
         
-        // Convert HTTP URL to WebSocket URL
+        // The server_url already contains the correct WebSocket path from get_websocket_url()
         let ws_url = self.server_url.replace("http://", "ws://").replace("https://", "wss://");
-        let ws_url = format!("{}/ws", ws_url);
         
         info!("Connecting to WebSocket: {}", ws_url);
         
