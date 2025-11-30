@@ -85,7 +85,7 @@ required_tools = ["read_file", "write_file"]
 [[agent_network.agents]]
 id = "planning-1"
 agent_type = "Planning"
-model = "qwen3:8b"
+model = "qwen2.5-coder:3b"
 temperature = 0.4
 max_tokens = 32768
 system_prompt = """You are a planning agent that decomposes complex tasks.

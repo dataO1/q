@@ -192,7 +192,8 @@ pub trait TypedAgent: Send + Sync {
             timestamp: chrono::Utc::now(),
             source: EventSource::Agent { 
                 agent_id: self.id().to_string(), 
-                agent_type: self.agent_type() 
+                agent_type: self.agent_type(),
+                task_id: context.task_id.clone(),
             },
             event: EventType::AgentStarted { 
                 context_size: context.description.len() + 
@@ -218,7 +219,8 @@ pub trait TypedAgent: Send + Sync {
                 timestamp: chrono::Utc::now(),
                 source: EventSource::Agent { 
                     agent_id: self.id().to_string(), 
-                    agent_type: self.agent_type() 
+                    agent_type: self.agent_type(),
+                    task_id: context.task_id.clone(),
                 },
                 event: EventType::WorkflowStepStarted { 
                     step_name: step.name.clone()
@@ -265,7 +267,8 @@ pub trait TypedAgent: Send + Sync {
                         timestamp: chrono::Utc::now(),
                         source: EventSource::Agent { 
                             agent_id: self.id().to_string(), 
-                            agent_type: self.agent_type() 
+                            agent_type: self.agent_type(),
+                            task_id: context.task_id.clone(),
                         },
                         event: EventType::WorkflowStepCompleted { 
                             step_name: step.name.clone()
@@ -295,7 +298,8 @@ pub trait TypedAgent: Send + Sync {
                         timestamp: chrono::Utc::now(),
                         source: EventSource::Agent { 
                             agent_id: self.id().to_string(), 
-                            agent_type: self.agent_type() 
+                            agent_type: self.agent_type(),
+                            task_id: context.task_id.clone(),
                         },
                         event: EventType::AgentFailed { 
                             error: error_msg.clone()
@@ -332,7 +336,8 @@ pub trait TypedAgent: Send + Sync {
             timestamp: chrono::Utc::now(),
             source: EventSource::Agent { 
                 agent_id: self.id().to_string(), 
-                agent_type: self.agent_type() 
+                agent_type: self.agent_type(),
+                task_id: context.task_id.clone(),
             },
             event: EventType::AgentCompleted { 
                 result: agent_result.reasoning.clone().unwrap_or_default()
@@ -899,6 +904,9 @@ pub trait Agent: Send + Sync {
         context: AgentContext,
         status_sender: BufferedEventSender,
     ) -> Result<AgentResult>;
+    
+    /// Define the workflow steps for this agent (from TypedAgent)
+    fn define_workflow_steps(&self, context: &AgentContext) -> Vec<WorkflowStep>;
 }
 
 // Blanket implementation: any TypedAgent automatically becomes an Agent
@@ -924,6 +932,10 @@ where
         let tools = Arc::new(ToolSet::new(&context.clone().project_scope.unwrap().root));
         self.execute_workflow(context, workflow_steps, tools, status_sender).await
     }
+    
+    fn define_workflow_steps(&self, context: &AgentContext) -> Vec<WorkflowStep> {
+        TypedAgent::define_workflow_steps(self, context)
+    }
 
 }
 
@@ -933,6 +945,9 @@ where
 pub struct AgentContext {
     /// Primary task description
     pub description: String,
+
+    /// Task identifier (None for planning agent)
+    pub task_id: Option<String>,
 
     /// Context dependencies that must be satisfied
     pub dependencies: Vec<String>,
@@ -956,9 +971,10 @@ pub struct AgentContext {
 
 impl AgentContext {
     /// Create new context with minimal required fields
-    pub fn new(description: String, conversation_id: String) -> Self {
+    pub fn new(description: String, conversation_id: String, task_id: Option<String>) -> Self {
         Self {
             description,
+            task_id,
             dependencies: Vec::new(),
             dependency_outputs: HashMap::new(),
             conversation_id: Some(ConversationId(conversation_id)),

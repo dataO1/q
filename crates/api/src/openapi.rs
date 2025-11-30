@@ -93,6 +93,12 @@ standard for agent interoperability and communication.
         HealthResponse,
         ErrorResponse,
         crate::types::ProjectScope,
+        crate::types::StatusEvent,
+        crate::types::EventType,
+        crate::types::EventSource,
+        crate::types::ExecutionPlan,
+        crate::types::WaveInfo,
+        crate::types::TaskInfo,
         ai_agent_common::AgentType
     )),
     tags(

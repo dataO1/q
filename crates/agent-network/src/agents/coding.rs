@@ -5,8 +5,8 @@
 
 use crate::agents::base::TypedAgent;
 use ai_agent_common::AgentType;
+use async_openai::{config::OpenAIConfig, Client};
 use async_trait::async_trait;
-use async_openai::{Client, config::OpenAIConfig};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, instrument};
@@ -26,7 +26,6 @@ pub struct ChangeLog {
     changed_file: String,
     summary_of_changes: String,
 }
-
 
 /// Coding agent for code generation and review
 pub struct CodingAgent {
@@ -64,7 +63,7 @@ impl CodingAgent {
         }
     }
 
-    fn build_system_prompt(prompt: String) -> String{
+    fn build_system_prompt(prompt: String) -> String {
         let tools_usage = r#"
 
         ## CRITICAL TOOL-USAGE RULES:
@@ -79,17 +78,32 @@ impl CodingAgent {
 
 #[async_trait]
 impl TypedAgent for CodingAgent {
-    fn id(&self) -> &str { &self.id }
-    fn agent_type(&self) -> AgentType { AgentType::Coding }
-    fn system_prompt(&self) -> &str { &self.system_prompt }
-    fn model(&self) -> &str { &self.model }
-    fn temperature(&self) -> f32 { self.temperature }
-    fn client(&self) -> &Client<OpenAIConfig> { &self.client }
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn agent_type(&self) -> AgentType {
+        AgentType::Coding
+    }
+    fn system_prompt(&self) -> &str {
+        &self.system_prompt
+    }
+    fn model(&self) -> &str {
+        &self.model
+    }
+    fn temperature(&self) -> f32 {
+        self.temperature
+    }
+    fn client(&self) -> &Client<OpenAIConfig> {
+        &self.client
+    }
     type Output = CodingOutput;
 
     /// Define coding workflow steps
-    fn define_workflow_steps(&self, context: &crate::agents::AgentContext) -> Vec<crate::agents::base::WorkflowStep> {
-        use crate::agents::base::{WorkflowStep, StepExecutionMode};
+    fn define_workflow_steps(
+        &self,
+        context: &crate::agents::AgentContext,
+    ) -> Vec<crate::agents::base::WorkflowStep> {
+        use crate::agents::base::{StepExecutionMode, WorkflowStep};
         use std::collections::HashMap;
 
         vec![
@@ -106,7 +120,7 @@ impl TypedAgent for CodingAgent {
                 id: "implement_code".to_string(),
                 name: "Code Implementation".to_string(),
                 description: "Generate required code to complete the user prompt. Use `write_file` to write all code to disk. Do NOT output code in text - only use the write_file tool.".to_string(),
-                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(3) }, // Allow multiple writes if needed
+                execution_mode: StepExecutionMode::ReAct { max_iterations: Some(1) }, // Allow multiple writes if needed
                 required_tools: vec!["write_file".to_string()],
                 parameters: HashMap::new(),
                 formatted: false, // Must produce CodingOutput JSON

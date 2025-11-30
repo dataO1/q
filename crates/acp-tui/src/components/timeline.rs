@@ -3,7 +3,7 @@
 //! This component maintains tree state and responds to incoming WebSocket messages
 //! with pure state transition functions, following React/Elm architecture patterns.
 
-use crate::models::{StatusEvent, EventSource, EventType};
+use crate::client::types::{StatusEvent, EventSource, EventType, AgentType, ExecutionPlan};
 use crate::models::tree::{TimelineTree, TreeNode, NodeStatus};
 use ratatui::{
     Frame,
@@ -115,7 +115,16 @@ impl TimelineComponent {
                 if let Some(node) = self.tree.find_node_mut(&node_id) {
                     node.start();
                 }
-                self.track_active_node(node_id, None);
+                // Track with both task_id (if available) and agent_id for backward compatibility
+                if let EventSource::Agent { agent_id, task_id, .. } = &event.source {
+                    self.track_active_node(node_id.clone(), None);
+                    // Also track by agent_id for tool routing
+                    if task_id.is_some() {
+                        self.track_active_node(agent_id.clone(), None);
+                    }
+                } else {
+                    self.track_active_node(node_id, None);
+                }
             }
             
             // Agent thinking - update activity
@@ -126,15 +135,25 @@ impl TimelineComponent {
             // Tool started - create tool node under agent
             EventType::ToolStarted { args } => {
                 if let EventSource::Tool { agent_id, tool_name } = &event.source {
-                    self.ensure_agent_node(&EventSource::Agent { 
-                        agent_id: agent_id.clone(), 
-                        agent_type: "unknown".to_string() 
-                    }, agent_id);
+                    // Find the task node that this agent is working on
+                    // Look for active nodes with this agent_id to find the task
+                    let parent_node_id = if let Some((task_id, _)) = self.active_nodes.iter()
+                        .find(|(id, _)| id.starts_with(agent_id) || id.ends_with(agent_id)) {
+                        task_id.clone()
+                    } else {
+                        // Fallback: ensure agent node exists
+                        self.ensure_agent_node(&EventSource::Agent { 
+                            agent_id: agent_id.clone(), 
+                            agent_type: AgentType::Coding,
+                            task_id: None,
+                        }, agent_id);
+                        agent_id.clone()
+                    };
                     
                     let tool_display = format!("{} {}", tool_name, 
                         args.as_str().unwrap_or(""));
                     
-                    self.tree.add_child(agent_id.clone(), node_id.clone(), tool_display);
+                    self.tree.add_child(parent_node_id, node_id.clone(), tool_display);
                     if let Some(node) = self.tree.find_node_mut(&node_id) {
                         node.start();
                     }
@@ -238,14 +257,76 @@ impl TimelineComponent {
                     }
                 }
             }
+            
+            // Planning events
+            EventType::PlanningStarted => {
+                self.tree.add_child(node_id, "planning".to_string(), "📋 Planning".to_string());
+                if let Some(planning_node) = self.tree.find_node_mut("planning") {
+                    planning_node.start();
+                }
+            }
+            
+            EventType::PlanningCompleted { task_count, reasoning: _ } => {
+                // Complete the planning node
+                if let Some(node) = self.tree.find_node_mut("planning") {
+                    node.complete();
+                    // Add decomposition summary as child
+                    self.tree.add_child("planning".to_string(), "decomposition".to_string(), 
+                        format!("Task Decomposition: {} tasks", task_count));
+                    if let Some(decomp_node) = self.tree.find_node_mut("decomposition") {
+                        decomp_node.complete();
+                    }
+                }
+                // Note: Execution plan structure will be created when ExecutionPlanReady arrives
+            }
+
+            EventType::ExecutionPlanReady { plan } => {
+                // Create the full execution plan structure
+                self.create_execution_plan_structure(plan);
+            }
+            
+            // Wave events
+            EventType::WaveStarted { wave_index, task_count: _, task_ids: _ } => {
+                let wave_id = format!("wave-{}", wave_index);
+                if let Some(node) = self.tree.find_node_mut(&wave_id) {
+                    node.start();
+                }
+            }
+            
+            EventType::WaveCompleted { wave_index, success_count: _, failure_count: _ } => {
+                let wave_id = format!("wave-{}", wave_index);
+                if let Some(node) = self.tree.find_node_mut(&wave_id) {
+                    node.complete();
+                }
+            }
+            
+            // Task node events
+            EventType::TaskNodeStarted { task_id, agent_id: _, wave_index: _, description: _ } => {
+                if let Some(node) = self.tree.find_node_mut(task_id) {
+                    node.start();
+                }
+            }
+            
+            EventType::TaskNodeCompleted { task_id, agent_id: _, wave_index: _, success } => {
+                if let Some(node) = self.tree.find_node_mut(task_id) {
+                    if *success {
+                        node.complete();
+                    } else {
+                        node.fail(Some("Task execution failed".to_string()));
+                    }
+                }
+            }
         }
     }
     
-    /// Extract node ID from event source
+    /// Extract node ID from event source - prefer task_id for agents when available
     fn extract_node_id(&self, source: &EventSource) -> String {
         match source {
             EventSource::Orchestrator => "orchestrator".to_string(),
-            EventSource::Agent { agent_id, .. } => agent_id.clone(),
+            EventSource::Agent { agent_id, task_id, .. } => {
+                // Use task_id if available to route events to the correct task node
+                task_id.as_ref().unwrap_or(agent_id).clone()
+            },
             EventSource::Tool { tool_name, agent_id } => {
                 format!("{}::{}", agent_id, tool_name)
             }
@@ -260,7 +341,7 @@ impl TimelineComponent {
             EventSource::Orchestrator => "Orchestrator".to_string(),
             EventSource::Agent { agent_type, .. } => {
                 // Extract readable agent type
-                let clean_type = agent_type
+                let clean_type = agent_type.to_string()
                     .replace("_", " ")
                     .replace("-", " ")
                     .split_whitespace()
@@ -275,7 +356,7 @@ impl TimelineComponent {
                     .join(" ");
                 
                 // Add emoji based on agent type
-                let emoji = self.get_agent_emoji(agent_type);
+                let emoji = self.get_agent_emoji(&agent_type.to_string());
                 format!("{} {}", emoji, clean_type)
             }
             EventSource::Tool { tool_name, .. } => {
@@ -329,9 +410,19 @@ impl TimelineComponent {
         }
     }
     
-    /// Ensure agent node exists
+    /// Ensure agent node exists - use task_id to route to existing task nodes when available
     fn ensure_agent_node(&mut self, source: &EventSource, display_name: &str) {
-        if let EventSource::Agent { agent_id, .. } = source {
+        if let EventSource::Agent { agent_id, task_id, .. } = source {
+            // If we have a task_id, try to find the existing task node
+            if let Some(task_id) = task_id {
+                if let Some(task_node) = self.tree.find_node_mut(task_id) {
+                    // Update the task node to show it's now associated with this agent
+                    // The task node already exists from the execution plan
+                    return;
+                }
+            }
+            
+            // Fallback: create agent node if task node not found or no task_id
             if self.tree.find_node_mut(agent_id).is_none() {
                 // Create as root if no parent found
                 self.tree.add_root(agent_id.clone(), display_name.to_string());
@@ -370,7 +461,7 @@ impl TimelineComponent {
     }
     
     /// Render the timeline component
-    pub fn render(&self, f: &mut Frame, area: Rect) {
+    pub fn render(&self, f: &mut Frame, area: Rect, focused: bool) {
         let lines = self.tree.render_lines();
         debug!("Timeline rendering {} lines, tree has {} roots", lines.len(), self.tree.roots.len());
         
@@ -388,10 +479,17 @@ impl TimelineComponent {
         let title = format!(" Timeline (⟳{} ✔{} ✗{} ⚠{}) ", 
             stats.running, stats.completed, stats.failed, stats.warnings);
         
+        let border_style = if focused {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        
         let paragraph = Paragraph::new(visible_lines)
             .block(Block::default()
                 .title(title)
-                .borders(Borders::ALL))
+                .borders(Borders::ALL)
+                .border_style(border_style))
             .wrap(Wrap { trim: false });
         
         f.render_widget(paragraph, area);
@@ -424,6 +522,45 @@ impl TimelineComponent {
     pub fn scroll_info(&self) -> (usize, usize) {
         let total_lines = self.tree.render_lines().len();
         (self.scroll_offset, total_lines)
+    }
+    
+    /// Create the full execution plan structure from PlanningCompleted event
+    fn create_execution_plan_structure(&mut self, plan: &ExecutionPlan) {
+        for wave_info in &plan.waves {
+            let wave_id = format!("wave-{}", wave_info.wave_index);
+            let wave_display = format!("Wave {} ({} tasks)", 
+                wave_info.wave_index, wave_info.tasks.len());
+            
+            // Add wave as root node (it will be positioned in the tree structure)
+            self.tree.add_root(wave_id.clone(), wave_display);
+            
+            // Set wave node as waiting initially
+            if let Some(wave_node) = self.tree.find_node_mut(&wave_id) {
+                // Waves start in waiting state
+                // They'll be updated to running when WaveStarted events arrive
+            }
+            
+            // Add tasks as children of the wave
+            for task_info in &wave_info.tasks {
+                let task_display = format!("{} {}", 
+                    self.get_agent_emoji(&task_info.agent_type.to_string()), 
+                    task_info.description);
+                
+                self.tree.add_child(wave_id.clone(), task_info.task_id.clone(), task_display);
+                
+                // Set task node as waiting initially
+                if let Some(task_node) = self.tree.find_node_mut(&task_info.task_id) {
+                    // Tasks start in waiting state  
+                    // They'll be updated to running when TaskNodeStarted events arrive
+                }
+                
+                // Add steps as children of tasks if they exist
+                for (step_index, step) in task_info.steps.iter().enumerate() {
+                    let step_id = format!("{}:step:{}", task_info.task_id, step_index);
+                    self.tree.add_child(task_info.task_id.clone(), step_id, step.clone());
+                }
+            }
+        }
     }
 }
 

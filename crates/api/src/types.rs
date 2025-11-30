@@ -6,8 +6,8 @@ use serde_json::json;
 use utoipa::ToSchema;
 use ai_agent_common::AgentType;
 
-// Re-export ProjectScope to avoid qualified references in OpenAPI
-pub use ai_agent_common::ProjectScope;
+// Re-export common types to avoid qualified references in OpenAPI
+pub use ai_agent_common::{ProjectScope, StatusEvent, EventType, EventSource, ExecutionPlan, WaveInfo, TaskInfo};
 
 /// Request to execute a query
 /// 

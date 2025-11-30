@@ -12,7 +12,7 @@ use crate::tools::ToolSet;
 use crate::coordination::CoordinationManager;
 use crate::filelocks::FileLockManager;
 use crate::execution_manager::BufferedEventSender;
-use ai_agent_common::{ConversationId, ProjectScope, StatusEvent};
+use ai_agent_common::{ConversationId, ProjectScope, StatusEvent, EventSource, EventType, ExecutionPlan, WaveInfo, TaskInfo};
 use petgraph::algo::toposort;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
@@ -171,6 +171,21 @@ impl WorkflowExecutor {
         let waves = self.compute_execution_waves(&graph, &sorted_nodes)?;
         info!("Computed {} execution waves", waves.len());
 
+        // Create and send ExecutionPlan
+        let execution_plan = self.create_execution_plan(&graph, &waves).await?;
+        let execution_plan_event = StatusEvent {
+            execution_id: conversation_id.to_string(),
+            timestamp: chrono::Utc::now(),
+            source: EventSource::Orchestrator,
+            event: EventType::ExecutionPlanReady {
+                plan: execution_plan,
+            },
+        };
+        
+        if let Err(_) = status_sender.send(execution_plan_event).await {
+            debug!("Failed to send execution plan event");
+        }
+
         // Execute waves sequentially, tasks within waves in parallel
         let mut all_results: HashMap<String, TaskResult> = HashMap::new();
 
@@ -235,6 +250,26 @@ impl WorkflowExecutor {
             task_count = wave.task_indices.len(),
             "Starting wave execution"
         );
+
+        // Emit wave started event
+        let task_ids: Vec<String> = wave.task_indices.iter()
+            .map(|&idx| graph[idx].task_id.clone())
+            .collect();
+        
+        let wave_started_event = ai_agent_common::StatusEvent {
+            execution_id: conversation_id.to_string(),
+            timestamp: chrono::Utc::now(),
+            source: ai_agent_common::EventSource::Orchestrator,
+            event: ai_agent_common::EventType::WaveStarted {
+                wave_index: wave.wave_index,
+                task_count: wave.task_indices.len(),
+                task_ids,
+            },
+        };
+        
+        if let Err(_) = status_sender.send(wave_started_event).await {
+            debug!("Failed to send wave started event");
+        }
 
         let mut handles: Vec<JoinHandle<AgentNetworkResult<TaskResult>>> = vec![];
 
@@ -327,6 +362,27 @@ impl WorkflowExecutor {
             }
         }
         info!("Wave {} completed", wave.wave_index);
+
+        // Count successes and failures
+        let success_count = wave_results.iter().filter(|r| r.success).count();
+        let failure_count = wave_results.len() - success_count;
+
+        // Emit wave completed event
+        let wave_completed_event = ai_agent_common::StatusEvent {
+            execution_id: conversation_id.to_string(),
+            timestamp: chrono::Utc::now(),
+            source: ai_agent_common::EventSource::Orchestrator,
+            event: ai_agent_common::EventType::WaveCompleted {
+                wave_index: wave.wave_index,
+                success_count,
+                failure_count,
+            },
+        };
+        
+        if let Err(_) = status_sender.send(wave_completed_event).await {
+            debug!("Failed to send wave completed event");
+        }
+
         Ok(wave_results)
     }
 
@@ -361,7 +417,6 @@ impl WorkflowExecutor {
 
                 if all_deps_satisfied {
                     wave_tasks.push(*node_idx);
-                    processed.insert(*node_idx);
 
                     // Respect max concurrent limit per wave
                     if wave_tasks.len() >= self.config.max_concurrent_tasks {
@@ -374,6 +429,11 @@ impl WorkflowExecutor {
                 break;
             }
 
+            // Mark all tasks in this wave as processed
+            for &task_idx in &wave_tasks {
+                processed.insert(task_idx);
+            }
+
             waves.push(ExecutionWave {
                 wave_index,
                 task_indices: wave_tasks,
@@ -384,6 +444,66 @@ impl WorkflowExecutor {
         }
 
         Ok(waves)
+    }
+
+    /// Create execution plan from computed waves
+    async fn create_execution_plan(
+        &self,
+        graph: &WorkflowGraph,
+        waves: &[ExecutionWave],
+    ) -> AgentNetworkResult<ExecutionPlan> {
+        let mut plan_waves = vec![];
+
+        for wave in waves {
+            let mut wave_tasks = vec![];
+            
+            for &node_idx in &wave.task_indices {
+                let task_node = &graph[node_idx];
+                
+                // Get agent to determine agent_type
+                let agent = self.agent_pool
+                    .get_agent(&task_node.agent_id)
+                    .ok_or_else(|| AgentNetworkError::Agent(format!("Agent not found: {}", task_node.agent_id)))?;
+
+                // Get dependencies by checking incoming edges
+                let mut dependencies = vec![];
+                for edge_idx in graph.edges_directed(node_idx, petgraph::Direction::Incoming) {
+                    let source_node = &graph[edge_idx.source()];
+                    dependencies.push(source_node.task_id.clone());
+                }
+
+                // Get actual workflow steps from agent
+                let steps = {
+                    // Create a temporary agent context to get workflow steps
+                    let temp_context = crate::agents::AgentContext::new(
+                        task_node.description.clone(),
+                        "temp".to_string(),
+                        Some(task_node.task_id.clone())
+                    );
+                    
+                    agent.define_workflow_steps(&temp_context)
+                        .iter()
+                        .map(|step| step.name.clone())
+                        .collect::<Vec<String>>()
+                };
+
+                wave_tasks.push(TaskInfo {
+                    task_id: task_node.task_id.clone(),
+                    agent_id: task_node.agent_id.clone(),
+                    agent_type: format!("{:?}", agent.agent_type()),
+                    description: task_node.description.clone(),
+                    dependencies,
+                    steps,
+                });
+            }
+
+            plan_waves.push(WaveInfo {
+                wave_index: wave.wave_index,
+                tasks: wave_tasks,
+            });
+        }
+
+        Ok(ExecutionPlan { waves: plan_waves })
     }
 
     /// Get executor configuration
@@ -422,7 +542,8 @@ async fn execute_single_task(
 
     let mut agent_context = AgentContext::new(
         task.description.clone(),
-        conversation_id.to_string()
+        conversation_id.to_string(),
+        Some(task.task_id.clone())
     ).with_project_scope(project_scope.clone());
 
     // Build dependency outputs from previous results
@@ -566,7 +687,22 @@ async fn execute_task_with_retry(
     // Register task
     coordination.register_task(task_id.clone(), agent_id.clone()).await?;
 
-    // Task started (status events will be handled in future phases)
+    // Emit task node started event
+    let task_started_event = ai_agent_common::StatusEvent {
+        execution_id: conversation_id.to_string(),
+        timestamp: chrono::Utc::now(),
+        source: ai_agent_common::EventSource::Orchestrator,
+        event: ai_agent_common::EventType::TaskNodeStarted {
+            task_id: task_id.clone(),
+            agent_id: agent_id.clone(),
+            wave_index,
+            description: task.description.clone(),
+        },
+    };
+    
+    if let Err(_) = status_sender.send(task_started_event).await {
+        debug!("Failed to send task started event");
+    }
 
     let mut retries = 0;
     let mut last_error = None;
@@ -635,7 +771,23 @@ async fn execute_task_with_retry(
                     }
                 }
 
-                // Task completed (status events will be handled in future phases)
+                // Emit task node completed event
+                let task_completed_event = ai_agent_common::StatusEvent {
+                    execution_id: conversation_id.to_string(),
+                    timestamp: chrono::Utc::now(),
+                    source: ai_agent_common::EventSource::Orchestrator,
+                    event: ai_agent_common::EventType::TaskNodeCompleted {
+                        task_id: task_id.clone(),
+                        agent_id: agent_id.clone(),
+                        wave_index,
+                        success: true,
+                    },
+                };
+                
+                if let Err(_) = status_sender.send(task_completed_event).await {
+                    debug!("Failed to send task completed event");
+                }
+
                 return Ok(task_result);
             }
             Ok(Err(e)) => {
@@ -675,8 +827,24 @@ async fn execute_task_with_retry(
         .update_task_status(&task_id, crate::coordination::TaskStatus::Failed)
         .await?;
 
-    // Task failed (status events will be handled in future phases)
-    debug!("Task completed successfully");
+    // Emit task node completed event for failed task
+    let task_completed_event = ai_agent_common::StatusEvent {
+        execution_id: conversation_id.to_string(),
+        timestamp: chrono::Utc::now(),
+        source: ai_agent_common::EventSource::Orchestrator,
+        event: ai_agent_common::EventType::TaskNodeCompleted {
+            task_id: task_id.clone(),
+            agent_id: agent_id.clone(),
+            wave_index,
+            success: false,
+        },
+    };
+    
+    if let Err(_) = status_sender.send(task_completed_event).await {
+        debug!("Failed to send task completed event");
+    }
+
+    debug!("Task completed with failure");
     Ok(TaskResult {
         task_id,
         success: false,

@@ -6,7 +6,7 @@
 use crate::{
     components::{StatusLine, StatusLineMessage, TimelineComponent, TimelineMessage},
     websocket::{WebSocketClient, WebSocketHandle},
-    models::StatusEvent,
+    client::types::StatusEvent,
     config::Config,
     utils::{generate_client_id, format_client_id_short},
     error::{Error, Result},
@@ -24,6 +24,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
     Frame, Terminal,
 };
+use tui_textarea::TextArea;
 use std::{
     io::{self, stdout},
     time::{Duration, Instant},
@@ -114,11 +115,8 @@ pub struct App {
     /// Event receiver from WebSocket
     event_receiver: Option<broadcast::Receiver<StatusEvent>>,
     
-    /// Current query input
-    query_input: String,
-    
-    /// Input cursor position
-    input_cursor: usize,
+    /// Current query input (multi-line text area)
+    query_input: TextArea<'static>,
     
     /// Whether input is focused
     input_focused: bool,
@@ -237,6 +235,16 @@ impl App {
         // Create internal message channel
         let (internal_sender, internal_receiver) = tokio::sync::mpsc::unbounded_channel();
         
+        // Initialize multi-line text area
+        let mut text_area = TextArea::default();
+        text_area.set_placeholder_text("Enter query (Enter to submit, Shift+Enter for new line)");
+        text_area.set_block(
+            Block::default()
+                .title("Query Input")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::White))
+        );
+        
         let mut app = Self {
             config,
             acp_client,
@@ -248,8 +256,7 @@ impl App {
             terminal,
             websocket_handle: None,
             event_receiver: None,
-            query_input: String::new(),
-            input_cursor: 0,
+            query_input: text_area,
             input_focused: true,
             status_message: "Connecting to server...".to_string(),
             last_connection_error: None,
@@ -392,7 +399,7 @@ impl App {
                     // Start connection flow if not connected
                     self.start_connection_flow()?;
                     // Store query for after connection
-                    self.query_input = query;
+                    self.query_input = TextArea::from([query.as_str()]);
                 } else {
                     // Connection ready, execute query
                     self.execute_query(query)?;
@@ -427,10 +434,9 @@ impl App {
                 self.status_message = "Connected - ready for queries".to_string();
                 
                 // If there's a pending query, execute it now
-                if !self.query_input.trim().is_empty() {
-                    let query = self.query_input.clone();
-                    self.query_input.clear();
-                    self.input_cursor = 0;
+                if !self.is_query_empty() {
+                    let query = self.get_full_query();
+                    self.clear_query_input();
                     self.execute_query(query)?;
                 }
             }
@@ -488,6 +494,28 @@ impl App {
         Ok(())
     }
     
+    /// Check if the query input is empty
+    fn is_query_empty(&self) -> bool {
+        self.query_input.lines().iter().all(|line| line.trim().is_empty())
+    }
+
+    /// Get the full query as a single string
+    fn get_full_query(&self) -> String {
+        self.query_input.lines().join("\n")
+    }
+
+    /// Clear all query input
+    fn clear_query_input(&mut self) {
+        self.query_input = TextArea::default();
+        self.query_input.set_placeholder_text("Enter query (Enter to submit, Shift+Enter for new line)");
+        self.query_input.set_block(
+            Block::default()
+                .title("Query Input")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::White))
+        );
+    }
+
     /// Handle keyboard events
     fn handle_key_event(&mut self, key_event: KeyEvent) -> Result<()> {
         if self.show_help {
@@ -509,74 +537,48 @@ impl App {
                 self.show_help = true;
             }
             
-            // Clear timeline
-            KeyEvent { code: KeyCode::Char('c'), modifiers: KeyModifiers::NONE, .. } => {
-                self.timeline.update(TimelineMessage::Reset);
-                self.status_message = "Timeline cleared".to_string();
-            }
             
-            // Scroll timeline
-            KeyEvent { code: KeyCode::Up, .. } => {
+            // Scroll timeline (only when timeline is focused)
+            KeyEvent { code: KeyCode::Up, .. } if !self.input_focused => {
                 self.timeline.update(TimelineMessage::ScrollUp);
             }
-            KeyEvent { code: KeyCode::Down, .. } => {
+            KeyEvent { code: KeyCode::Down, .. } if !self.input_focused => {
                 self.timeline.update(TimelineMessage::ScrollDown);
             }
-            KeyEvent { code: KeyCode::PageUp, .. } => {
+            KeyEvent { code: KeyCode::PageUp, .. } if !self.input_focused => {
                 for _ in 0..10 {
                     self.timeline.update(TimelineMessage::ScrollUp);
                 }
             }
-            KeyEvent { code: KeyCode::PageDown, .. } => {
+            KeyEvent { code: KeyCode::PageDown, .. } if !self.input_focused => {
                 for _ in 0..10 {
                     self.timeline.update(TimelineMessage::ScrollDown);
                 }
             }
             
-            // Input handling when focused
-            KeyEvent { code: KeyCode::Enter, .. } if self.input_focused => {
-                if !self.query_input.trim().is_empty() {
-                    let query = self.query_input.clone();
-                    self.query_input.clear();
-                    self.input_cursor = 0;
+            // Tab to switch focus between input and timeline
+            KeyEvent { code: KeyCode::Tab, .. } => {
+                self.input_focused = !self.input_focused;
+            }
+            
+            // Enter submits the query when input is focused  
+            KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::NONE, .. } if self.input_focused => {
+                if !self.is_query_empty() {
+                    let query = self.get_full_query();
+                    self.clear_query_input();
                     self.update(AppMessage::SubmitQuery(query))?;
                 }
             }
             
-            KeyEvent { code: KeyCode::Char(c), modifiers: KeyModifiers::NONE, .. } if self.input_focused => {
-                self.query_input.insert(self.input_cursor, c);
-                self.input_cursor += 1;
+            // Shift+Enter creates a new line
+            KeyEvent { code: KeyCode::Enter, modifiers: KeyModifiers::SHIFT, .. } if self.input_focused => {
+                // Let TextArea handle the new line insertion
+                self.query_input.input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
             }
             
-            KeyEvent { code: KeyCode::Backspace, .. } if self.input_focused => {
-                if self.input_cursor > 0 {
-                    self.input_cursor -= 1;
-                    self.query_input.remove(self.input_cursor);
-                }
-            }
-            
-            KeyEvent { code: KeyCode::Delete, .. } if self.input_focused => {
-                if self.input_cursor < self.query_input.len() {
-                    self.query_input.remove(self.input_cursor);
-                }
-            }
-            
-            KeyEvent { code: KeyCode::Left, .. } if self.input_focused => {
-                self.input_cursor = self.input_cursor.saturating_sub(1);
-            }
-            
-            KeyEvent { code: KeyCode::Right, .. } if self.input_focused => {
-                if self.input_cursor < self.query_input.len() {
-                    self.input_cursor += 1;
-                }
-            }
-            
-            KeyEvent { code: KeyCode::Home, .. } if self.input_focused => {
-                self.input_cursor = 0;
-            }
-            
-            KeyEvent { code: KeyCode::End, .. } if self.input_focused => {
-                self.input_cursor = self.query_input.len();
+            // All other input events handled by TextArea when input is focused
+            key_event if self.input_focused => {
+                self.query_input.input(key_event);
             }
             
             _ => {}
@@ -738,8 +740,6 @@ impl App {
     /// Render the application UI
     fn render(&mut self) -> Result<()> {
         let timeline = &self.timeline;
-        let status_line = &self.status_line;
-        let query_input = &self.query_input;
         let input_focused = self.input_focused;
         let status_message = &self.status_message;
         let show_help = self.show_help;
@@ -748,7 +748,7 @@ impl App {
         let client_id = &self.client_id;
         
         self.terminal.draw(|frame| {
-            Self::render_frame(frame, timeline, status_line, query_input, input_focused, status_message, show_help, connection_state, client_id);
+            Self::render_frame(frame, timeline, &mut self.query_input, input_focused, status_message, show_help, connection_state, client_id);
         }).map_err(Error::Io)?;
         
         Ok(())
@@ -758,8 +758,7 @@ impl App {
     fn render_frame(
         frame: &mut Frame,
         timeline: &TimelineComponent,
-        status_line: &StatusLine,
-        query_input: &str,
+        query_input: &mut TextArea,
         input_focused: bool,
         status_message: &str,
         show_help: bool,
@@ -768,21 +767,40 @@ impl App {
     ) {
         let area = frame.area();
         
+        // Calculate dynamic height for input area based on content
+        let input_lines = query_input.lines().len();
+        let input_height = (input_lines + 2).max(5).min(15) as u16; // min 5, max 15 lines
+        
         // Main layout: timeline + input + status bar (3 sections)
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(3),      // Timeline
-                Constraint::Length(3),   // Input
-                Constraint::Length(1),   // Single status bar
+                Constraint::Min(5),                    // Timeline gets remaining space
+                Constraint::Length(input_height),      // Dynamic input area
+                Constraint::Length(1),                 // Single status bar
             ])
             .split(area);
         
-        // Render timeline
-        timeline.render(frame, chunks[0]);
+        // Render timeline with focus state
+        timeline.render(frame, chunks[0], !input_focused);
         
-        // Render input box
-        Self::render_input(frame, chunks[1], query_input, input_focused);
+        // Update border style based on focus
+        if input_focused {
+            query_input.set_block(
+                Block::default()
+                    .title("Query Input")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow))
+            );
+        } else {
+            query_input.set_block(
+                Block::default()
+                    .title("Query Input")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::White))
+            );
+        }
+        frame.render_widget(&*query_input, chunks[1]);
         
         // Render consolidated status bar
         Self::render_status(frame, chunks[2], status_message, timeline, connection_state, client_id);
@@ -793,26 +811,6 @@ impl App {
         }
     }
     
-    /// Render input box
-    fn render_input(frame: &mut Frame, area: Rect, query_input: &str, input_focused: bool) {
-        let input_text = if input_focused {
-            format!("{}│", query_input)
-        } else {
-            query_input.to_string()
-        };
-        
-        let input = Paragraph::new(input_text)
-            .block(Block::default()
-                .title(" Query ")
-                .borders(Borders::ALL)
-                .border_style(if input_focused {
-                    Style::default().fg(Color::Green)
-                } else {
-                    Style::default()
-                }));
-        
-        frame.render_widget(input, area);
-    }
     
     /// Render consolidated status bar
     fn render_status(frame: &mut Frame, area: Rect, status_message: &str, timeline: &TimelineComponent, connection_state: &ConnectionState, client_id: &str) {
@@ -858,8 +856,9 @@ impl App {
                 Span::styled(" ACP TUI Help ", Style::default().fg(Color::Green))
             ]),
             Line::from(""),
-            Line::from(" Enter: Submit query"),
-            Line::from(" ↑/↓: Scroll timeline"),
+            Line::from(" Enter: New line"),
+            Line::from(" Shift+Enter: Submit query"),
+            Line::from(" ↑/↓: Navigate lines or scroll timeline"),
             Line::from(" PgUp/PgDn: Scroll faster"),
             Line::from(" c: Clear timeline"),
             Line::from(" ?: Show this help"),

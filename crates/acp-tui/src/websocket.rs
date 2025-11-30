@@ -4,7 +4,7 @@
 //! real-time status updates during query execution. It manages connection lifecycle,
 //! message parsing, and event forwarding to the application state.
 
-use crate::{models::StatusEvent, error::{Error, Result}};
+use crate::{client::types::StatusEvent, error::Result};
 use futures_util::{SinkExt, StreamExt};
 use serde_json;
 use std::time::Duration;

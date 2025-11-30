@@ -1,6 +1,14 @@
-- really integrate the RAG and history context!!
 - decide whether to use workflowsteps or single step agents.
 - fine tune which models to use for which tasks.
+
+# TUI
+- how to handle corrections after task triggered?
+- how to handle interruptions after task has triggered? (agents, RAG and history must be stateless, until the very end of the execution?).
+-
+
+
+# RAG
+
 
 ### #######################################################
 ### Dynamic Context Expansion During Agent Execution

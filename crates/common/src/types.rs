@@ -166,6 +166,7 @@ pub struct MessageMetadata {
 
 /// Real-time status event for WebSocket streaming  
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct StatusEvent {
     /// Unique identifier for this execution
     pub execution_id: String,
@@ -182,6 +183,7 @@ pub struct StatusEvent {
 
 /// Source of a status event
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventSource {
     /// Event from the orchestrator
@@ -190,7 +192,8 @@ pub enum EventSource {
     /// Event from a specific agent
     Agent { 
         agent_id: String, 
-        agent_type: AgentType 
+        agent_type: AgentType,
+        task_id: Option<String>,
     },
     
     /// Event from a tool being used by an agent
@@ -211,8 +214,36 @@ pub enum EventSource {
     },
 }
 
+/// Complete execution plan created by the planning agent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ExecutionPlan {
+    pub waves: Vec<WaveInfo>,
+}
+
+/// Information about a wave in the execution plan
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct WaveInfo {
+    pub wave_index: usize,
+    pub tasks: Vec<TaskInfo>,
+}
+
+/// Information about a task in the execution plan
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TaskInfo {
+    pub task_id: String,
+    pub agent_id: String,
+    pub agent_type: String,
+    pub description: String,
+    pub dependencies: Vec<String>,
+    pub steps: Vec<String>, // Known steps like "Code Implementation"
+}
+
 /// Types of events that can occur during execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventType {
     /// Execution has started
@@ -285,6 +316,50 @@ pub enum EventType {
     /// Workflow step completed
     WorkflowStepCompleted { 
         step_name: String 
+    },
+    
+    /// Planning phase started
+    PlanningStarted,
+    
+    /// Planning phase completed
+    PlanningCompleted { 
+        task_count: usize,
+        reasoning: String,
+    },
+    
+    /// Execution plan ready with computed waves
+    ExecutionPlanReady {
+        plan: ExecutionPlan,
+    },
+    
+    /// Wave execution started
+    WaveStarted { 
+        wave_index: usize,
+        task_count: usize,
+        task_ids: Vec<String>,
+    },
+    
+    /// Wave execution completed
+    WaveCompleted { 
+        wave_index: usize,
+        success_count: usize,
+        failure_count: usize,
+    },
+    
+    /// Task node started within a wave
+    TaskNodeStarted { 
+        task_id: String,
+        agent_id: String,
+        wave_index: usize,
+        description: String,
+    },
+    
+    /// Task node completed within a wave
+    TaskNodeCompleted { 
+        task_id: String,
+        agent_id: String,
+        wave_index: usize,
+        success: bool,
     },
 }
 

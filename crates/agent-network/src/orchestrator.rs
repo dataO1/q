@@ -16,16 +16,19 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn, error, instrument};
 
 use crate::agents::{AgentContext, AgentPool};
+use crate::agents::planning::{SubtaskSpec, TaskDecompositionPlan};
 use crate::sharedcontext::SharedContext;
 use crate::coordination::CoordinationManager;
 use crate::filelocks::FileLockManager;
 use crate::hitl::{AuditLogger, DefaultApprovalQueue};
 use crate::workflow::{WorkflowExecutor, WorkflowGraph, TaskResult, WorkflowBuilder, TaskNode, DependencyType};
 use crate::execution_manager::BufferedEventSender;
+use schemars::JsonSchema;
 
 use ai_agent_common::{
     ConversationId, ProjectScope, SystemConfig, StatusEvent, EventSource, EventType,
     AgentNetworkConfig, AgentType, ErrorRecoveryStrategy,
+    ExecutionPlan, WaveInfo, TaskInfo,
 };
 use chrono;
 use ai_agent_history::HistoryManager;
@@ -38,7 +41,7 @@ pub struct Orchestrator;
 // Basic types for orchestration
 
 /// Query analysis result
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct QueryAnalysis {
     pub query: String,
     pub complexity: Complexity,
@@ -47,7 +50,7 @@ pub struct QueryAnalysis {
 }
 
 /// Complexity levels
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 pub enum Complexity {
     Trivial = 0,
     Simple = 1,
@@ -68,11 +71,30 @@ pub struct DecomposedTask {
 }
 
 /// Agent capability information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AgentCapability {
     pub agent_type: AgentType,
     pub description: String,
     pub capabilities: Vec<String>,
+}
+
+/// Input for task decomposition using planning agent
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DecompositionInput {
+    /// The user's query/goal
+    pub query: String,
+
+    /// Analyzed complexity and metadata
+    pub analysis: QueryAnalysis,
+
+    /// Available agent types and their capabilities
+    pub available_agents: Vec<AgentCapability>,
+
+    /// Project context (files, dependencies, etc.)
+    pub project_context: Option<String>,
+
+    /// RAG-retrieved relevant examples
+    pub example_decompositions: Option<Vec<String>>,
 }
 
 impl Orchestrator {
@@ -130,13 +152,13 @@ impl Orchestrator {
             },
             _ => {
                 info!("Complex task detected, using planning agent decomposition");
-                // For now, fallback to single agent until decomposition is implemented
-                Self::route_to_single_agent(
-                    &analysis, 
-                    &project_scope, 
-                    &conversation_id, 
-                    &agent_pool, 
-                    &config.agent_network
+                Self::decompose_query(
+                    &analysis,
+                    &project_scope,
+                    &conversation_id,
+                    &agent_pool,
+                    &config.agent_network,
+                    status_sender.clone(),
                 ).await?
             }
         };
@@ -237,8 +259,8 @@ impl Orchestrator {
         match (words, special_chars) {
             (w, _) if w < 5 => Complexity::Trivial,
             (w, _) if w < 15 && special_chars == 0 => Complexity::Simple,
-            (w, _) if w < 30 => Complexity::Moderate,
-            (w, _) if w < 100 => Complexity::Complex,
+            (w, _) if w < 50 => Complexity::Moderate,  // Increased from 30 to 50
+            (w, _) if w < 100 => Complexity::Complex,  // Now 50-100 words
             _ => Complexity::VeryComplex,
         }
     }
@@ -338,6 +360,7 @@ impl Orchestrator {
         Ok(graph)
     }
 
+
     /// Execute workflow
     async fn execute_workflow(
         workflow: WorkflowGraph,
@@ -372,6 +395,171 @@ impl Orchestrator {
         ).await?;
         
         Ok(results)
+    }
+
+    /// LLM-driven task decomposition using Planning Agent
+    #[instrument(name = "query_decomposition", skip_all)]
+    async fn decompose_query(
+        analysis: &QueryAnalysis,
+        project_scope: &ProjectScope,
+        conversation_id: &ConversationId,
+        agent_pool: &Arc<AgentPool>,
+        config: &AgentNetworkConfig,
+        status_sender: BufferedEventSender,
+    ) -> Result<Vec<DecomposedTask>> {
+        info!("Decomposing query using LLM planning agent: {}", analysis.query);
+
+        // Emit planning started event
+        let planning_started_event = StatusEvent {
+            execution_id: conversation_id.to_string(),
+            timestamp: chrono::Utc::now(),
+            source: EventSource::Orchestrator,
+            event: EventType::PlanningStarted,
+        };
+        
+        if let Err(_) = status_sender.send(planning_started_event).await {
+            debug!("Failed to send planning started event");
+        }
+
+        // Get planning agent from pool
+        let planning_agent = agent_pool
+            .get_agent_by_type(AgentType::Planning)
+            .ok_or_else(|| anyhow::anyhow!("No planning agent available"))?;
+
+        // Prepare decomposition input
+        let available_agents: Vec<AgentCapability> = agent_pool
+            .list_agent_ids()
+            .iter()
+            .filter_map(|agent_id| {
+                let agent = agent_pool.get_agent(agent_id)?;
+                if agent.agent_type() != AgentType::Planning {
+                    Some(AgentCapability {
+                        agent_type: agent.agent_type(),
+                        description: format!("{} agent", agent.system_prompt()),
+                        capabilities: vec![],
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        info!("Available agents: {:?}", available_agents);
+
+        let decomposition_input = DecompositionInput {
+            query: analysis.query.clone(),
+            analysis: analysis.clone(),
+            available_agents,
+            project_context: None, // TODO: add ProjectContext
+            example_decompositions: None, // Could add RAG examples here
+        };
+
+        let description = format!(
+            "Generate a task decomposition plan with a list of Subtasks for the following task:\n\n{}",
+            serde_json::to_string_pretty(&decomposition_input)?
+        );
+
+        // Build agent context for planning
+        let planning_context = AgentContext::new(
+            description.clone(),
+            conversation_id.to_string(),
+            None  // Planning agent has no task_id
+        ).with_project_scope(project_scope.clone());
+
+        info!("Planning Context: {}", description);
+
+        // Execute planning agent with extractor for structured output
+        let result = planning_agent.execute(planning_context, status_sender.clone()).await?;
+
+        // Extract the structured plan
+        let plan: TaskDecompositionPlan = result.extract()
+            .context("Failed to extract task decomposition plan")?;
+
+        info!(
+            "LLM generated {} subtasks with reasoning: {}",
+            plan.subtasks.len(),
+            plan.reasoning
+        );
+
+        // Step 1: Create mapping from LLM task IDs to actual UUIDs
+        let mut id_mapping: HashMap<String, String> = HashMap::new();
+
+        // Step 2: First pass - generate UUIDs and build mapping
+        let task_specs_with_ids: Vec<(String, SubtaskSpec)> = plan.subtasks
+            .into_iter()
+            .map(|subtask| {
+                let actual_task_id = format!("{:?}-{}", subtask.agent_type, Uuid::new_v4());
+
+                // Map LLM's ID to our generated UUID
+                id_mapping.insert(subtask.id.clone(), actual_task_id.clone());
+
+                (actual_task_id, subtask)
+            })
+            .collect();
+
+        info!("ID Mapping: {:?}", id_mapping);
+
+        // Step 3: Second pass - create tasks with resolved dependencies
+        let tasks: Result<Vec<DecomposedTask>> = task_specs_with_ids
+            .into_iter()
+            .map(|(actual_task_id, subtask)| {
+                let agent = config
+                    .get_agents_by_type(subtask.agent_type)
+                    .first()
+                    .ok_or_else(|| anyhow::anyhow!(
+                        "No agent of type '{:?}' available", subtask.agent_type
+                    ))?
+                    .clone();
+
+                // Resolve dependencies: convert LLM IDs to actual UUIDs
+                let resolved_dependencies: Vec<String> = subtask.dependencies
+                    .iter()
+                    .filter_map(|llm_dep_id| {
+                        id_mapping.get(llm_dep_id).cloned().or_else(|| {
+                            warn!("Could not resolve dependency '{}' for task '{}'", llm_dep_id, actual_task_id);
+                            None
+                        })
+                    })
+                    .collect();
+
+                info!(
+                    "Task '{}': LLM deps {:?} → Resolved deps {:?}",
+                    actual_task_id, subtask.dependencies, resolved_dependencies
+                );
+
+                Ok(DecomposedTask {
+                    id: actual_task_id,
+                    agent_id: agent.id.clone(),
+                    description: subtask.instructions,
+                    dependencies: resolved_dependencies,
+                    requires_hitl: subtask.requires_approval || plan.requires_hitl,
+                    recovery_strategy: agent.effective_recovery_strategy()
+                        .unwrap_or(ErrorRecoveryStrategy::Retry {
+                            max_attempts: 3,
+                            backoff_ms: 1000,
+                        }),
+                })
+            })
+            .collect();
+
+        let final_tasks = tasks?;
+
+        // Emit planning completed event
+        let planning_completed_event = StatusEvent {
+            execution_id: conversation_id.to_string(),
+            timestamp: chrono::Utc::now(),
+            source: EventSource::Orchestrator,
+            event: EventType::PlanningCompleted {
+                task_count: final_tasks.len(),
+                reasoning: plan.reasoning,
+            },
+        };
+        
+        if let Err(_) = status_sender.send(planning_completed_event).await {
+            debug!("Failed to send planning completed event");
+        }
+
+        Ok(final_tasks)
     }
 
     /// Synthesize task results into final output
