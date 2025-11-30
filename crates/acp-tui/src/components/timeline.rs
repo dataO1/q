@@ -54,6 +54,8 @@ pub enum TimelineMessage {
     ScrollDown,
     /// Reset timeline
     Reset,
+    /// Toggle expanded state of focused node
+    ToggleExpanded,
 }
 
 impl TimelineComponent {
@@ -88,6 +90,13 @@ impl TimelineComponent {
                 self.active_nodes.clear();
                 self.scroll_offset = 0;
                 self.animation_tick = 0;
+            }
+            TimelineMessage::ToggleExpanded => {
+                // For now, toggle the first root node as a simple implementation
+                // TODO: Implement proper focus tracking for more sophisticated node selection
+                if let Some(root) = self.tree.roots.get_mut(0) {
+                    root.toggle_expanded();
+                }
             }
         }
     }
@@ -228,7 +237,13 @@ impl TimelineComponent {
             // Workflow steps
             EventType::WorkflowStepStarted { step_name } => {
                 let step_node_id = format!("{}::{}", node_id, step_name);
-                self.tree.add_child(node_id, step_node_id.clone(), step_name.clone());
+                
+                // Only add if step doesn't already exist (from ExecutionPlanReady)
+                if self.tree.find_node(&step_node_id).is_none() {
+                    self.tree.add_child(node_id, step_node_id.clone(), step_name.clone());
+                }
+                
+                // Update status to started
                 if let Some(node) = self.tree.find_node_mut(&step_node_id) {
                     node.start();
                 }

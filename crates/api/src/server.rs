@@ -20,6 +20,7 @@ use crate::{
         stream::websocket_handler,
         agents::list_capabilities,
         subscribe::{create_subscription, get_subscription_status},
+        hitl::{get_pending_requests, submit_decision, get_request_details},
     },
     middleware::logging::logging_middleware,
     openapi::ApiDoc,
@@ -70,6 +71,11 @@ impl AcpServer {
             // Subscription management
             .route("/subscribe", post(create_subscription))
             .route("/subscribe/{subscription_id}", get(get_subscription_status))
+            
+            // HITL endpoints
+            .route("/hitl/pending", get(get_pending_requests))
+            .route("/hitl/decide", post(submit_decision))
+            .route("/hitl/{request_id}/details", get(get_request_details))
             
             // Discovery and health endpoints
             .route("/capabilities", get(list_capabilities))

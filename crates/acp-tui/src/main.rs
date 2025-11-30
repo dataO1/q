@@ -9,6 +9,7 @@ mod client;
 mod components;
 mod config;
 mod error;
+mod layout_manager;
 mod models;
 mod utils;
 mod websocket;

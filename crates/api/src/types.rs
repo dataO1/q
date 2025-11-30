@@ -235,3 +235,181 @@ pub struct ErrorResponse {
     pub timestamp: DateTime<Utc>,
 }
 
+// HITL (Human-in-the-Loop) API types
+
+/// HITL approval request details
+/// 
+/// Contains all information needed for a human to review and approve/reject
+/// an agent's proposed action.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct HitlApprovalRequest {
+    /// Unique identifier for this approval request
+    #[schema(example = "hitl_550e8400-e29b-41d4-a716-446655440001")]
+    pub request_id: String,
+    
+    /// Task ID that triggered this approval request
+    #[schema(example = "Coding-4c7b3d00-81a2-43d2-aef6-2850ea6b5fad")]
+    pub task_id: String,
+    
+    /// Agent ID that made the request
+    #[schema(example = "coding-1")]
+    pub agent_id: String,
+    
+    /// Type of agent making the request
+    pub agent_type: AgentType,
+    
+    /// Risk level assessment
+    /// 
+    /// Determines urgency and required approval level.
+    #[schema(example = "High")]
+    pub risk_level: String,
+    
+    /// Summary of what the agent wants to do
+    /// 
+    /// Human-readable description of the proposed action.
+    #[schema(example = "Create database migration to add user authentication tables")]
+    pub proposed_action: String,
+    
+    /// Detailed changes the agent wants to make
+    pub proposed_changes: Vec<ProposedChange>,
+    
+    /// Additional context about why this action is needed
+    #[schema(example = "User requested authentication system. This migration creates the necessary database schema.")]
+    pub context: String,
+    
+    /// When this request was created
+    pub timestamp: DateTime<Utc>,
+}
+
+/// A specific change proposed by an agent
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ProposedChange {
+    /// File path for file operations (None for non-file operations)
+    #[schema(example = "migrations/001_create_users.sql")]
+    pub file_path: Option<String>,
+    
+    /// Type of change being proposed
+    pub change_type: ChangeType,
+    
+    /// Content of the change (new content for creates, full content for modifies)
+    #[schema(example = "CREATE TABLE users (id SERIAL PRIMARY KEY, email VARCHAR(255) UNIQUE, created_at TIMESTAMP DEFAULT NOW());")]
+    pub content: String,
+    
+    /// Optional diff showing what changed (for modify operations)
+    pub diff: Option<String>,
+}
+
+/// Type of change an agent wants to make
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub enum ChangeType {
+    /// Create a new file or resource
+    Create,
+    /// Modify existing content
+    Modify,
+    /// Delete a file or resource
+    Delete,
+    /// Execute a command
+    Execute,
+}
+
+/// Request to make a decision on a HITL approval
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct HitlDecisionRequest {
+    /// The approval request ID being decided on
+    #[schema(example = "hitl_550e8400-e29b-41d4-a716-446655440001")]
+    pub request_id: String,
+    
+    /// Decision made by the human reviewer
+    pub decision: HitlDecision,
+    
+    /// Modified content if decision is Modify
+    /// 
+    /// Contains the human's edited version of the proposed changes.
+    pub modified_content: Option<String>,
+    
+    /// Optional reason for the decision
+    /// 
+    /// Particularly useful for rejections to help the agent understand.
+    #[schema(example = "Please use more descriptive column names")]
+    pub reason: Option<String>,
+}
+
+/// Human decision on an approval request
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub enum HitlDecision {
+    /// Approve the proposed action as-is
+    Approve,
+    /// Reject the proposed action
+    Reject,
+    /// Approve with modifications (requires modified_content)
+    Modify,
+}
+
+/// Response after submitting a HITL decision
+#[derive(Debug, Serialize, ToSchema)]
+pub struct HitlDecisionResponse {
+    /// The request ID that was decided on
+    pub request_id: String,
+    
+    /// Confirmation of the decision made
+    pub decision: HitlDecision,
+    
+    /// When the decision was processed
+    pub processed_at: DateTime<Utc>,
+    
+    /// Success message
+    #[schema(example = "Decision processed successfully")]
+    pub message: String,
+}
+
+/// List of pending HITL requests
+#[derive(Debug, Serialize, ToSchema)]
+pub struct HitlPendingResponse {
+    /// List of requests awaiting human decision
+    pub requests: Vec<HitlApprovalRequest>,
+    
+    /// Total number of pending requests
+    pub count: usize,
+}
+
+/// Detailed view of a specific HITL request
+#[derive(Debug, Serialize, ToSchema)]
+pub struct HitlRequestDetails {
+    /// The full approval request
+    pub request: HitlApprovalRequest,
+    
+    /// Additional metadata about the request
+    pub metadata: HitlMetadata,
+}
+
+/// Additional metadata about a HITL request
+#[derive(Debug, Serialize, ToSchema)]
+pub struct HitlMetadata {
+    /// Which execution this request belongs to
+    pub execution_id: String,
+    
+    /// Current status of the request
+    #[schema(example = "pending")]
+    pub status: String,
+    
+    /// How long this request has been pending
+    pub pending_duration_ms: u64,
+    
+    /// Related task context
+    pub task_context: TaskContext,
+}
+
+/// Context about the task that triggered a HITL request
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TaskContext {
+    /// Task description
+    #[schema(example = "Implement database migration for user authentication")]
+    pub description: String,
+    
+    /// Wave this task is part of
+    pub wave_index: u64,
+    
+    /// Dependencies this task has
+    pub dependencies: Vec<String>,
+}
+

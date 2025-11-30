@@ -35,6 +35,9 @@ pub struct TreeNode {
     
     /// Error/warning message if applicable
     pub error_message: Option<String>,
+    
+    /// Whether this node is expanded (shows children)
+    pub expanded: bool,
 }
 
 /// Status of a tree node
@@ -81,6 +84,7 @@ impl TreeNode {
             depth,
             duration_text: None,
             error_message: None,
+            expanded: true, // Start expanded by default (progressive disclosure)
         }
     }
     
@@ -100,6 +104,8 @@ impl TreeNode {
                 duration.as_secs() % 60
             ));
         }
+        // Auto-hide details when completed (progressive disclosure)
+        self.expanded = false;
     }
     
     /// Mark this node as failed
@@ -119,6 +125,21 @@ impl TreeNode {
     pub fn warn(&mut self, warning: String) {
         self.status = NodeStatus::Warning;
         self.error_message = Some(warning);
+    }
+    
+    /// Toggle expanded state (for manual control)
+    pub fn toggle_expanded(&mut self) {
+        self.expanded = !self.expanded;
+    }
+    
+    /// Set expanded state
+    pub fn set_expanded(&mut self, expanded: bool) {
+        self.expanded = expanded;
+    }
+    
+    /// Check if node has children
+    pub fn has_children(&self) -> bool {
+        !self.children.is_empty()
     }
     
     /// Advance animation frame
@@ -255,7 +276,16 @@ impl TimelineTree {
         }
     }
     
-    /// Find a node by ID
+    /// Find a node by ID (immutable)
+    pub fn find_node(&self, id: &str) -> Option<&TreeNode> {
+        if let Some(path) = self.node_map.get(id) {
+            self.get_node_by_path(path)
+        } else {
+            None
+        }
+    }
+    
+    /// Find a node by ID (mutable)
     pub fn find_node_mut(&mut self, id: &str) -> Option<&mut TreeNode> {
         if let Some(path) = self.node_map.get(id).cloned() {
             self.get_node_by_path_mut(&path)
@@ -264,7 +294,25 @@ impl TimelineTree {
         }
     }
     
-    /// Get node by path in tree
+    /// Get node by path in tree (immutable)
+    fn get_node_by_path(&self, path: &[usize]) -> Option<&TreeNode> {
+        if path.is_empty() {
+            return None;
+        }
+        
+        let mut current = &self.roots[path[0]];
+        
+        for &index in &path[1..] {
+            if index >= current.children.len() {
+                return None;
+            }
+            current = &current.children[index];
+        }
+        
+        Some(current)
+    }
+    
+    /// Get node by path in tree (mutable)
     fn get_node_by_path_mut(&mut self, path: &[usize]) -> Option<&mut TreeNode> {
         if path.is_empty() {
             return None;
@@ -316,16 +364,26 @@ impl TimelineTree {
         
         if is_root {
             // Root node - no tree characters
-            line.push_str(&format!("{} {}", 
+            let expand_indicator = if node.has_children() {
+                if node.expanded { "▼ " } else { "▶ " }
+            } else { "" };
+            
+            line.push_str(&format!("{} {}{}", 
                 node.get_status_char(),
+                expand_indicator,
                 node.display_name
             ));
         } else {
             // Child node - add tree characters
             let connector = if is_last { "└─" } else { "├─" };
-            line.push_str(&format!("{}{} {}", 
+            let expand_indicator = if node.has_children() {
+                if node.expanded { "▼ " } else { "▶ " }
+            } else { "" };
+            
+            line.push_str(&format!("{}{} {}{}", 
                 prefix,
                 connector,
+                expand_indicator,
                 node.display_name
             ));
         }
@@ -354,19 +412,31 @@ impl TimelineTree {
             lines.push(format!("{}└─ {}", error_prefix, error));
         }
         
-        // Render children
-        for (i, child) in node.children.iter().enumerate() {
-            let child_is_last = i == node.children.len() - 1;
-            let child_prefix = if is_root {
-                "".to_string()
-            } else {
-                format!("{}{} ", 
-                    prefix, 
-                    if is_last { " " } else { node.get_animated_char(false) }
-                )
-            };
-            
-            self.render_node(child, lines, &child_prefix, child_is_last, false);
+        // Render children (only if expanded)
+        if node.expanded {
+            for (i, child) in node.children.iter().enumerate() {
+                let child_is_last = i == node.children.len() - 1;
+                let child_prefix = if is_root {
+                    "".to_string()
+                } else {
+                    format!("{}{} ", 
+                        prefix, 
+                        if is_last { " " } else { node.get_animated_char(false) }
+                    )
+                };
+                
+                self.render_node(child, lines, &child_prefix, child_is_last, false);
+            }
+        }
+    }
+    
+    /// Toggle expanded state for a node by ID
+    pub fn toggle_expanded(&mut self, node_id: &str) -> bool {
+        if let Some(node) = self.find_node_mut(node_id) {
+            node.toggle_expanded();
+            true
+        } else {
+            false
         }
     }
     

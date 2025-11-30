@@ -516,7 +516,7 @@ impl WorkflowExecutor {
 
 
 /// Execute a single task
-#[instrument(name = "task_execution", skip(agent_pool, context_provider, file_locks, previous_results), fields(
+#[instrument(name = "task_execution", skip(agent_pool, approval_queue, audit_logger, context_provider, file_locks, previous_results), fields(
     task_id = %task.task_id,
     agent_id = %task.agent_id,
     description = %task.description
@@ -524,6 +524,8 @@ impl WorkflowExecutor {
 async fn execute_single_task(
     task: TaskNode,
     agent_pool: Arc<AgentPool>,
+    approval_queue: Arc<DefaultApprovalQueue>,
+    audit_logger: Arc<AuditLogger>,
     context_provider: Option<Arc<crate::rag::ContextProvider>>,
     file_locks: Arc<FileLockManager>,
     project_scope: ProjectScope,
@@ -621,7 +623,9 @@ async fn execute_single_task(
 
     // Execute agent
     info!("Starting agent execution");
-    match agent.execute(agent_context, status_sender).await {
+    let hitl_approval_queue = Some(approval_queue.clone());
+    let hitl_audit_logger = Some(audit_logger.clone());
+    match agent.execute(agent_context, status_sender, hitl_approval_queue, hitl_audit_logger).await {
         Ok(result) => {
             info!("Agent execution completed successfully (tool executions: {})", result.tool_executions.len());
 
@@ -652,7 +656,7 @@ async fn execute_single_task(
     }
 }
 
-#[instrument(name = "task_retry_execution", skip(task, agent_pool, coordination, file_locks), fields(
+#[instrument(name = "task_retry_execution", skip(task, agent_pool, coordination, file_locks, approval_queue, audit_logger, context_provider, status_sender, previous_results), fields(
     task_id = %task.task_id,
     agent_id = %task.agent_id,
 ))]
@@ -712,6 +716,8 @@ async fn execute_task_with_retry(
         let result = tokio::time::timeout(timeout, execute_single_task(
             task.clone(),
             Arc::clone(&agent_pool),
+            approval_queue.clone(),
+            audit_logger.clone(),
             context_provider.clone(),
             Arc::clone(&file_locks),
             project_scope.clone(),

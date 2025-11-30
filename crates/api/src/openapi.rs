@@ -80,6 +80,9 @@ standard for agent interoperability and communication.
         crate::routes::agents::list_capabilities,
         crate::routes::subscribe::create_subscription,
         crate::routes::subscribe::get_subscription_status,
+        crate::routes::hitl::get_pending_requests,
+        crate::routes::hitl::submit_decision,
+        crate::routes::hitl::get_request_details,
         crate::server::health_check
     ),
     components(schemas(
@@ -92,6 +95,18 @@ standard for agent interoperability and communication.
         AgentCapability,
         HealthResponse,
         ErrorResponse,
+        // HITL types
+        HitlApprovalRequest,
+        ProposedChange,
+        ChangeType,
+        HitlDecisionRequest,
+        HitlDecision,
+        HitlDecisionResponse,
+        HitlPendingResponse,
+        HitlRequestDetails,
+        HitlMetadata,
+        TaskContext,
+        // Common types
         crate::types::ProjectScope,
         crate::types::StatusEvent,
         crate::types::EventType,
@@ -105,6 +120,7 @@ standard for agent interoperability and communication.
         (name = "query", description = "Query execution endpoints"),
         (name = "discovery", description = "Agent capability discovery"), 
         (name = "health", description = "System health and status"),
+        (name = "HITL", description = "Human-in-the-Loop approval workflows"),
         (name = "streaming", description = "Real-time status streaming (WebSocket)")
     ),
     external_docs(

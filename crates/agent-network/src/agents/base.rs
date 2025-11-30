@@ -22,7 +22,12 @@ use crate::execution_manager::BufferedEventSender;
 use schemars::JsonSchema;
 use anyhow::{Context, Result, anyhow};
 
-use crate::{agents::AgentResult, tools::{ToolResult, ToolSet, ToolExecution}};
+use crate::{
+    agents::AgentResult, 
+    tools::{ToolResult, ToolSet, ToolExecution},
+    hitl::{RiskAssessment, DefaultApprovalQueue, ApprovalRequest, ApprovalDecision, AuditLogger, AuditEvent},
+};
+use ai_agent_common::RiskLevel;
 
 /// ReAct step output for semantic stop conditions
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,6 +185,8 @@ pub trait TypedAgent: Send + Sync {
         workflow_steps: Vec<WorkflowStep>,
         tools: Arc<ToolSet>,
         status_sender: BufferedEventSender,
+        approval_queue: Option<Arc<DefaultApprovalQueue>>,
+        audit_logger: Option<Arc<AuditLogger>>,
     ) -> Result<AgentResult> {
         // Emit agent started event
         let conversation_id = context.conversation_id
@@ -242,7 +249,7 @@ pub trait TypedAgent: Send + Sync {
                     self.execute_step_oneshot(&updated_context, step).await
                 }
                 StepExecutionMode::ReAct { max_iterations } => {
-                    self.execute_step_react(&updated_context, step, Arc::clone(&tools), *max_iterations).await
+                    self.execute_step_react(&updated_context, step, Arc::clone(&tools), *max_iterations, &status_sender, &approval_queue, &audit_logger).await
                 }
             };
 
@@ -528,6 +535,174 @@ pub trait TypedAgent: Send + Sync {
         Ok(step_result)
     }
 
+    /// Assess risk level for a tool call and determine if HITL approval is needed
+    fn assess_tool_risk(&self, tool_name: &str, confidence: f32) -> (RiskLevel, bool) {
+        // Hardcoded risk levels for now - can be made configurable later
+        let tool_risk = match tool_name {
+            // Critical risk tools - always require approval
+            "delete_file" | "DeleteFileTool" => RiskLevel::Critical,
+            // High risk tools - require approval if confidence < 0.8
+            "write_file" | "WriteFileTool" | "create_directory" | "CreateDirectoryTool" => RiskLevel::High,
+            // Medium risk tools - require approval if confidence < 0.6
+            "read_file" | "ReadFileTool" | "list_directory" | "ListDirectoryTool" => RiskLevel::Medium,
+            // Low risk tools - generally safe
+            "file_exists" | "FileExistsTool" | "file_metadata" | "FileMetadataTool" => RiskLevel::Low,
+            // Unknown tools default to high risk
+            _ => RiskLevel::High,
+        };
+
+        let needs_approval = match tool_risk {
+            RiskLevel::Critical => true, // Always require approval for critical operations
+            RiskLevel::High => confidence < 0.8, // Require approval if not confident
+            RiskLevel::Medium => confidence < 0.6, // Require approval if low confidence  
+            RiskLevel::Low => false, // Generally safe
+        };
+
+        (tool_risk, needs_approval)
+    }
+
+    /// Request HITL approval for a tool call
+    async fn request_hitl_approval(
+        &self,
+        tool_name: &str,
+        tool_args: &str,
+        agent_context: &AgentContext,
+        status_sender: &BufferedEventSender,
+        risk_level: RiskLevel,
+    ) -> Result<ApprovalDecision> {
+        let request_id = format!("hitl_{}_{}", 
+            agent_context.task_id.as_ref().unwrap_or(&"unknown".to_string()), 
+            chrono::Utc::now().timestamp_millis()
+        );
+
+        // Create risk assessment for HITL request
+        let agent_result = AgentResult {
+            agent_id: self.id().to_string(),
+            output: serde_json::json!({}),
+            confidence: 0.5, // Requesting approval indicates low confidence
+            requires_hitl: true,
+            tokens_used: None,
+            reasoning: Some(format!("Tool {} requires human approval due to {:?} risk", tool_name, risk_level)),
+            tool_executions: vec![],
+        };
+
+        let risk_assessment = RiskAssessment::new(&agent_result, self.agent_type(), 
+            Some(format!("Tool {} requires approval: risk={:?}, args={}", tool_name, risk_level, tool_args)));
+
+        // Send HITL requested event to notify TUI
+        let hitl_event = StatusEvent {
+            execution_id: agent_context.conversation_id
+                .as_ref()
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            timestamp: chrono::Utc::now(),
+            source: EventSource::Agent {
+                agent_id: self.id().to_string(),
+                agent_type: self.agent_type(),
+                task_id: agent_context.task_id.clone(),
+            },
+            event: EventType::HitlRequested {
+                risk_level: format!("{:?}", risk_level),
+                task_description: format!("{}: {} with args: {}", self.agent_type(), tool_name, tool_args),
+            },
+        };
+
+        if let Err(_) = status_sender.send(hitl_event).await {
+            warn!("Failed to send HITL requested event");
+        }
+
+        // Create audit event for the request
+        let audit_event = AuditEvent {
+            event_id: request_id.clone(),
+            timestamp: chrono::Utc::now(),
+            agent_id: self.id().to_string(),
+            task_id: agent_context.task_id.as_ref().unwrap_or(&"unknown".to_string()).clone(),
+            action: format!("HITL_REQUEST:{}", tool_name),
+            risk_level: format!("{:?}", risk_level),
+            decision: "PENDING".to_string(),
+            metadata: [
+                ("tool_name".to_string(), tool_name.to_string()),
+                ("tool_args".to_string(), tool_args.to_string()),
+                ("agent_type".to_string(), format!("{:?}", self.agent_type())),
+            ].into(),
+        };
+
+        AuditLogger::log(audit_event);
+
+        info!("HITL approval requested for {} tool {} (risk: {:?})", 
+              self.agent_type(), tool_name, risk_level);
+
+        // Apply approval policy based on risk level and business rules
+        let decision = match risk_level {
+            RiskLevel::Critical => {
+                warn!("CRITICAL OPERATION BLOCKED: {} tool {} requires manual approval", 
+                      self.agent_type(), tool_name);
+                // Critical operations always require approval - block for safety
+                ApprovalDecision::Rejected
+            },
+            RiskLevel::High => {
+                warn!("HIGH-RISK OPERATION: {} tool {} requires review", 
+                      self.agent_type(), tool_name);
+                // High-risk operations - for now auto-approve but log for review
+                // In production, this would wait for human decision via API
+                ApprovalDecision::Approved
+            },
+            RiskLevel::Medium => {
+                info!("MEDIUM-RISK OPERATION: {} tool {} auto-approved with monitoring", 
+                      self.agent_type(), tool_name);
+                ApprovalDecision::Approved
+            },
+            RiskLevel::Low => {
+                debug!("LOW-RISK OPERATION: {} tool {} auto-approved", 
+                       self.agent_type(), tool_name);
+                ApprovalDecision::Approved
+            },
+        };
+
+        // Log the final decision
+        let decision_audit = AuditEvent {
+            event_id: format!("{}_decision", request_id),
+            timestamp: chrono::Utc::now(),
+            agent_id: self.id().to_string(),
+            task_id: agent_context.task_id.as_ref().unwrap_or(&"unknown".to_string()).clone(),
+            action: format!("HITL_DECISION:{}", tool_name),
+            risk_level: format!("{:?}", risk_level),
+            decision: format!("{:?}", decision),
+            metadata: [
+                ("tool_name".to_string(), tool_name.to_string()),
+                ("tool_args".to_string(), tool_args.to_string()),
+                ("decision_reason".to_string(), format!("Auto-policy for {:?} risk level", risk_level)),
+            ].into(),
+        };
+
+        AuditLogger::log(decision_audit);
+
+        // Send completion event
+        let completion_event = StatusEvent {
+            execution_id: agent_context.conversation_id
+                .as_ref()
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            timestamp: chrono::Utc::now(),
+            source: EventSource::Agent {
+                agent_id: self.id().to_string(),
+                agent_type: self.agent_type(),
+                task_id: agent_context.task_id.clone(),
+            },
+            event: EventType::HitlCompleted {
+                approved: matches!(decision, ApprovalDecision::Approved),
+                reason: Some(format!("Policy decision for {:?} risk: {:?}", risk_level, decision)),
+            },
+        };
+
+        if let Err(_) = status_sender.send(completion_event).await {
+            warn!("Failed to send HITL completed event");
+        }
+
+        info!("HITL decision for {} tool {}: {:?}", self.agent_type(), tool_name, decision);
+        Ok(decision)
+    }
+
     /// Execute a single ReAct workflow step
     #[instrument(name = "agent_react_step", skip(self, context, tools), fields(
         step_id = %step.id,
@@ -547,7 +722,10 @@ pub trait TypedAgent: Send + Sync {
         context: &AgentContext,
         step: &WorkflowStep,
         tools: Arc<ToolSet>,
-        max_iterations: Option<usize>
+        max_iterations: Option<usize>,
+        status_sender: &BufferedEventSender,
+        approval_queue: &Option<Arc<DefaultApprovalQueue>>,
+        audit_logger: &Option<Arc<AuditLogger>>,
     ) -> Result<StepResult> {
         // Record comprehensive input details as span attributes for Jaeger visibility
         let current_span = tracing::Span::current();
@@ -653,17 +831,85 @@ pub trait TypedAgent: Send + Sync {
 
                     for tool_call in tool_calls {
                         let function = &tool_call.function;
-                        // Execute tool and get result
-                        let tool_execution = tools.execute_tool(&function.name, &function.arguments).await?;
-                        tool_executions.push(tool_execution.clone());
+                        
+                        // HITL: Check if this tool requires approval
+                        // Use agent's current confidence - for now, estimate from iteration count
+                        let estimated_confidence = match iteration {
+                            0 => 0.9, // High confidence on first attempt
+                            1 => 0.7, // Medium confidence on second attempt
+                            2 => 0.5, // Lower confidence on third attempt
+                            _ => 0.3, // Low confidence after multiple attempts
+                        };
+                        
+                        let (risk_level, needs_approval) = self.assess_tool_risk(&function.name, estimated_confidence);
+                        
+                        if needs_approval && approval_queue.is_some() {
+                            debug!(target: "agent_execution", "Tool {} requires HITL approval (risk: {:?})", function.name, risk_level);
+                            
+                            // Add assistant message showing the tool call the agent wants to make
+                            messages.push(ChatCompletionRequestMessage::Assistant(
+                                async_openai::types::ChatCompletionRequestAssistantMessageArgs::default()
+                                    .content(format!("I want to call {} with arguments: {}", function.name, function.arguments))
+                                    .tool_calls(vec![tool_call.clone()])
+                                    .build()?
+                            ));
+                            
+                            match self.request_hitl_approval(
+                                &function.name,
+                                &function.arguments,
+                                context,
+                                status_sender,
+                                risk_level,
+                            ).await? {
+                                ApprovalDecision::Approved => {
+                                    debug!(target: "agent_execution", "HITL approved tool execution: {}", function.name);
+                                    // Execute tool as normal
+                                    let tool_execution = tools.execute_tool(&function.name, &function.arguments).await?;
+                                    tool_executions.push(tool_execution.clone());
 
-                        // Add tool result to conversation
-                        messages.push(ChatCompletionRequestMessage::Tool(
-                            async_openai::types::ChatCompletionRequestToolMessageArgs::default()
-                                .content(tool_execution.result.output)
-                                .tool_call_id(tool_call.id.clone())
-                                .build()?
-                        ));
+                                    // Add tool result to conversation
+                                    messages.push(ChatCompletionRequestMessage::Tool(
+                                        async_openai::types::ChatCompletionRequestToolMessageArgs::default()
+                                            .content(tool_execution.result.output)
+                                            .tool_call_id(tool_call.id.clone())
+                                            .build()?
+                                    ));
+                                }
+                                ApprovalDecision::Rejected => {
+                                    warn!(target: "agent_execution", "HITL rejected tool execution: {}", function.name);
+                                    // Add rejection message to conversation
+                                    messages.push(ChatCompletionRequestMessage::Tool(
+                                        async_openai::types::ChatCompletionRequestToolMessageArgs::default()
+                                            .content(format!("Tool execution was rejected by human reviewer. Please try a different approach or ask for guidance."))
+                                            .tool_call_id(tool_call.id.clone())
+                                            .build()?
+                                    ));
+                                }
+                                ApprovalDecision::NeedsMoreInfo => {
+                                    info!(target: "agent_execution", "HITL requested more info for tool: {}", function.name);
+                                    // Add request for more info to conversation
+                                    messages.push(ChatCompletionRequestMessage::Tool(
+                                        async_openai::types::ChatCompletionRequestToolMessageArgs::default()
+                                            .content(format!("Human reviewer needs more information about this action. Please provide more context about why you want to {} and what you expect to happen.", function.name))
+                                            .tool_call_id(tool_call.id.clone())
+                                            .build()?
+                                    ));
+                                }
+                            }
+                        } else {
+                            // No approval needed, execute directly
+                            debug!(target: "agent_execution", "Tool {} auto-approved (risk: {:?})", function.name, risk_level);
+                            let tool_execution = tools.execute_tool(&function.name, &function.arguments).await?;
+                            tool_executions.push(tool_execution.clone());
+
+                            // Add tool result to conversation
+                            messages.push(ChatCompletionRequestMessage::Tool(
+                                async_openai::types::ChatCompletionRequestToolMessageArgs::default()
+                                    .content(tool_execution.result.output)
+                                    .tool_call_id(tool_call.id.clone())
+                                    .build()?
+                            ));
+                        }
                     }
 
                     // Messages are captured by closure, no need to update here
@@ -903,6 +1149,8 @@ pub trait Agent: Send + Sync {
         &self, 
         context: AgentContext,
         status_sender: BufferedEventSender,
+        approval_queue: Option<Arc<DefaultApprovalQueue>>,
+        audit_logger: Option<Arc<AuditLogger>>,
     ) -> Result<AgentResult>;
     
     /// Define the workflow steps for this agent (from TypedAgent)
@@ -921,16 +1169,18 @@ where
     fn model(&self) -> &str { TypedAgent::model(self) }
     fn client(&self) -> &Client<OpenAIConfig> { TypedAgent::client(self) }
 
-    #[instrument(name = "agent_workflow_execution", skip(self, context, status_sender), fields(agent_id = %self.id(), agent_type = %self.agent_type()))]
+    #[instrument(name = "agent_workflow_execution", skip(self, context, status_sender, approval_queue, audit_logger), fields(agent_id = %self.id(), agent_type = %self.agent_type()))]
     async fn execute(
         &self, 
         context: AgentContext,
         status_sender: BufferedEventSender,
+        approval_queue: Option<Arc<DefaultApprovalQueue>>,
+        audit_logger: Option<Arc<AuditLogger>>,
     ) -> Result<AgentResult> {
         // All agents use workflow execution
         let workflow_steps = self.define_workflow_steps(&context);
         let tools = Arc::new(ToolSet::new(&context.clone().project_scope.unwrap().root));
-        self.execute_workflow(context, workflow_steps, tools, status_sender).await
+        self.execute_workflow(context, workflow_steps, tools, status_sender, approval_queue, audit_logger).await
     }
     
     fn define_workflow_steps(&self, context: &AgentContext) -> Vec<WorkflowStep> {

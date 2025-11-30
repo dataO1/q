@@ -27,6 +27,7 @@ reqwest = { version = "*", features = ["json", "rustls-tls"] }
 uuid = { version = "*", features = ["v4"] }
 chrono = { version = "*", features = ["serde"] }
 tracing = "*"
+once_cell = "*"
 utoipa = { version = "4.2.2", features = ["axum_extras", "chrono"] }
 utoipa-swagger-ui = { version = "4", features = ["axum"] }
 utoipa-axum = "0.1"

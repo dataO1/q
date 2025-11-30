@@ -469,7 +469,7 @@ impl Orchestrator {
         info!("Planning Context: {}", description);
 
         // Execute planning agent with extractor for structured output
-        let result = planning_agent.execute(planning_context, status_sender.clone()).await?;
+        let result = planning_agent.execute(planning_context, status_sender.clone(), None, None).await?;
 
         // Extract the structured plan
         let plan: TaskDecompositionPlan = result.extract()

@@ -101,6 +101,7 @@ dependencies = [
  "clap",
  "futures",
  "futures-util",
+ "once_cell",
  "reqwest 0.12.24",
  "rig-core",
  "serde",
