@@ -21,6 +21,7 @@ use crate::coordination::CoordinationManager;
 use crate::filelocks::FileLockManager;
 use crate::hitl::{AuditLogger, DefaultApprovalQueue};
 use crate::workflow::{WorkflowExecutor, WorkflowGraph, TaskResult, WorkflowBuilder, TaskNode, DependencyType};
+use crate::execution_manager::BufferedEventSender;
 
 use ai_agent_common::{
     ConversationId, ProjectScope, SystemConfig, StatusEvent, EventSource, EventType,
@@ -81,7 +82,7 @@ impl Orchestrator {
         query: &str,
         project_scope: ProjectScope,
         conversation_id: ConversationId,
-        status_sender: Arc<broadcast::Sender<StatusEvent>>,
+        status_sender: BufferedEventSender,
         config: Arc<SystemConfig>,
         agent_pool: Arc<AgentPool>,
         shared_context: Arc<RwLock<SharedContext>>,
@@ -111,8 +112,8 @@ impl Orchestrator {
             },
         };
         
-        if let Err(_) = status_sender.send(analysis_event) {
-            debug!("No subscribers for query analysis event");
+        if let Err(_) = status_sender.send(analysis_event).await {
+            debug!("Failed to send query analysis event");
         }
 
         // Step 2: Decompose into tasks (or route directly for simple tasks)
@@ -151,8 +152,8 @@ impl Orchestrator {
             },
         };
         
-        if let Err(_) = status_sender.send(decomposition_event) {
-            debug!("No subscribers for task decomposition event");
+        if let Err(_) = status_sender.send(decomposition_event).await {
+            debug!("Failed to send task decomposition event");
         }
 
         // Step 3: Build workflow DAG
@@ -169,8 +170,8 @@ impl Orchestrator {
             },
         };
         
-        if let Err(_) = status_sender.send(workflow_event) {
-            debug!("No subscribers for workflow construction event");
+        if let Err(_) = status_sender.send(workflow_event).await {
+            debug!("Failed to send workflow construction event");
         }
 
         // Step 4: Execute workflow
@@ -202,8 +203,8 @@ impl Orchestrator {
             },
         };
         
-        if let Err(_) = status_sender.send(synthesis_event) {
-            debug!("No subscribers for result synthesis event");
+        if let Err(_) = status_sender.send(synthesis_event).await {
+            debug!("Failed to send result synthesis event");
         }
 
         Ok(final_result)
@@ -349,7 +350,7 @@ impl Orchestrator {
         audit_logger: Arc<AuditLogger>,
         rag: Arc<SmartMultiSourceRag>,
         history_manager: Arc<RwLock<HistoryManager>>,
-        status_sender: Arc<broadcast::Sender<StatusEvent>>,
+        status_sender: BufferedEventSender,
     ) -> Result<Vec<TaskResult>> {
         debug!("Executing workflow with {} nodes", workflow.node_count());
 

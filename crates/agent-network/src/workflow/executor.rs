@@ -11,6 +11,7 @@ use crate::agents::{AgentPool, AgentContext};
 use crate::tools::ToolSet;
 use crate::coordination::CoordinationManager;
 use crate::filelocks::FileLockManager;
+use crate::execution_manager::BufferedEventSender;
 use ai_agent_common::{ConversationId, ProjectScope, StatusEvent};
 use petgraph::algo::toposort;
 use petgraph::graph::NodeIndex;
@@ -150,7 +151,7 @@ impl WorkflowExecutor {
             audit_logger: Arc<AuditLogger>,
             project_scope: ProjectScope,
             conversation_id: ConversationId,
-            status_sender: Arc<broadcast::Sender<StatusEvent>>,
+            status_sender: BufferedEventSender,
         ) -> AgentNetworkResult<Vec<TaskResult>> {
         let start_time = Instant::now();
         info!("Starting workflow execution: {} tasks", graph.node_count());
@@ -183,7 +184,7 @@ impl WorkflowExecutor {
                 Arc::clone(&audit_logger),
                 project_scope.clone(),
                 conversation_id.clone(),
-                Arc::clone(&status_sender),
+                status_sender.clone(),
             ).await?;
 
             for result in wave_results {
@@ -225,7 +226,7 @@ impl WorkflowExecutor {
         audit_logger: Arc<AuditLogger>,
         project_scope: ProjectScope,
         conversation_id: ConversationId,
-        status_sender: Arc<broadcast::Sender<StatusEvent>>,
+        status_sender: BufferedEventSender,
     ) -> AgentNetworkResult<Vec<TaskResult>> {
         debug!("Executing wave {}: {} parallel tasks", wave.wave_index, wave.task_indices.len());
         // Log wave information with structured fields
@@ -252,7 +253,7 @@ impl WorkflowExecutor {
 
             let project_scope = project_scope.clone();
             let conversation_id = conversation_id.clone();
-            let status_sender = Arc::clone(&status_sender);
+            let status_sender = status_sender.clone();
 
             let previous_results_clone = previous_results.clone();
 
@@ -407,7 +408,7 @@ async fn execute_single_task(
     file_locks: Arc<FileLockManager>,
     project_scope: ProjectScope,
     conversation_id: ConversationId,
-    status_sender: Arc<broadcast::Sender<StatusEvent>>,
+    status_sender: BufferedEventSender,
     previous_results: &HashMap<String, TaskResult>
 ) -> AgentNetworkResult<TaskResult> {
     // Get agent
@@ -548,7 +549,7 @@ async fn execute_task_with_retry(
     wave_index: usize,
     project_scope: ProjectScope,
     conversation_id: ConversationId,
-    status_sender: Arc<broadcast::Sender<StatusEvent>>,
+    status_sender: BufferedEventSender,
     previous_results: &HashMap<String, TaskResult>
 ) -> AgentNetworkResult<TaskResult> {
 
@@ -579,7 +580,7 @@ async fn execute_task_with_retry(
             Arc::clone(&file_locks),
             project_scope.clone(),
             conversation_id.clone(),
-            Arc::clone(&status_sender),
+            status_sender.clone(),
             previous_results
         ))
         .await;

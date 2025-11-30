@@ -139,6 +139,36 @@ pub struct SubscriptionStatusInfo {
     pub client_id: Option<String>,
 }
 
+/// Buffered event sender that routes events through subscription buffering
+#[derive(Clone, Debug)]
+pub struct BufferedEventSender {
+    subscription_id: String,
+    subscriptions: Arc<RwLock<HashMap<String, Subscription>>>,
+}
+
+impl BufferedEventSender {
+    /// Create a new buffered event sender for a subscription
+    pub fn new(subscription_id: String, subscriptions: Arc<RwLock<HashMap<String, Subscription>>>) -> Self {
+        Self {
+            subscription_id,
+            subscriptions,
+        }
+    }
+    
+    /// Send an event, routing it through the subscription's buffering mechanism
+    pub async fn send(&self, event: StatusEvent) -> Result<(), broadcast::error::SendError<StatusEvent>> {
+        let mut subscriptions = self.subscriptions.write().await;
+        
+        if let Some(subscription) = subscriptions.get_mut(&self.subscription_id) {
+            subscription.add_event(event.clone());
+            Ok(())
+        } else {
+            warn!("Tried to send event for unknown subscription: {}", self.subscription_id);
+            Err(broadcast::error::SendError(event))
+        }
+    }
+}
+
 /// ExecutionManager handles subscription-based streaming and orchestrates query execution
 pub struct ExecutionManager {
     /// Active subscriptions for buffered streaming
@@ -241,7 +271,6 @@ impl ExecutionManager {
             return Err(anyhow::anyhow!("Subscription '{}' has expired", subscription_id));
         }
         
-        let stream_sender = Arc::clone(&subscription.sender);
         drop(subscriptions);
         
         // Generate a unique execution ID for this query
@@ -277,6 +306,9 @@ impl ExecutionManager {
         let embedding_client = Arc::clone(&self.embedding_client);
         let subscriptions = Arc::clone(&self.subscriptions);
         
+        // Create buffered event sender for this subscription
+        let event_sender = BufferedEventSender::new(subscription_id_clone.clone(), subscriptions.clone());
+        
         // Generate a ConversationId for the orchestrator
         let conversation_id = ConversationId::new();
         
@@ -286,7 +318,7 @@ impl ExecutionManager {
                 &query_clone,
                 project_scope_clone,
                 conversation_id,
-                stream_sender.clone(),
+                event_sender,
                 config,
                 agent_pool,
                 shared_context,

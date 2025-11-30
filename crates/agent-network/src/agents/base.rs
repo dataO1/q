@@ -18,6 +18,7 @@ use tokio::sync::{Mutex, broadcast};
 use tracing::{debug, info, error, warn, instrument, Instrument};
 use std::{collections::{HashMap, HashSet}, sync::Arc};
 use chrono;
+use crate::execution_manager::BufferedEventSender;
 use schemars::JsonSchema;
 use anyhow::{Context, Result, anyhow};
 
@@ -178,7 +179,7 @@ pub trait TypedAgent: Send + Sync {
         context: AgentContext,
         workflow_steps: Vec<WorkflowStep>,
         tools: Arc<ToolSet>,
-        status_sender: Arc<broadcast::Sender<StatusEvent>>,
+        status_sender: BufferedEventSender,
     ) -> Result<AgentResult> {
         // Emit agent started event
         let conversation_id = context.conversation_id
@@ -200,8 +201,8 @@ pub trait TypedAgent: Send + Sync {
             },
         };
         
-        if let Err(_) = status_sender.send(agent_started_event) {
-            debug!("No subscribers for agent started event");
+        if let Err(_) = status_sender.send(agent_started_event).await {
+            debug!("Failed to send agent started event");
         }
 
         let mut workflow_state = WorkflowState::new();
@@ -224,8 +225,8 @@ pub trait TypedAgent: Send + Sync {
                 },
             };
             
-            if let Err(_) = status_sender.send(step_started_event) {
-                debug!("No subscribers for workflow step started event");
+            if let Err(_) = status_sender.send(step_started_event).await {
+                debug!("Failed to send workflow step started event");
             }
 
             // Update context with workflow state for this step
@@ -271,8 +272,8 @@ pub trait TypedAgent: Send + Sync {
                         },
                     };
                     
-                    if let Err(_) = status_sender.send(step_completed_event) {
-                        debug!("No subscribers for workflow step completed event");
+                    if let Err(_) = status_sender.send(step_completed_event).await {
+                        debug!("Failed to send workflow step completed event");
                     }
                 }
                 Err(e) => {
@@ -301,8 +302,8 @@ pub trait TypedAgent: Send + Sync {
                         },
                     };
                     
-                    if let Err(_) = status_sender.send(agent_failed_event) {
-                        debug!("No subscribers for agent failed event");
+                    if let Err(_) = status_sender.send(agent_failed_event).await {
+                        debug!("Failed to send agent failed event");
                     }
 
                     return Err(anyhow!(error_msg));
@@ -338,8 +339,8 @@ pub trait TypedAgent: Send + Sync {
             },
         };
         
-        if let Err(_) = status_sender.send(agent_completed_event) {
-            debug!("No subscribers for agent completed event");
+        if let Err(_) = status_sender.send(agent_completed_event).await {
+            debug!("Failed to send agent completed event");
         }
 
         Ok(agent_result)
@@ -896,7 +897,7 @@ pub trait Agent: Send + Sync {
     async fn execute(
         &self, 
         context: AgentContext,
-        status_sender: Arc<broadcast::Sender<StatusEvent>>,
+        status_sender: BufferedEventSender,
     ) -> Result<AgentResult>;
 }
 
@@ -916,7 +917,7 @@ where
     async fn execute(
         &self, 
         context: AgentContext,
-        status_sender: Arc<broadcast::Sender<StatusEvent>>,
+        status_sender: BufferedEventSender,
     ) -> Result<AgentResult> {
         // All agents use workflow execution
         let workflow_steps = self.define_workflow_steps(&context);

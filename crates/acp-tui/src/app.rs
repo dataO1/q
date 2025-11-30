@@ -5,7 +5,7 @@
 
 use crate::{
     components::{StatusLine, StatusLineMessage, TimelineComponent, TimelineMessage},
-    websocket::WebSocketClient,
+    websocket::{WebSocketClient, WebSocketHandle},
     models::StatusEvent,
     config::Config,
     utils::{generate_client_id, format_client_id_short},
@@ -108,8 +108,8 @@ pub struct App {
     /// Terminal manager
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
     
-    /// WebSocket client for real-time updates
-    websocket_client: Option<WebSocketClient>,
+    /// WebSocket handle for real-time updates
+    websocket_handle: Option<WebSocketHandle>,
     
     /// Event receiver from WebSocket
     event_receiver: Option<broadcast::Receiver<StatusEvent>>,
@@ -246,7 +246,7 @@ impl App {
             timeline: TimelineComponent::new(),
             status_line: StatusLine::new(),
             terminal,
-            websocket_client: None,
+            websocket_handle: None,
             event_receiver: None,
             query_input: String::new(),
             input_cursor: 0,
@@ -439,7 +439,7 @@ impl App {
                 warn!("WebSocket disconnected - server may be down");
                 self.connection_state = ConnectionState::Disconnected;
                 self.status_message = "Disconnected from server".to_string();
-                self.websocket_client = None;
+                self.websocket_handle = None;
                 self.event_receiver = None;
             }
             
@@ -639,34 +639,20 @@ impl App {
         let ws_url = format!("{}/stream/{}", 
             self.acp_client.base_url().replace("http://", "ws://").replace("https://", "wss://"), 
             subscription_id);
-        let (websocket_client, event_receiver) = WebSocketClient::new();
+            
+        let (websocket_handle, event_receiver) = WebSocketClient::start_new(ws_url);
         
-        // Store the event receiver immediately
+        // Store both the handle and receiver
+        self.websocket_handle = Some(websocket_handle);
         self.event_receiver = Some(event_receiver);
-        
-        // Store the client to keep it alive first
-        self.websocket_client = Some(websocket_client);
         
         let sender = self.internal_sender.clone();
         
-        let ws_url_clone = ws_url.clone();
-        
-        // Start the WebSocket in the background
+        // Notify that WebSocket connection is starting
         tokio::spawn(async move {
-            // Use a new client instance since we can't move the stored one
-            let (mut ws_client, _) = WebSocketClient::new();
-            match ws_client.start(ws_url_clone).await {
-                Ok(()) => {
-                    info!("WebSocket connection started successfully");
-                    let _ = sender.send(AppMessage::WebSocketConnected);
-                }
-                Err(e) => {
-                    error!("Failed to start WebSocket connection: {}", e);
-                    let _ = sender.send(AppMessage::ConnectionFailed {
-                        error: format!("WebSocket connection failed: {}", e),
-                    });
-                }
-            }
+            // Small delay to ensure connection is established
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            let _ = sender.send(AppMessage::WebSocketConnected);
         });
         
         Ok(())
@@ -900,9 +886,9 @@ impl Drop for App {
         let _ = disable_raw_mode();
         
         // Stop WebSocket client
-        if let Some(mut client) = self.websocket_client.take() {
+        if let Some(mut handle) = self.websocket_handle.take() {
             tokio::spawn(async move {
-                let _ = client.stop().await;
+                let _ = handle.stop().await;
             });
         }
     }

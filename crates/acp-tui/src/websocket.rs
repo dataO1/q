@@ -15,6 +15,42 @@ use tokio::{
 use tokio_tungstenite::{connect_async, tungstenite::Message, WebSocketStream, MaybeTlsStream};
 use tracing::{debug, error, info, warn};
 
+/// Handle for controlling a running WebSocket client
+pub struct WebSocketHandle {
+    /// Control channel for stopping the client
+    control_sender: mpsc::Sender<ControlMessage>,
+    
+    /// Task handle for the WebSocket connection
+    task_handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl WebSocketHandle {
+    /// Stop the WebSocket client
+    pub async fn stop(&mut self) -> Result<()> {
+        if let Some(handle) = self.task_handle.take() {
+            // Send stop signal
+            if self.control_sender.send(ControlMessage::Stop).await.is_err() {
+                warn!("Failed to send stop signal to WebSocket client");
+            }
+            
+            // Wait for the task to complete with timeout
+            match timeout(Duration::from_secs(5), handle).await {
+                Ok(Ok(())) => {
+                    info!("WebSocket client stopped successfully");
+                }
+                Ok(Err(e)) => {
+                    error!("WebSocket client task panicked: {}", e);
+                }
+                Err(_) => {
+                    warn!("WebSocket client stop timed out");
+                }
+            }
+        }
+        
+        Ok(())
+    }
+}
+
 /// WebSocket client for ACP server status updates
 pub struct WebSocketClient {
     /// Server URL for WebSocket connection
@@ -60,6 +96,62 @@ impl WebSocketClient {
         };
         
         (client, event_receiver)
+    }
+    
+    /// Create and start a new WebSocket client, returning handle for control
+    pub fn start_new(websocket_url: String) -> (WebSocketHandle, broadcast::Receiver<StatusEvent>) {
+        let (event_sender, event_receiver) = broadcast::channel(1000);
+        let (control_sender, mut control_receiver) = mpsc::channel(100);
+        
+        let server_url = websocket_url.clone();
+        let control_sender_clone = control_sender.clone();
+        
+        let handle = tokio::spawn(async move {
+            info!("WebSocket client task starting");
+            let mut connection_handler = ConnectionHandler::new(server_url.clone(), event_sender);
+            
+            // Spawn the connection handler in its own task
+            let mut connection_task = tokio::spawn(async move {
+                info!("Spawning ConnectionHandler task");
+                connection_handler.run().await;
+                info!("ConnectionHandler task ended");
+            });
+            
+            // Handle control messages in this task
+            loop {
+                tokio::select! {
+                    // Handle control messages
+                    control_msg = control_receiver.recv() => {
+                        match control_msg {
+                            Some(ControlMessage::Stop) => {
+                                info!("Received stop signal for WebSocket client");
+                                connection_task.abort();
+                                break;
+                            }
+                            None => {
+                                warn!("Control channel closed for WebSocket client");
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Check if connection task ended unexpectedly
+                    _ = &mut connection_task => {
+                        warn!("Connection handler task ended unexpectedly");
+                        break;
+                    }
+                }
+            }
+            
+            info!("WebSocket client task ending");
+        });
+        
+        let ws_handle = WebSocketHandle {
+            control_sender: control_sender_clone,
+            task_handle: Some(handle),
+        };
+        
+        (ws_handle, event_receiver)
     }
     
     /// Start the WebSocket client with full WebSocket URL
