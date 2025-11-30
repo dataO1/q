@@ -78,11 +78,16 @@ standard for agent interoperability and communication.
     paths(
         crate::routes::query::query_task,
         crate::routes::agents::list_capabilities,
+        crate::routes::subscribe::create_subscription,
+        crate::routes::subscribe::get_subscription_status,
         crate::server::health_check
     ),
     components(schemas(
         QueryRequest,
         QueryResponse,
+        SubscribeRequest,
+        SubscribeResponse,
+        SubscriptionStatus,
         CapabilitiesResponse,
         AgentCapability,
         HealthResponse,

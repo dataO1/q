@@ -36,8 +36,7 @@ pub struct WorkflowExecutor {
 
     /// Execution configuration
     config: ExecutorConfig,
-    approval_queue: Option<Arc<DefaultApprovalQueue>>,
-    audit_logger: Option<Arc<AuditLogger>>,
+    /// Context provider for RAG and history
     context_provider: Option<Arc<crate::rag::ContextProvider>>,
 }
 
@@ -139,20 +138,8 @@ impl WorkflowExecutor {
             coordination,
             file_locks,
             config,
-            approval_queue: None,
-            audit_logger: None,
             context_provider: None
         }
-    }
-
-    pub fn with_hitl(
-        mut self,
-        approval_queue: Arc<crate::hitl::DefaultApprovalQueue>,
-        audit_logger: Arc<crate::hitl::AuditLogger>,
-    ) -> Self {
-        self.approval_queue = Some(approval_queue);
-        self.audit_logger = Some(audit_logger);
-        self
     }
 
     /// Execute workflow with wave-based parallel execution
@@ -259,8 +246,8 @@ impl WorkflowExecutor {
             let timeout = self.config.task_timeout;
             let max_retries = self.config.max_retries;
             let wave_index = wave.wave_index;
-            let approval_queue = self.approval_queue.clone().unwrap();
-            let audit_logger = self.audit_logger.clone().unwrap();
+            let approval_queue_clone = Arc::clone(&approval_queue);
+            let audit_logger_clone = Arc::clone(&audit_logger);
             let context_provider = self.context_provider.clone();
 
             let project_scope = project_scope.clone();
@@ -284,8 +271,8 @@ impl WorkflowExecutor {
                         agent_pool,
                         coordination,
                         file_locks,
-                        approval_queue,
-                        audit_logger,
+                        approval_queue_clone,
+                        audit_logger_clone,
                         context_provider,
                         timeout,
                         max_retries,

@@ -12,7 +12,7 @@ pub use ai_agent_common::ProjectScope;
 /// Request to execute a query
 /// 
 /// Starts asynchronous query execution with the multi-agent system.
-/// Returns immediately with a conversation_id for tracking progress.
+/// Requires a subscription_id obtained from the /subscribe endpoint first.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct QueryRequest {
     /// The user's natural language query or request
@@ -30,33 +30,32 @@ pub struct QueryRequest {
     /// This determines which tools and approaches agents can use.
     pub project_scope: ProjectScope,
     
-    /// Optional conversation ID for maintaining context across multiple queries
+    /// Subscription ID for streaming events
     /// 
-    /// If provided, this query will be part of an existing conversation.
-    /// If not provided, a new conversation will be created.
-    /// Use this to maintain context across related queries.
-    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
-    pub conversation_id: Option<String>,
+    /// Must be obtained from POST /subscribe before executing the query.
+    /// This ensures events are buffered and no progress is lost.
+    #[schema(example = "sub_750e8400-e29b-41d4-a716-446655440123")]
+    pub subscription_id: String,
 }
 
 /// Response when starting an execution
 /// 
 /// Returned immediately when a query execution starts. The actual processing
-/// happens asynchronously in the background.
+/// happens asynchronously in the background with events streamed to the subscription.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct QueryResponse {
-    /// Conversation ID for tracking this execution
+    /// Subscription ID for this execution
     /// 
-    /// Use this ID to subscribe to the WebSocket stream for real-time updates.
-    /// This is the conversation identifier, not just a single execution.
-    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
-    pub conversation_id: String,
+    /// The same subscription_id from the request, confirming execution started.
+    /// Use this with the WebSocket stream for real-time updates.
+    #[schema(example = "sub_750e8400-e29b-41d4-a716-446655440123")]
+    pub subscription_id: String,
     
     /// WebSocket URL path for streaming status updates
     /// 
     /// Connect to this WebSocket endpoint to receive real-time progress updates.
     /// The URL is relative to the API base URL.
-    #[schema(example = "/stream/550e8400-e29b-41d4-a716-446655440000")]
+    #[schema(example = "/stream/sub_750e8400-e29b-41d4-a716-446655440123")]
     pub stream_url: String,
     
     /// Current execution status
@@ -65,6 +64,48 @@ pub struct QueryResponse {
     /// for detailed progress updates.
     #[schema(example = "started")]
     pub status: String,
+}
+
+/// Request to create a subscription
+/// 
+/// Creates a subscription that will buffer events for future query execution.
+/// Must be called before executing a query to ensure no events are lost.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct SubscribeRequest {
+    /// Optional client identifier for tracking
+    /// 
+    /// Helps with debugging and metrics. If not provided, a unique
+    /// client ID will be generated for this subscription.
+    #[schema(example = "tui-client-1")]
+    pub client_id: Option<String>,
+}
+
+/// Response when creating a subscription
+/// 
+/// Contains the information needed to connect to the WebSocket stream
+/// and start receiving events for this subscription.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SubscribeResponse {
+    /// Unique subscription ID for this client
+    /// 
+    /// Use this ID to connect to the WebSocket stream. Each subscription
+    /// gets its own buffer of events and replay behavior.
+    #[schema(example = "sub_750e8400-e29b-41d4-a716-446655440123")]
+    pub subscription_id: String,
+    
+    /// WebSocket URL path for this subscription
+    /// 
+    /// Connect to this WebSocket endpoint to receive buffered and live events.
+    /// The URL is relative to the API base URL.
+    #[schema(example = "/stream/sub_750e8400-e29b-41d4-a716-446655440123")]
+    pub stream_url: String,
+    
+    /// When this subscription expires
+    /// 
+    /// Subscriptions automatically expire after a timeout to prevent
+    /// memory leaks. Connect before this time to avoid losing events.
+    #[schema(example = "2024-01-01T12:05:00Z")]
+    pub expires_at: DateTime<Utc>,
 }
 
 /// System capabilities response
@@ -132,6 +173,44 @@ pub struct HealthResponse {
     
     /// Timestamp when health check was performed
     pub timestamp: DateTime<Utc>,
+}
+
+/// Subscription status information
+/// 
+/// Contains information about an active subscription including its state
+/// and connection details.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SubscriptionStatus {
+    /// Unique subscription ID
+    #[schema(example = "sub_750e8400-e29b-41d4-a716-446655440123")]
+    pub subscription_id: String,
+    
+    /// Current subscription state
+    /// 
+    /// - "waiting": Subscription created, waiting for query execution
+    /// - "active": Query executing, buffering events, WebSocket not connected
+    /// - "connected": WebSocket is connected and streaming events
+    /// - "completed": Query execution finished
+    /// - "expired": Subscription has expired and is no longer valid
+    #[schema(example = "waiting")]
+    pub status: String,
+    
+    /// When this subscription was created
+    pub created_at: DateTime<Utc>,
+    
+    /// When this subscription expires
+    pub expires_at: DateTime<Utc>,
+    
+    /// Number of events buffered for this subscription
+    #[schema(example = 5)]
+    pub buffered_events: usize,
+    
+    /// Whether a WebSocket is currently connected
+    pub connected: bool,
+    
+    /// Optional client identifier
+    #[schema(example = "tui-client-1")]
+    pub client_id: Option<String>,
 }
 
 /// Error response

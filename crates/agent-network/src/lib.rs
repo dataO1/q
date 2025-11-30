@@ -21,7 +21,6 @@ pub mod filelocks;
 pub mod coordination;
 pub mod sharedcontext;
 pub mod token_budget;
-pub mod acp;
 pub mod rag;
 
 // ... existing exports ...

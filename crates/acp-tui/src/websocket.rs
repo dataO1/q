@@ -34,8 +34,6 @@ pub struct WebSocketClient {
 #[derive(Debug)]
 enum ControlMessage {
     Stop,
-    Subscribe { execution_id: String },
-    Unsubscribe { execution_id: String },
 }
 
 /// WebSocket connection state
@@ -49,13 +47,13 @@ pub enum ConnectionState {
 }
 
 impl WebSocketClient {
-    /// Create a new WebSocket client
-    pub fn new(server_url: String) -> (Self, broadcast::Receiver<StatusEvent>) {
+    /// Create a new WebSocket client (URL will be set when starting with subscription_id)
+    pub fn new() -> (Self, broadcast::Receiver<StatusEvent>) {
         let (event_sender, event_receiver) = broadcast::channel(1000);
         let (control_sender, _) = mpsc::channel(100);
         
         let client = Self {
-            server_url,
+            server_url: String::new(), // Will be set in start()
             event_sender,
             control_sender,
             task_handle: None,
@@ -64,12 +62,15 @@ impl WebSocketClient {
         (client, event_receiver)
     }
     
-    /// Start the WebSocket client
-    pub async fn start(&mut self) -> Result<()> {
+    /// Start the WebSocket client with full WebSocket URL
+    pub async fn start(&mut self, websocket_url: String) -> Result<()> {
         if self.task_handle.is_some() {
             warn!("WebSocket client is already running");
             return Ok(());
         }
+        
+        // Store the full WebSocket URL
+        self.server_url = websocket_url;
         
         let server_url = self.server_url.clone();
         let event_sender = self.event_sender.clone();
@@ -77,37 +78,44 @@ impl WebSocketClient {
         self.control_sender = control_sender;
         
         let handle = tokio::spawn(async move {
-            let mut connection_handler = ConnectionHandler::new(server_url, event_sender);
+            info!("WebSocket client task starting");
+            let mut connection_handler = ConnectionHandler::new(server_url.clone(), event_sender);
             
+            // Spawn the connection handler in its own task
+            let mut connection_task = tokio::spawn(async move {
+                info!("Spawning ConnectionHandler task");
+                connection_handler.run().await;
+                info!("ConnectionHandler task ended");
+            });
+            
+            // Handle control messages in this task
             loop {
                 tokio::select! {
                     // Handle control messages
                     control_msg = control_receiver.recv() => {
                         match control_msg {
                             Some(ControlMessage::Stop) => {
-                                info!("Stopping WebSocket client");
+                                info!("Received stop signal for WebSocket client");
+                                connection_task.abort();
                                 break;
                             }
-                            Some(ControlMessage::Subscribe { execution_id }) => {
-                                connection_handler.subscribe(execution_id).await;
-                            }
-                            Some(ControlMessage::Unsubscribe { execution_id }) => {
-                                connection_handler.unsubscribe(execution_id).await;
-                            }
                             None => {
-                                debug!("Control channel closed");
+                                debug!("Control channel closed, stopping WebSocket client");
+                                connection_task.abort();
                                 break;
                             }
                         }
                     }
                     
-                    // Handle connection management
-                    _ = connection_handler.run() => {
-                        // Connection handler returned, likely due to error
-                        debug!("Connection handler stopped, will retry");
+                    // Check if connection task ended unexpectedly
+                    _ = &mut connection_task => {
+                        warn!("Connection handler task ended unexpectedly");
+                        break;
                     }
                 }
             }
+            
+            info!("WebSocket client task ending");
         });
         
         self.task_handle = Some(handle);
@@ -139,36 +147,13 @@ impl WebSocketClient {
         Ok(())
     }
     
-    /// Subscribe to status updates for a specific execution
-    pub async fn subscribe_to_execution(&self, execution_id: String) -> Result<()> {
-        self.control_sender
-            .send(ControlMessage::Subscribe { execution_id })
-            .await
-            .map_err(|e| Error::WebSocket(crate::error::WebSocketError::SendError {
-                message: format!("Failed to send subscribe message: {}", e),
-            }))?;
-        
-        Ok(())
-    }
-    
-    /// Unsubscribe from status updates for a specific execution
-    pub async fn unsubscribe_from_execution(&self, execution_id: String) -> Result<()> {
-        self.control_sender
-            .send(ControlMessage::Unsubscribe { execution_id })
-            .await
-            .map_err(|e| Error::WebSocket(crate::error::WebSocketError::SendError {
-                message: format!("Failed to send unsubscribe message: {}", e),
-            }))?;
-        
-        Ok(())
-    }
+    // Note: No subscription methods needed since server streams all events for the conversation_id
 }
 
 /// Handles WebSocket connection lifecycle and message processing
 struct ConnectionHandler {
     server_url: String,
     event_sender: broadcast::Sender<StatusEvent>,
-    subscriptions: std::collections::HashSet<String>,
     connection_state: ConnectionState,
     reconnect_attempts: usize,
 }
@@ -178,34 +163,50 @@ impl ConnectionHandler {
         Self {
             server_url,
             event_sender,
-            subscriptions: std::collections::HashSet::new(),
             connection_state: ConnectionState::Disconnected,
             reconnect_attempts: 0,
         }
     }
     
     async fn run(&mut self) {
+        debug!("ConnectionHandler run loop starting");
         loop {
+            debug!("Connection state: {:?}", self.connection_state);
             match &self.connection_state {
                 ConnectionState::Disconnected => {
+                    info!("Attempting to connect to WebSocket");
                     self.connect().await;
+                    // connect() will set state to Connected or Failed
+                    // If Connected, handle_connection() runs until disconnection
+                    // When it returns, connect() sets state to Failed
+                }
+                ConnectionState::Failed { error } => {
+                    warn!("Connection failed: {}. Will retry.", error);
+                    self.reconnect().await;
+                    // reconnect() will set state back to Disconnected after delay
+                }
+                ConnectionState::Connecting => {
+                    // Should not stay in this state - it's transient
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                ConnectionState::Reconnecting { .. } => {
+                    // Should not stay in this state - it's transient  
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
                 ConnectionState::Connected => {
-                    // This should not be reached in normal flow
-                    break;
-                }
-                ConnectionState::Failed { .. } => {
-                    self.reconnect().await;
-                }
-                _ => {
-                    // Wait a bit for state transitions
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    // This should not happen in normal flow
+                    // If we reach here, something is wrong with state management
+                    error!("Invalid state: Connected in run loop - resetting to Disconnected");
+                    self.connection_state = ConnectionState::Failed { 
+                        error: "Invalid state transition".to_string() 
+                    };
                 }
             }
         }
     }
     
     async fn connect(&mut self) {
+        debug!("Setting state to Connecting");
         self.connection_state = ConnectionState::Connecting;
         
         // The server_url already contains the correct WebSocket path from get_websocket_url()
@@ -214,23 +215,30 @@ impl ConnectionHandler {
         info!("Connecting to WebSocket: {}", ws_url);
         
         match connect_async(&ws_url).await {
-            Ok((ws_stream, _)) => {
-                info!("WebSocket connected successfully");
+            Ok((ws_stream, response)) => {
+                info!("WebSocket connected successfully. Response status: {:?}", response.status());
+                debug!("Setting state to Connected");
                 self.connection_state = ConnectionState::Connected;
                 self.reconnect_attempts = 0;
                 
-                // Handle the connection
+                // Handle the connection - this will block until connection closes
+                info!("Starting connection handler loop");
                 if let Err(e) = self.handle_connection(ws_stream).await {
-                    error!("WebSocket connection error: {}", e);
+                    error!("WebSocket connection handler error: {}", e);
                     self.connection_state = ConnectionState::Failed { 
-                        error: e.to_string() 
+                        error: format!("Connection handler error: {}", e) 
+                    };
+                } else {
+                    info!("WebSocket connection closed gracefully");
+                    self.connection_state = ConnectionState::Failed { 
+                        error: "Connection closed".to_string() 
                     };
                 }
             }
             Err(e) => {
-                error!("Failed to connect to WebSocket: {}", e);
+                error!("Failed to establish WebSocket connection to {}: {}", ws_url, e);
                 self.connection_state = ConnectionState::Failed { 
-                    error: e.to_string() 
+                    error: format!("Connection failed: {}", e)
                 };
             }
         }
@@ -260,60 +268,54 @@ impl ConnectionHandler {
         &mut self, 
         ws_stream: WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>
     ) -> Result<()> {
+        info!("WebSocket connection handler starting");
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
         
-        // Send initial subscriptions
-        for execution_id in &self.subscriptions.clone() {
-            let subscribe_msg = serde_json::json!({
-                "type": "subscribe",
-                "execution_id": execution_id
-            });
-            
-            if let Err(e) = ws_sender.send(Message::Text(subscribe_msg.to_string().into())).await {
-                error!("Failed to send subscription for {}: {}", execution_id, e);
-            }
-        }
+        // Server is unidirectional - it only sends status events
+        // No subscription messages needed since the server streams all events for this conversation_id
         
         // Set up ping interval
         let mut ping_interval = interval(Duration::from_secs(30));
         
+        info!("WebSocket connection handler entering message loop");
         loop {
             tokio::select! {
                 // Handle incoming messages
                 msg = ws_receiver.next() => {
                     match msg {
                         Some(Ok(Message::Text(text))) => {
+                            info!("Received WebSocket text message: {} chars", text.len());
                             if let Err(e) = self.handle_message(&text).await {
                                 warn!("Failed to handle WebSocket message: {}", e);
                             }
                         }
-                        Some(Ok(Message::Binary(_))) => {
-                            warn!("Received unexpected binary message");
+                        Some(Ok(Message::Binary(data))) => {
+                            warn!("Received unexpected binary message: {} bytes", data.len());
                         }
-                        Some(Ok(Message::Close(_))) => {
-                            info!("WebSocket connection closed by server");
+                        Some(Ok(Message::Close(close_frame))) => {
+                            info!("WebSocket connection closed by server: {:?}", close_frame);
                             break;
                         }
                         Some(Ok(Message::Ping(data))) => {
-                            debug!("Received ping, sending pong");
+                            debug!("Received ping ({} bytes), sending pong", data.len());
                             if let Err(e) = ws_sender.send(Message::Pong(data)).await {
                                 error!("Failed to send pong: {}", e);
                                 break;
                             }
                         }
-                        Some(Ok(Message::Pong(_))) => {
-                            debug!("Received pong");
+                        Some(Ok(Message::Pong(data))) => {
+                            debug!("Received pong ({} bytes)", data.len());
                         }
                         Some(Ok(Message::Frame(_))) => {
                             // Raw frame - typically handled internally by tungstenite
                             debug!("Received raw frame");
                         }
                         Some(Err(e)) => {
-                            error!("WebSocket error: {}", e);
+                            error!("WebSocket receive error: {}", e);
                             break;
                         }
                         None => {
-                            debug!("WebSocket stream ended");
+                            info!("WebSocket stream ended (receiver returned None)");
                             break;
                         }
                     }
@@ -330,6 +332,7 @@ impl ConnectionHandler {
             }
         }
         
+        info!("WebSocket connection handler exiting");
         Ok(())
     }
     
@@ -347,71 +350,19 @@ impl ConnectionHandler {
                 }
             }
             Err(e) => {
-                // Try to parse as server message
-                if let Ok(server_msg) = serde_json::from_str::<serde_json::Value>(text) {
-                    if let Some(msg_type) = server_msg.get("type").and_then(|v| v.as_str()) {
-                        match msg_type {
-                            "subscribed" => {
-                                if let Some(execution_id) = server_msg.get("execution_id")
-                                    .and_then(|v| v.as_str()) {
-                                    info!("Subscribed to execution: {}", execution_id);
-                                }
-                            }
-                            "unsubscribed" => {
-                                if let Some(execution_id) = server_msg.get("execution_id")
-                                    .and_then(|v| v.as_str()) {
-                                    info!("Unsubscribed from execution: {}", execution_id);
-                                }
-                            }
-                            "error" => {
-                                if let Some(error) = server_msg.get("message")
-                                    .and_then(|v| v.as_str()) {
-                                    error!("Server error: {}", error);
-                                }
-                            }
-                            _ => {
-                                warn!("Unknown server message type: {}", msg_type);
-                            }
-                        }
-                    }
-                } else {
-                    warn!("Failed to parse WebSocket message as JSON: {}", e);
-                }
+                warn!("Failed to parse WebSocket message as StatusEvent: {}", e);
+                debug!("Raw message: {}", text);
             }
         }
         
         Ok(())
     }
     
-    async fn subscribe(&mut self, execution_id: String) {
-        self.subscriptions.insert(execution_id.clone());
-        
-        // If connected, send subscription immediately
-        if matches!(self.connection_state, ConnectionState::Connected) {
-            // Note: In a real implementation, we'd need access to the WebSocket sender here
-            // This would require refactoring the connection handling
-            debug!("Would send subscription for: {}", execution_id);
-        }
-    }
-    
-    async fn unsubscribe(&mut self, execution_id: String) {
-        self.subscriptions.remove(&execution_id);
-        
-        // If connected, send unsubscription immediately
-        if matches!(self.connection_state, ConnectionState::Connected) {
-            // Note: In a real implementation, we'd need access to the WebSocket sender here
-            debug!("Would send unsubscription for: {}", execution_id);
-        }
-    }
+    // Note: No subscription methods needed - server streams all conversation events automatically
 }
 
-impl Drop for WebSocketClient {
-    fn drop(&mut self) {
-        if let Some(handle) = self.task_handle.take() {
-            handle.abort();
-        }
-    }
-}
+// Note: Removed automatic Drop implementation to prevent premature task abortion
+// The WebSocket connection should be explicitly stopped via stop() method instead
 
 #[cfg(test)]
 mod tests {

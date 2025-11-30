@@ -8,7 +8,7 @@ use crate::{
     websocket::WebSocketClient,
     models::StatusEvent,
     config::Config,
-    utils,
+    utils::{generate_client_id, format_client_id_short},
     error::{Error, Result},
 };
 use anyhow::Context;
@@ -34,6 +34,54 @@ use tokio::{
 };
 use tracing::{debug, error, info, instrument, warn};
 
+/// Connection state for the subscription-first flow
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConnectionState {
+    /// Not connected to any subscription
+    Disconnected,
+    /// Creating subscription with server
+    Subscribing,
+    /// Subscription created, connecting WebSocket
+    ConnectingWebSocket,
+    /// WebSocket connected, ready for queries
+    Connected,
+    /// Reconnecting after connection loss
+    Reconnecting { attempt: usize },
+    /// Connection failed with error
+    Failed { error: String },
+}
+
+impl ConnectionState {
+    /// Check if queries can be executed in this state
+    pub fn can_query(&self) -> bool {
+        matches!(self, ConnectionState::Connected)
+    }
+    
+    /// Get display text for this connection state
+    pub fn display_text(&self) -> &str {
+        match self {
+            ConnectionState::Disconnected => "Disconnected",
+            ConnectionState::Subscribing => "Subscribing...",
+            ConnectionState::ConnectingWebSocket => "Connecting...",
+            ConnectionState::Connected => "Connected",
+            ConnectionState::Reconnecting { .. } => "Reconnecting...",
+            ConnectionState::Failed { .. } => "Failed",
+        }
+    }
+    
+    /// Get colored dot indicator for this connection state
+    pub fn status_dot(&self) -> &str {
+        match self {
+            ConnectionState::Disconnected => "●",
+            ConnectionState::Subscribing => "●",
+            ConnectionState::ConnectingWebSocket => "●",
+            ConnectionState::Connected => "●",
+            ConnectionState::Reconnecting { .. } => "●",
+            ConnectionState::Failed { .. } => "●",
+        }
+    }
+}
+
 /// Main application state and event loop
 pub struct App {
     /// Application configuration
@@ -42,8 +90,14 @@ pub struct App {
     /// ACP client for API calls
     acp_client: crate::client::AcpClient,
     
-    /// Current conversation ID (persistent for session)
-    conversation_id: Option<String>,
+    /// Connection state for subscription-first flow
+    connection_state: ConnectionState,
+    
+    /// Deterministic client ID for this machine
+    client_id: String,
+    
+    /// Current subscription ID (from /subscribe endpoint)
+    subscription_id: Option<String>,
     
     /// Timeline component
     timeline: TimelineComponent,
@@ -87,6 +141,9 @@ pub struct App {
     /// Channel for internal app messages
     internal_sender: tokio::sync::mpsc::UnboundedSender<AppMessage>,
     internal_receiver: tokio::sync::mpsc::UnboundedReceiver<AppMessage>,
+    
+    /// Last connection error for display
+    last_connection_error: Option<String>,
 }
 
 /// Application messages following Elm pattern
@@ -107,20 +164,41 @@ pub enum AppMessage {
     /// Animation tick
     Tick,
     
-    /// Query submitted
+    /// Query submitted (will check connection state first)
     SubmitQuery(String),
+    
+    /// Subscription created successfully
+    SubscriptionCreated { subscription_id: String },
+    
+    /// Subscription resumed (existing subscription found)
+    SubscriptionResumed { subscription_id: String },
+    
+    /// WebSocket connected successfully
+    WebSocketConnected,
+    
+    /// WebSocket disconnected
+    WebSocketDisconnected,
+    
+    /// Connection failed
+    ConnectionFailed { error: String },
+    
+    /// Connection state changed
+    ConnectionStateChanged(ConnectionState),
     
     /// Query execution started successfully
     ExecutionStarted {
-        conversation_id: String,
+        subscription_id: String,
         query: String,
     },
     
     /// Query execution failed
     ExecutionFailed { error: String },
     
-    /// Connection status change
-    ConnectionStatus(String),
+    /// Initiate connection flow (subscribe → websocket → allow queries)
+    StartConnection,
+    
+    /// Connection step: create subscription
+    CreateSubscription,
     
     /// Show help overlay
     ShowHelp,
@@ -147,32 +225,47 @@ impl App {
         let acp_client = crate::client::AcpClient::new(&config.server_url)
             .context("Failed to initialize ACP client")?;
         
+        // Generate deterministic client ID
+        let client_id = generate_client_id()
+            .context("Failed to generate client ID")?;
+        
+        info!("Generated client ID: {}", format_client_id_short(&client_id));
+        
         // Animation interval
         let animation_interval = interval(Duration::from_millis(100)); // 10 FPS
         
         // Create internal message channel
         let (internal_sender, internal_receiver) = tokio::sync::mpsc::unbounded_channel();
         
-        Ok(Self {
+        let mut app = Self {
             config,
             acp_client,
-            conversation_id: None,
+            connection_state: ConnectionState::Disconnected,
+            client_id,
+            subscription_id: None,
             timeline: TimelineComponent::new(),
             status_line: StatusLine::new(),
             terminal,
-            websocket_client: None, // Start as None, connect after first query
+            websocket_client: None,
             event_receiver: None,
             query_input: String::new(),
             input_cursor: 0,
             input_focused: true,
-            status_message: "Ready".to_string(),
+            status_message: "Connecting to server...".to_string(),
+            last_connection_error: None,
             animation_interval,
             last_animation: Instant::now(),
             running: true,
             show_help: false,
             internal_sender,
             internal_receiver,
-        })
+        };
+        
+        // Start connection immediately on startup
+        info!("Starting connection flow on TUI startup");
+        app.start_connection_flow()?;
+        
+        Ok(app)
     }
     
     /// Run the main application loop
@@ -192,6 +285,7 @@ impl App {
             
             // Handle internal messages from async tasks
             if let Some(msg) = self.handle_internal_messages() {
+                // Regular message processing
                 self.update(msg)?;
             }
             
@@ -294,57 +388,89 @@ impl App {
             }
             
             AppMessage::SubmitQuery(query) => {
-                self.submit_query(query)?;
+                if !self.connection_state.can_query() {
+                    // Start connection flow if not connected
+                    self.start_connection_flow()?;
+                    // Store query for after connection
+                    self.query_input = query;
+                } else {
+                    // Connection ready, execute query
+                    self.execute_query(query)?;
+                }
             }
             
-            AppMessage::ExecutionStarted { conversation_id, query } => {
-                info!("Execution started: {} for query: {}", conversation_id, query);
-                self.conversation_id = Some(conversation_id.clone());
-                self.status_message = format!("🚀 Execution started: {}", query);
+            AppMessage::StartConnection => {
+                self.start_connection_flow()?;
+            }
+            
+            AppMessage::CreateSubscription => {
+                self.create_subscription()?;
+            }
+            
+            AppMessage::SubscriptionCreated { subscription_id } => {
+                info!("Subscription created: {}", subscription_id);
+                self.subscription_id = Some(subscription_id.clone());
+                self.connection_state = ConnectionState::ConnectingWebSocket;
+                self.start_websocket(subscription_id)?;
+            }
+            
+            AppMessage::SubscriptionResumed { subscription_id } => {
+                info!("Subscription resumed: {}", subscription_id);
+                self.subscription_id = Some(subscription_id.clone());
+                self.connection_state = ConnectionState::ConnectingWebSocket;
+                self.start_websocket(subscription_id)?;
+            }
+            
+            AppMessage::WebSocketConnected => {
+                info!("WebSocket connected successfully");
+                self.connection_state = ConnectionState::Connected;
+                self.status_message = "Connected - ready for queries".to_string();
+                
+                // If there's a pending query, execute it now
+                if !self.query_input.trim().is_empty() {
+                    let query = self.query_input.clone();
+                    self.query_input.clear();
+                    self.input_cursor = 0;
+                    self.execute_query(query)?;
+                }
+            }
+            
+            AppMessage::WebSocketDisconnected => {
+                warn!("WebSocket disconnected - server may be down");
+                self.connection_state = ConnectionState::Disconnected;
+                self.status_message = "Disconnected from server".to_string();
+                self.websocket_client = None;
+                self.event_receiver = None;
+            }
+            
+            AppMessage::ConnectionFailed { error } => {
+                error!("Connection failed: {}", error);
+                self.connection_state = ConnectionState::Failed { error: error.clone() };
+                self.last_connection_error = Some(error.clone());
+                self.status_message = format!("Connection failed: {}", error);
+            }
+            
+            AppMessage::ConnectionStateChanged(state) => {
+                debug!("Connection state changed to: {:?}", state);
+                self.connection_state = state;
+            }
+            
+            AppMessage::ExecutionStarted { subscription_id, query } => {
+                info!("Execution started: {} for query: {}", subscription_id, query);
+                self.status_message = format!("Execution started: {}", query);
                 
                 // Clear any previous errors and show success
                 self.status_line.handle_message(StatusLineMessage::Info(format!("Query executed: {}", query)));
-                
-                // Start WebSocket connection now that we have conversation_id
-                let ws_url = self.acp_client.get_websocket_url(&conversation_id);
-                let (mut websocket_client, event_receiver) = WebSocketClient::new(ws_url);
-                
-                // Store the event receiver immediately
-                self.event_receiver = Some(event_receiver);
-                
-                // Start the WebSocket client asynchronously
-                let internal_sender = self.internal_sender.clone();
-                let conv_id = conversation_id.clone();
-                
-                tokio::spawn(async move {
-                    match websocket_client.start().await {
-                        Ok(()) => {
-                            info!("WebSocket connection started for conversation: {}", conv_id);
-                            let _ = internal_sender.send(AppMessage::ConnectionStatus(
-                                "🔗 Connected to execution stream".to_string()
-                            ));
-                        }
-                        Err(e) => {
-                            error!("Failed to start WebSocket connection: {}", e);
-                            let _ = internal_sender.send(AppMessage::ConnectionStatus(
-                                format!("❌ WebSocket connection failed: {}", e)
-                            ));
-                        }
-                    }
-                });
             }
             
             AppMessage::ExecutionFailed { error } => {
                 error!("Query execution failed: {}", error);
-                self.status_message = format!("❌ Execution failed: {}", error);
+                self.status_message = format!("Execution failed: {}", error);
                 
                 // Show error in status line for immediate user visibility
                 self.status_line.handle_message(StatusLineMessage::Error(format!("Execution failed: {}", error)));
             }
             
-            AppMessage::ConnectionStatus(status) => {
-                self.status_message = status;
-            }
             
             AppMessage::ShowHelp => {
                 self.show_help = true;
@@ -413,7 +539,7 @@ impl App {
                     let query = self.query_input.clone();
                     self.query_input.clear();
                     self.input_cursor = 0;
-                    self.submit_query(query)?;
+                    self.update(AppMessage::SubmitQuery(query))?;
                 }
             }
             
@@ -459,10 +585,110 @@ impl App {
         Ok(())
     }
     
-    /// Submit query to ACP server
+    /// Start the connection flow: subscribe → websocket → ready for queries
+    #[instrument(skip(self))]
+    fn start_connection_flow(&mut self) -> Result<()> {
+        info!("Starting connection flow");
+        self.connection_state = ConnectionState::Subscribing;
+        self.status_message = "Creating subscription...".to_string();
+        
+        let _ = self.internal_sender.send(AppMessage::CreateSubscription);
+        Ok(())
+    }
+    
+    /// Create subscription with the server
+    #[instrument(skip(self))]
+    fn create_subscription(&mut self) -> Result<()> {
+        info!("Creating subscription with client_id: {}", format_client_id_short(&self.client_id));
+        
+        let client = self.acp_client.client().clone();
+        let client_id = self.client_id.clone();
+        let sender = self.internal_sender.clone();
+        
+        tokio::spawn(async move {
+            let request = crate::client::types::SubscribeRequest {
+                client_id: Some(client_id),
+            };
+            
+            match client.create_subscription(&request).await {
+                Ok(response) => {
+                    let subscription = response.into_inner();
+                    
+                    info!("Created subscription: {}", subscription.subscription_id);
+                    let _ = sender.send(AppMessage::SubscriptionCreated { 
+                        subscription_id: subscription.subscription_id 
+                    });
+                }
+                Err(e) => {
+                    error!("Failed to create subscription: {}", e);
+                    let _ = sender.send(AppMessage::ConnectionFailed {
+                        error: format!("Failed to create subscription: {}", e),
+                    });
+                }
+            }
+        });
+        
+        Ok(())
+    }
+    
+    /// Start WebSocket connection with subscription_id
+    #[instrument(skip(self), fields(subscription_id = %subscription_id))]
+    fn start_websocket(&mut self, subscription_id: String) -> Result<()> {
+        info!("Starting WebSocket connection for subscription: {}", subscription_id);
+        
+        let ws_url = format!("{}/stream/{}", 
+            self.acp_client.base_url().replace("http://", "ws://").replace("https://", "wss://"), 
+            subscription_id);
+        let (websocket_client, event_receiver) = WebSocketClient::new();
+        
+        // Store the event receiver immediately
+        self.event_receiver = Some(event_receiver);
+        
+        // Store the client to keep it alive first
+        self.websocket_client = Some(websocket_client);
+        
+        let sender = self.internal_sender.clone();
+        
+        let ws_url_clone = ws_url.clone();
+        
+        // Start the WebSocket in the background
+        tokio::spawn(async move {
+            // Use a new client instance since we can't move the stored one
+            let (mut ws_client, _) = WebSocketClient::new();
+            match ws_client.start(ws_url_clone).await {
+                Ok(()) => {
+                    info!("WebSocket connection started successfully");
+                    let _ = sender.send(AppMessage::WebSocketConnected);
+                }
+                Err(e) => {
+                    error!("Failed to start WebSocket connection: {}", e);
+                    let _ = sender.send(AppMessage::ConnectionFailed {
+                        error: format!("WebSocket connection failed: {}", e),
+                    });
+                }
+            }
+        });
+        
+        Ok(())
+    }
+    
+    /// Execute query after connection is established
     #[instrument(skip(self), fields(query = %query))]
-    fn submit_query(&mut self, query: String) -> Result<()> {
-        info!("Submitting query: {}", query);
+    fn execute_query(&mut self, query: String) -> Result<()> {
+        if !self.connection_state.can_query() {
+            warn!("Attempted to execute query while not connected");
+            return Ok(());
+        }
+        
+        let subscription_id = match &self.subscription_id {
+            Some(id) => id.clone(),
+            None => {
+                error!("No subscription ID available for query execution");
+                return Ok(());
+            }
+        };
+        
+        info!("Executing query: {}", query);
         self.status_message = format!("⏳ Executing: {}", query);
         
         // Detect project scope for context
@@ -490,17 +716,24 @@ impl App {
             }
         };
         
-        // Execute the query asynchronously
-        let acp_client = self.acp_client.clone();
+        // Execute the query asynchronously using generated API client
+        let client = self.acp_client.client().clone();
         let query_clone = query.clone();
         let internal_sender = self.internal_sender.clone();
         
         tokio::spawn(async move {
-            match acp_client.query(&query_clone, project_scope).await {
+            let request = crate::client::types::QueryRequest {
+                query: query_clone.clone(),
+                project_scope,
+                subscription_id: subscription_id.clone(),
+            };
+            
+            match client.query_task(&request).await {
                 Ok(response) => {
-                    info!("Query executed successfully, conversation_id: {}", response.conversation_id);
+                    let query_response = response.into_inner();
+                    info!("Query executed successfully, subscription_id: {}", subscription_id);
                     let _ = internal_sender.send(AppMessage::ExecutionStarted {
-                        conversation_id: response.conversation_id,
+                        subscription_id,
                         query: query_clone,
                     });
                 }
@@ -525,8 +758,11 @@ impl App {
         let status_message = &self.status_message;
         let show_help = self.show_help;
         
+        let connection_state = &self.connection_state;
+        let client_id = &self.client_id;
+        
         self.terminal.draw(|frame| {
-            Self::render_frame(frame, timeline, status_line, query_input, input_focused, status_message, show_help);
+            Self::render_frame(frame, timeline, status_line, query_input, input_focused, status_message, show_help, connection_state, client_id);
         }).map_err(Error::Io)?;
         
         Ok(())
@@ -541,17 +777,18 @@ impl App {
         input_focused: bool,
         status_message: &str,
         show_help: bool,
+        connection_state: &ConnectionState,
+        client_id: &str,
     ) {
         let area = frame.area();
         
-        // Main layout: timeline + input + status line + bottom status
+        // Main layout: timeline + input + status bar (3 sections)
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Min(3),      // Timeline
                 Constraint::Length(3),   // Input
-                Constraint::Length(1),   // Status line (error messages)
-                Constraint::Length(1),   // Bottom status (app info)
+                Constraint::Length(1),   // Single status bar
             ])
             .split(area);
         
@@ -561,11 +798,8 @@ impl App {
         // Render input box
         Self::render_input(frame, chunks[1], query_input, input_focused);
         
-        // Render status line for errors/warnings
-        status_line.render(frame, chunks[2]);
-        
-        // Render bottom status line for app info
-        Self::render_status(frame, chunks[3], status_message, timeline);
+        // Render consolidated status bar
+        Self::render_status(frame, chunks[2], status_message, timeline, connection_state, client_id);
         
         // Render help overlay if shown
         if show_help {
@@ -594,21 +828,30 @@ impl App {
         frame.render_widget(input, area);
     }
     
-    /// Render status line
-    fn render_status(frame: &mut Frame, area: Rect, status_message: &str, timeline: &TimelineComponent) {
+    /// Render consolidated status bar
+    fn render_status(frame: &mut Frame, area: Rect, status_message: &str, timeline: &TimelineComponent, connection_state: &ConnectionState, client_id: &str) {
         let (scroll_offset, total_lines) = timeline.scroll_info();
         
+        // Format: [Status Message] | Scroll: X/Y | Connection: ● Connected | Help: ?
         let status_text = format!(
-            " {} | Scroll: {}/{} | Press ? for help, q to quit ",
+            " {} | Scroll: {}/{} | Connection: {} {} | Help: ?",
             status_message,
             scroll_offset,
-            total_lines
+            total_lines,
+            connection_state.status_dot(),
+            connection_state.display_text()
         );
         
-        let status = Paragraph::new(status_text)
-            .style(Style::default().fg(Color::Gray));
+        let connection_color = match connection_state {
+            ConnectionState::Connected => Color::Green,
+            ConnectionState::Failed { .. } => Color::Red,
+            ConnectionState::Disconnected => Color::Gray,
+            _ => Color::Yellow,
+        };
         
-        frame.render_widget(status, area);
+        let status_widget = Paragraph::new(status_text)
+            .style(Style::default().fg(connection_color));
+        frame.render_widget(status_widget, area);
     }
     
     /// Render help overlay

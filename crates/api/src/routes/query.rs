@@ -100,7 +100,7 @@ async fn extract_and_validate_json(
             info!(
                 has_query = value.get("query").is_some(),
                 has_project_scope = value.get("project_scope").is_some(),
-                has_conversation_id = value.get("conversation_id").is_some(),
+                has_subscription_id = value.get("subscription_id").is_some(),
                 "JSON structure parsed successfully"
             );
             value
@@ -144,6 +144,18 @@ async fn extract_and_validate_json(
             Json(ErrorResponse {
                 error: "Missing required field 'project_scope'. The request must include project context.".to_string(),
                 code: Some("MISSING_FIELD_PROJECT_SCOPE".to_string()),
+                timestamp: Utc::now(),
+            })
+        ));
+    }
+
+    if json_value.get("subscription_id").is_none() {
+        error!("Missing required field: 'subscription_id'");
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(ErrorResponse {
+                error: "Missing required field 'subscription_id'. Please create a subscription with POST /subscribe first.".to_string(),
+                code: Some("MISSING_FIELD_SUBSCRIPTION_ID".to_string()),
                 timestamp: Utc::now(),
             })
         ));
@@ -229,7 +241,7 @@ async fn extract_and_validate_json(
                 query_length = req.query.len(),
                 project_root = %req.project_scope.root,
                 language_count = req.project_scope.language_distribution.len(),
-                conversation_id = ?req.conversation_id,
+                subscription_id = %req.subscription_id,
                 "Request successfully parsed and validated"
             );
             Ok(req)
@@ -273,7 +285,7 @@ async fn validate_parsed_query_request(
         query_preview = %req.query.chars().take(100).collect::<String>(),
         project_root = %req.project_scope.root,
         language_count = req.project_scope.language_distribution.len(),
-        conversation_id = ?req.conversation_id,
+        subscription_id = %req.subscription_id,
         "Validating parsed query request"
     );
     
@@ -345,7 +357,7 @@ pub async fn query_task(
         query_preview = %req.query.chars().take(100).collect::<String>(),
         project_root = %req.project_scope.root,
         language_count = %req.project_scope.language_distribution.len(),
-        conversation_id = ?req.conversation_id,
+        subscription_id = %req.subscription_id,
         "Starting query execution"
     );
 
@@ -353,22 +365,17 @@ pub async fn query_task(
     let project_scope = req.project_scope.clone();
     let project_root = project_scope.root.clone(); // Clone for later use in error logging
 
-    // Create conversation ID  
-    let conversation_id = req.conversation_id
-        .map(|id| ConversationId::from_string(id))
-        .unwrap_or_else(|| ConversationId::new());
-
-    // Execute query through execution manager (returns immediately, runs async)
+    // Execute query through execution manager with subscription_id (returns immediately, runs async)
     let result = state.execution_manager.execute_query(
         &req.query,
         project_scope,
-        conversation_id.clone()
+        &req.subscription_id
     ).await;
 
     match result {
-        Ok(conversation_id_str) => {
+        Ok(subscription_id_str) => {
             info!(
-                conversation_id = %conversation_id_str,
+                subscription_id = %subscription_id_str,
                 query_length = %req.query.len(),
                 "Query execution started successfully"
             );
@@ -378,6 +385,7 @@ pub async fn query_task(
                 error = %e,
                 query_preview = %req.query.chars().take(100).collect::<String>(),
                 project_root = %project_root,
+                subscription_id = %req.subscription_id,
                 "Failed to start query execution"
             );
             return Err((
@@ -391,13 +399,12 @@ pub async fn query_task(
         }
     }
 
-    let conversation_id_str = conversation_id.to_string();
     let response = QueryResponse {
-        conversation_id: conversation_id_str.clone(),
-        stream_url: format!("/stream/{}", conversation_id_str),
+        subscription_id: req.subscription_id.clone(),
+        stream_url: format!("/stream/{}", req.subscription_id),
         status: "started".to_string(),
     };
 
-    info!("Execution started successfully for conversation {}", conversation_id_str);
+    info!("Execution started successfully for subscription {}", req.subscription_id);
     Ok(Json(response))
 }

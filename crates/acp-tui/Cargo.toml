@@ -50,6 +50,11 @@ tracing-appender = "0.2"
 # URL handling for API connection
 url = "2"
 
+# Hardware identification for deterministic client ID
+mac_address = "1.1"
+sha2 = "0.10"
+hex = "0.4"
+
 # Configuration
 toml = { workspace = true }
 

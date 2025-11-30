@@ -13,6 +13,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 use std::collections::HashMap;
+use tracing::debug;
 
 /// Timeline widget component following React/Elm patterns
 pub struct TimelineComponent {
@@ -93,15 +94,19 @@ impl TimelineComponent {
     
     /// Handle incoming status events with state transitions
     fn handle_status_event(&mut self, event: StatusEvent) {
+        debug!("Timeline received event: {:?} from source: {:?}", event.event, event.source);
         let node_id = self.extract_node_id(&event.source);
         let display_name = self.extract_display_name(&event);
+        debug!("Extracted node_id: '{}', display_name: '{}'", node_id, display_name);
         
         match &event.event {
             // Execution started - create root node
             EventType::ExecutionStarted { query } => {
+                debug!("Creating root node for execution: '{}' with query: '{}'", node_id, query);
                 let root = self.tree.add_root(node_id.clone(), query.clone());
                 root.start();
                 self.track_active_node(node_id, None);
+                debug!("Tree now has {} root nodes", self.tree.roots.len());
             }
             
             // Agent started - create or update agent node
@@ -367,6 +372,7 @@ impl TimelineComponent {
     /// Render the timeline component
     pub fn render(&self, f: &mut Frame, area: Rect) {
         let lines = self.tree.render_lines();
+        debug!("Timeline rendering {} lines, tree has {} roots", lines.len(), self.tree.roots.len());
         
         // Apply scroll offset
         let visible_lines: Vec<Line> = lines

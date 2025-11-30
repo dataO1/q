@@ -19,6 +19,7 @@ use crate::{
         query::query_task,
         stream::websocket_handler,
         agents::list_capabilities,
+        subscribe::{create_subscription, get_subscription_status},
     },
     middleware::logging::logging_middleware,
     openapi::ApiDoc,
@@ -64,7 +65,11 @@ impl AcpServer {
         Router::new()
             // Core ACP endpoints
             .route("/query", post(query_task))
-            .route("/stream/{conversation_id}", get(websocket_handler))
+            .route("/stream/{subscription_id}", get(websocket_handler))
+            
+            // Subscription management
+            .route("/subscribe", post(create_subscription))
+            .route("/subscribe/{subscription_id}", get(get_subscription_status))
             
             // Discovery and health endpoints
             .route("/capabilities", get(list_capabilities))

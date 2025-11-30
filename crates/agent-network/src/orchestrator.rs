@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 use std::collections::HashMap;
+use petgraph::graph::NodeIndex;
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
 use anyhow::{Context, Result};
@@ -19,7 +20,7 @@ use crate::sharedcontext::SharedContext;
 use crate::coordination::CoordinationManager;
 use crate::filelocks::FileLockManager;
 use crate::hitl::{AuditLogger, DefaultApprovalQueue};
-use crate::workflow::{WorkflowExecutor, WorkflowGraph, TaskResult};
+use crate::workflow::{WorkflowExecutor, WorkflowGraph, TaskResult, WorkflowBuilder, TaskNode, DependencyType};
 
 use ai_agent_common::{
     ConversationId, ProjectScope, SystemConfig, StatusEvent, EventSource, EventType,
@@ -297,11 +298,43 @@ impl Orchestrator {
     }
 
     /// Build workflow DAG from decomposed tasks
-    async fn build_workflow(_tasks: &[DecomposedTask]) -> Result<WorkflowGraph> {
-        use petgraph::Graph;
-        // TODO: Implement proper workflow building
-        // For now, return empty graph which will work with single tasks
-        Ok(Graph::new())
+    async fn build_workflow(tasks: &[DecomposedTask]) -> Result<WorkflowGraph> {
+        debug!("Building workflow from {} tasks", tasks.len());
+
+        let mut builder = WorkflowBuilder::new();
+        let mut task_indices: HashMap<String, NodeIndex> = HashMap::new();
+
+        // Add all task nodes
+        for task in tasks {
+            let node = TaskNode {
+                task_id: task.id.clone(),
+                agent_id: task.agent_id.clone(),
+                description: task.description.clone(),
+                recovery_strategy: task.recovery_strategy.clone(),
+                requires_hitl: task.requires_hitl,
+            };
+
+            let idx = builder.add_task(node)?;
+            task_indices.insert(task.id.clone(), idx);
+        }
+
+        // Add dependency edges
+        for (idx, task) in tasks.iter().enumerate() {
+            info!(
+                "Task {}: id='{}', agent_id='{}', dependencies={:?}",
+                idx, task.id, task.agent_id, task.dependencies
+            );
+            
+            // Add dependencies between tasks
+            for from_id in &task.dependencies {
+                builder.add_dependency(&from_id, &task.id, DependencyType::Sequential)?;
+            }
+        }
+
+        let graph = builder.build();
+        debug!("Workflow DAG built: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+
+        Ok(graph)
     }
 
     /// Execute workflow

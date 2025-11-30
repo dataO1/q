@@ -1,11 +1,10 @@
 //! ACP API client module
 //!
-//! Provides a wrapper around the generated OpenAPI client with additional
-//! functionality for the TUI application.
+//! Minimal wrapper around the generated OpenAPI client, using only generated types and methods.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use std::time::Duration;
-use tracing::{debug, error, instrument};
+use tracing::{debug, instrument};
 
 // Include the generated API client
 include!(concat!(env!("OUT_DIR"), "/acp_client.rs"));
@@ -13,10 +12,12 @@ include!(concat!(env!("OUT_DIR"), "/acp_client.rs"));
 // Re-export the generated types for convenience
 pub use types::*;
 
-/// High-level ACP client wrapper
+/// Minimal ACP client wrapper that uses only generated OpenAPI client methods
 #[derive(Clone)]
 pub struct AcpClient {
+    /// Generated OpenAPI client
     inner: Client,
+    /// Base URL for WebSocket URL generation
     base_url: String,
 }
 
@@ -36,126 +37,15 @@ impl AcpClient {
         })
     }
     
-    /// Test connection to the ACP server
-    #[instrument(skip(self))]
-    pub async fn health_check(&self) -> Result<HealthResponse> {
-        let response = self.inner.health_check()
-            .await
-            .map_err(|e| {
-                error!("Health check failed: {}", e);
-                match e.status() {
-                    Some(status) if status.is_server_error() => {
-                        anyhow!("Server error during health check: {} ({})", e, status)
-                    },
-                    Some(status) if status.is_client_error() => {
-                        anyhow!("Client error during health check: {} ({})", e, status)
-                    },
-                    Some(status) => {
-                        anyhow!("Unexpected response during health check: {} ({})", e, status)
-                    },
-                    None => {
-                        anyhow!("Network error during health check: {}", e)
-                    }
-                }
-            })
-            .context("Failed to connect to ACP server")?;
-        
-        Ok(response.into_inner())
+    /// Get direct access to the generated client for all API operations
+    pub fn client(&self) -> &Client {
+        &self.inner
     }
     
-    /// Get server capabilities
-    #[instrument(skip(self))]
-    pub async fn get_capabilities(&self) -> Result<CapabilitiesResponse> {
-        let response = self.inner.list_capabilities()
-            .await
-            .map_err(|e| {
-                error!("Capabilities request failed: {}", e);
-                match e.status() {
-                    Some(status) if status.is_server_error() => {
-                        anyhow!("Server error getting capabilities: {} ({})", e, status)
-                    },
-                    Some(status) if status.is_client_error() => {
-                        anyhow!("Client error getting capabilities: {} ({})", e, status)
-                    },
-                    Some(status) => {
-                        anyhow!("Unexpected response getting capabilities: {} ({})", e, status)
-                    },
-                    None => {
-                        anyhow!("Network error getting capabilities: {}", e)
-                    }
-                }
-            })
-            .context("Failed to get server capabilities")?;
-        
-        Ok(response.into_inner())
-    }
-    
-    /// Execute a query
-    #[instrument(skip(self, project_scope), fields(query = %query))]
-    pub async fn query(&self, query: &str, project_scope: types::ProjectScope) -> Result<types::QueryResponse> {
-        let request = types::QueryRequest {
-            query: query.to_string(),
-            project_scope,
-            conversation_id: None,
-        };
-        
-        let response = self.inner.query_task(&request)
-            .await
-            .map_err(|e| {
-                error!("Query execution failed: {}", e);
-                match e.status() {
-                    Some(status) if status.as_u16() == 400 => {
-                        anyhow!("Invalid query request: Check your query syntax and project context")
-                    },
-                    Some(status) if status.as_u16() == 401 => {
-                        anyhow!("Authentication failed: Check your API credentials")
-                    },
-                    Some(status) if status.as_u16() == 403 => {
-                        anyhow!("Permission denied: You don't have access to execute queries")
-                    },
-                    Some(status) if status.as_u16() == 404 => {
-                        anyhow!("API endpoint not found: Check your server URL")
-                    },
-                    Some(status) if status.as_u16() == 422 => {
-                        // Try to extract the actual validation error message from response body
-                        match extract_error_body(&e) {
-                            Ok(body) if !body.is_empty() => {
-                                anyhow!("Validation error: {}", body)
-                            },
-                            _ => {
-                                anyhow!("Validation error: Request data is invalid or incomplete")
-                            }
-                        }
-                    },
-                    Some(status) if status.as_u16() == 500 => {
-                        anyhow!("Server error: The agent network encountered an internal error")
-                    },
-                    Some(status) if status.as_u16() == 503 => {
-                        anyhow!("Service unavailable: Agent network is temporarily down")
-                    },
-                    Some(status) if status.is_server_error() => {
-                        anyhow!("Server error during query execution: {} ({})", e, status)
-                    },
-                    Some(status) if status.is_client_error() => {
-                        anyhow!("Client error during query execution: {} ({})", e, status)
-                    },
-                    Some(status) => {
-                        anyhow!("Unexpected response during query execution: {} ({})", e, status)
-                    },
-                    None => {
-                        anyhow!("Network error during query execution: {}", e)
-                    }
-                }
-            })
-            .context("Failed to execute query")?;
-        
-        Ok(response.into_inner())
-    }
-    
-    /// Get WebSocket URL for streaming
-    pub fn get_websocket_url(&self, conversation_id: &str) -> String {
+    /// Get WebSocket URL for streaming with subscription_id
+    pub fn get_websocket_url(&self, subscription_id: &str) -> String {
         let ws_url = self.base_url.replace("http://", "ws://").replace("https://", "wss://");
-        format!("{}/stream/{}", ws_url, conversation_id)
+        format!("{}/stream/{}", ws_url, subscription_id)
     }
     
     /// Get the base URL
@@ -164,15 +54,17 @@ impl AcpClient {
     }
 }
 
-/// Test connection to ACP server
+/// Test connection to ACP server using generated client
 #[instrument(fields(server_url = %server_url))]
 pub async fn test_connection(server_url: &str) -> Result<HealthResponse> {
     let client = AcpClient::new(server_url)
         .context("Failed to create ACP client")?;
     
-    client.health_check()
+    let response = client.client().health_check()
         .await
-        .context("Health check failed")
+        .context("Health check failed")?;
+    
+    Ok(response.into_inner())
 }
 
 /// Detect project scope from current directory using generated API types
@@ -251,107 +143,4 @@ fn extension_to_language(ext: &str) -> &'static str {
         "xml" => "XML",
         _ => "Unknown",
     }
-}
-
-/// Extract error response body text from progenitor Error
-/// 
-/// Attempts to extract the actual error message from the HTTP response body.
-/// This is particularly useful for validation errors (422) that contain specific
-/// field-level error descriptions.
-fn extract_error_body(error: &progenitor_client::Error<types::ErrorResponse>) -> Result<String> {
-    // Convert the error to a string and try to parse useful information
-    let error_str = error.to_string();
-    
-    // Enhanced error body extraction with detailed logging
-    debug!("Extracting error body from: {}", error_str);
-    
-    // Try to extract structured error response first
-    match error {
-        progenitor_client::Error::ErrorResponse(response_value) => {
-            // This is a structured ErrorResponse - extract the error message
-            debug!("Extracted structured error response: {:?}", response_value);
-            // For now, just return a generic message since we have the structured error
-            return Ok("Server returned structured error response".to_string());
-        }
-        progenitor_client::Error::UnexpectedResponse(ref _response) => {
-            // For unexpected responses, we need to extract info from the string representation
-            debug!("Processing unexpected response: {}", error_str);
-            
-            // Check if this contains error details - progenitor includes response body in error string
-            if let Some(content_start) = error_str.find("content-length\": \"") {
-                if let Some(content_end) = error_str[content_start..].find("\", \"") {
-                    let content_length_str = &error_str[content_start + "content-length\": \"".len()..content_start + content_end];
-                    if let Ok(content_length) = content_length_str.parse::<usize>() {
-                        if content_length > 0 {
-                            // There's content, but progenitor doesn't expose it directly
-                            // For now, provide contextual help based on status code
-                            if error_str.contains("422") {
-                                return Ok("Request validation failed. This usually means required fields are missing. Please check that your request includes both 'query' text and 'project_scope' with root path and language distribution.".to_string());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        _ => {
-            debug!("Other error type: {:?}", error);
-        }
-    }
-    
-    // Enhanced fallback parsing for various error patterns
-    if error_str.contains("422") {
-        return Ok("Request validation failed - missing or invalid required fields (query, project_scope.root, project_scope.language_distribution)".to_string());
-    }
-    
-    if error_str.contains("400") {
-        return Ok("Bad request - invalid JSON format or malformed data".to_string());
-    }
-    
-    if error_str.contains("500") {
-        return Ok("Internal server error - the agent network encountered an unexpected problem".to_string());
-    }
-    
-    // Fallback: try to extract any useful information from the error string
-    if let Some(msg) = extract_meaningful_error_text(&error_str) {
-        Ok(msg)
-    } else {
-        Ok("Error details not available".to_string())
-    }
-}
-
-/// Extract meaningful error text from a complex error string
-fn extract_meaningful_error_text(error_str: &str) -> Option<String> {
-    // Look for common error patterns and extract useful information
-    
-    // Check for validation error patterns
-    if error_str.contains("missing field") {
-        if let Some(start) = error_str.find("missing field") {
-            if let Some(end) = error_str[start..].find("at line") {
-                return Some(error_str[start..start + end].trim().to_string());
-            }
-        }
-    }
-    
-    // Check for deserialization errors
-    if error_str.contains("Failed to deserialize") {
-        if let Some(start) = error_str.find("Failed to deserialize") {
-            if let Some(end) = error_str[start..].find("at line") {
-                return Some(error_str[start..start + end].trim().to_string());
-            }
-        }
-    }
-    
-    // Check for other common validation patterns
-    if error_str.contains("invalid") || error_str.contains("required") {
-        // Try to extract a meaningful snippet
-        let words: Vec<&str> = error_str.split_whitespace().collect();
-        for window in words.windows(8) {
-            let phrase = window.join(" ");
-            if phrase.contains("invalid") || phrase.contains("required") || phrase.contains("missing") {
-                return Some(phrase);
-            }
-        }
-    }
-    
-    None
 }
