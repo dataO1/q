@@ -2,7 +2,7 @@
 - fine tune which models to use for which tasks.
 
 # TUI
-- how to handle corrections after task triggered?
+- how to handle corrections after task triggered? like queued messages
 - how to handle interruptions after task has triggered? (agents, RAG and history must be stateless, until the very end of the execution?).
 -
 

@@ -1,14 +1,28 @@
-//! UI Components for the ACP TUI application
+//! TUIRealm Components for the ACP TUI application
 //!
-//! This module contains all UI components following React/Elm-style architecture
-//! with message-driven state transitions.
+//! This module contains all UI components built with TUIRealm's Elm-style architecture.
 
-pub mod status_line;
-pub mod timeline;
-pub mod hitl_queue;
-pub mod hitl_review;
+pub mod realm;
 
-pub use status_line::{StatusLine, StatusLineMessage, StatusMessage, StatusSeverity};
-pub use timeline::{TimelineComponent, TimelineMessage};
-pub use hitl_queue::{HitlQueueComponent, HitlQueueMessage};
-pub use hitl_review::{HitlReviewComponent, HitlReviewMessage, ReviewMode};
+// Re-export all TUIRealm components
+pub use realm::{
+    TimelineRealmComponent, QueryInputRealmComponent, StatusLineRealmComponent,
+    HitlReviewRealmComponent, HitlQueueRealmComponent,
+};
+
+// Legacy types for compatibility
+use chrono::{DateTime, Utc};
+use crate::message::StatusSeverity;
+
+/// A status message to display
+#[derive(Debug, Clone)]
+pub struct StatusMessage {
+    /// The severity level of this message
+    pub severity: StatusSeverity,
+    /// The message text to display
+    pub message: String,
+    /// When this message was created
+    pub timestamp: DateTime<Utc>,
+    /// Optional error code for programmatic handling
+    pub error_code: Option<String>,
+}

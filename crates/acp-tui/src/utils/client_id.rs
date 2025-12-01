@@ -5,7 +5,6 @@
 
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 
 /// Generate a deterministic client ID for this machine
 /// 
@@ -74,8 +73,8 @@ fn get_primary_mac_address() -> Option<String> {
             tracing::warn!("No MAC address found");
             None
         }
-        Err(e) => {
-            tracing::warn!(error = %e, "Failed to get MAC address");
+        Err(_e) => {
+            tracing::warn!("Failed to get MAC address");
             None
         }
     }
@@ -89,7 +88,7 @@ fn get_hostname() -> Option<String> {
             std::process::Command::new("hostname")
                 .output()
                 .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-                .map_err(|e| std::env::VarError::NotPresent)
+                .map_err(|_e| std::env::VarError::NotPresent)
         }) {
         Ok(hostname) if !hostname.is_empty() => {
             tracing::trace!(hostname = %hostname, "Found hostname");

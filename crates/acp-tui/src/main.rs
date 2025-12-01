@@ -4,13 +4,14 @@
 //! with ACP servers. Features include real-time orchestration visualization, live
 //! status updates via WebSocket, and a React-like component architecture.
 
-mod app;
+mod application;
 mod client;
 mod components;
 mod config;
 mod error;
-mod layout_manager;
+mod message;
 mod models;
+mod services;
 mod utils;
 mod websocket;
 
@@ -77,9 +78,11 @@ async fn main() -> Result<()> {
     // Test connectivity to ACP server
     test_connectivity(&config).await?;
 
-    // Initialize and run the application
-    let mut app = app::App::new(config).await?;
-    app.run().await?;
+    // Initialize and run the Elm-based application
+    let mut app = application::Application::new(config).await?;
+    let result = app.run().await;
+    app.cleanup()?;
+    result?;
 
     info!("ACP TUI client shutting down");
     Ok(())

@@ -4,7 +4,7 @@
 
 use anyhow::{Context, Result};
 use std::time::Duration;
-use tracing::{debug, instrument};
+use tracing::instrument;
 
 // Include the generated API client
 include!(concat!(env!("OUT_DIR"), "/acp_client.rs"));
