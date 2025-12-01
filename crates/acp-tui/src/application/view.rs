@@ -17,8 +17,8 @@ pub fn render_app(
     let area = frame.area();
     
     match model.layout_mode {
-        LayoutMode::Normal => render_normal_layout(app, frame, area),
-        LayoutMode::HitlReview => render_hitl_layout(app, frame, area),
+        LayoutMode::Normal => render_normal_layout(model, app, frame, area),
+        LayoutMode::HitlReview => render_hitl_layout(model, app, frame, area),
     }
     
     // Render overlay components
@@ -34,6 +34,7 @@ pub fn render_app(
 
 /// Render normal layout: Timeline + QueryInput + StatusLine
 fn render_normal_layout(
+    model: &AppModel,
     app: &mut Application<ComponentId, crate::message::AppMsg, crate::message::NoUserEvent>,
     frame: &mut Frame,
     area: Rect,
@@ -47,13 +48,21 @@ fn render_normal_layout(
         ])
         .split(area);
     
-    app.view(&ComponentId::Timeline, frame, chunks[0]);
-    app.view(&ComponentId::QueryInput, frame, chunks[1]);
-    app.view(&ComponentId::StatusLine, frame, chunks[2]);
+    // Only render components that are dirty (smart updates)
+    if model.component_dirty_flags.timeline {
+        app.view(&ComponentId::Timeline, frame, chunks[0]);
+    }
+    if model.component_dirty_flags.query_input {
+        app.view(&ComponentId::QueryInput, frame, chunks[1]);
+    }
+    if model.component_dirty_flags.status_line {
+        app.view(&ComponentId::StatusLine, frame, chunks[2]);
+    }
 }
 
 /// Render HITL review layout: HitlQueue + Timeline (smaller) + StatusLine
 fn render_hitl_layout(
+    model: &AppModel,
     app: &mut Application<ComponentId, crate::message::AppMsg, crate::message::NoUserEvent>,
     frame: &mut Frame,
     area: Rect,
@@ -74,9 +83,16 @@ fn render_hitl_layout(
         ])
         .split(main_chunks[1]);
     
-    app.view(&ComponentId::HitlQueue, frame, main_chunks[0]);
-    app.view(&ComponentId::Timeline, frame, main_area_chunks[0]);
-    app.view(&ComponentId::StatusLine, frame, main_area_chunks[1]);
+    // Only render components that are dirty (smart updates)
+    if model.component_dirty_flags.hitl_queue {
+        app.view(&ComponentId::HitlQueue, frame, main_chunks[0]);
+    }
+    if model.component_dirty_flags.timeline {
+        app.view(&ComponentId::Timeline, frame, main_area_chunks[0]);
+    }
+    if model.component_dirty_flags.status_line {
+        app.view(&ComponentId::StatusLine, frame, main_area_chunks[1]);
+    }
 }
 
 /// Render help overlay

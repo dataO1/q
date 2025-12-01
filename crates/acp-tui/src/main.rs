@@ -13,7 +13,6 @@ mod message;
 mod models;
 mod services;
 mod utils;
-mod websocket;
 
 use anyhow::{Context, Result};
 use clap::{Arg, Command};
@@ -21,7 +20,6 @@ use config::Config;
 use tracing::{info, warn};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use tracing_appender::{non_blocking, rolling};
-use std::path::Path;
 
 #[tokio::main]
 async fn main() -> Result<()> {

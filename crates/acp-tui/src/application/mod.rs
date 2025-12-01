@@ -106,8 +106,8 @@ impl Application {
         let query_executor = QueryExecutor::new(api_service.clone(), sender.clone());
         let websocket_manager = WebSocketManager::new(config.server_url.clone(), sender.clone());
         
-        // Animation timer
-        let animation_timer = interval(Duration::from_millis(100));
+        // Animation timer - configurable rate for smooth animations when needed
+        let animation_timer = interval(Duration::from_millis(config.ui.animation_interval_ms));
         
         info!("Application initialized successfully");
         
@@ -121,6 +121,7 @@ impl Application {
             query_executor,
             websocket_manager,
             animation_timer,
+            needs_render: true, // Initial render is needed
         })
     }
     
@@ -134,67 +135,92 @@ impl Application {
             warn!("Failed to connect WebSocket: {}", e);
         }
         
-        // Set up signal handling for graceful shutdown
-        #[cfg(unix)]
-        let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())
-            .context("Failed to set up SIGTERM handler")?;
-        #[cfg(unix)]
-        let mut sigint = signal::unix::signal(signal::unix::SignalKind::interrupt())
-            .context("Failed to set up SIGINT handler")?;
+        // Set up signal handling for graceful shutdown  
+        let ctrl_c = signal::ctrl_c();
+        tokio::pin!(ctrl_c);
 
-        loop {
+        'main_loop: loop {
             tokio::select! {
-                // Handle UI events through TUIRealm
-                _ = tokio::time::sleep(Duration::from_millis(20)) => {
-                    // Poll TUIRealm for UI messages
+                // Handle UI events through TUIRealm with adaptive polling
+                _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                    // Use UpTo strategy for more efficient polling
                     if let Ok(messages) = self.ui_app.tick(PollStrategy::Once) {
                         for msg in messages {
                             if self.handle_message(msg).await? {
-                                return self.shutdown().await;
+                                break 'main_loop;
                             }
                         }
                     }
                 },
                 
-                // Handle internal messages
+                // Handle internal messages with batching
                 msg = self.receiver.recv() => {
                     if let Some(msg) = msg {
-                        if self.handle_message(msg).await? {
-                            return self.shutdown().await;
+                        // Collect additional messages if available (batching)
+                        let mut messages = vec![msg];
+                        while let Ok(additional_msg) = self.receiver.try_recv() {
+                            messages.push(additional_msg);
+                            // Limit batch size to prevent blocking
+                            if messages.len() >= 10 {
+                                break;
+                            }
+                        }
+                        
+                        // Process all batched messages
+                        for batched_msg in messages {
+                            if self.handle_message(batched_msg).await? {
+                                break 'main_loop;
+                            }
                         }
                     }
                 },
                 
-                // Animation timer
+                // Animation timer - only send tick if animations are active
                 _ = self.animation_timer.tick() => {
-                    let _ = self.sender.send(AppMsg::Tick);
+                    // Check if we have any active animations before sending tick
+                    if self.has_active_animations() {
+                        let _ = self.sender.send(AppMsg::Tick);
+                    }
                 },
                 
-                // Handle SIGTERM (graceful shutdown)
-                #[cfg(unix)]
-                _ = sigterm.recv() => {
-                    info!("Received SIGTERM, initiating graceful shutdown");
-                    return self.shutdown().await;
-                },
-                
-                // Handle SIGINT (Ctrl+C)
-                #[cfg(unix)]
-                _ = sigint.recv() => {
-                    info!("Received SIGINT, initiating graceful shutdown");
-                    return self.shutdown().await;
-                },
-                
-                // Handle Ctrl+C on Windows
-                #[cfg(windows)]
-                _ = signal::ctrl_c() => {
+                // Handle Ctrl+C (cross-platform)
+                _ = &mut ctrl_c => {
                     info!("Received Ctrl+C, initiating graceful shutdown");
-                    return self.shutdown().await;
-                },
+                    break 'main_loop;
+                }
             }
             
-            // Render the UI
-            self.render();
+            // Only render the UI if something has changed
+            if self.needs_render || self.model.component_dirty_flags.any_dirty() {
+                self.render();
+                self.needs_render = false;
+                // Clear dirty flags after rendering
+                self.model.component_dirty_flags.clear_all();
+            }
         }
+        
+        // Shutdown sequence - called after main loop exits
+        info!("Initiating graceful shutdown");
+        
+        // Disconnect WebSocket
+        if let Err(e) = self.websocket_manager.disconnect().await {
+            warn!("Error during WebSocket disconnection: {}", e);
+        }
+        
+        // Wait a brief moment for any final operations
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        
+        // Restore terminal
+        if let Err(e) = disable_raw_mode() {
+            error!("Failed to disable raw mode: {}", e);
+        }
+        
+        if let Err(e) = execute!(io::stdout(), LeaveAlternateScreen) {
+            error!("Failed to leave alternate screen: {}", e);
+        }
+        
+        info!("Graceful shutdown complete");
+        Ok(())
     }
     
     /// Handle a message using the Elm update pattern
@@ -209,6 +235,9 @@ impl Application {
         
         // Update model with Elm update function
         let effects = update_app(&mut self.model, msg)?;
+        
+        // Mark that we need to render since the model has changed
+        self.needs_render = true;
         
         // Handle any effects generated by the update
         for effect in effects {
@@ -317,29 +346,11 @@ impl Application {
         Ok(())
     }
     
-    /// Graceful shutdown of the application
-    async fn shutdown(mut self) -> Result<()> {
-        info!("Initiating graceful shutdown");
-        
-        // Disconnect WebSocket
-        if let Err(e) = self.websocket_manager.disconnect().await {
-            warn!("Error during WebSocket disconnection: {}", e);
-        }
-        
-        // Wait a brief moment for any final operations
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        
-        // Restore terminal
-        if let Err(e) = disable_raw_mode() {
-            error!("Failed to disable raw mode: {}", e);
-        }
-        
-        if let Err(e) = execute!(io::stdout(), LeaveAlternateScreen) {
-            error!("Failed to leave alternate screen: {}", e);
-        }
-        
-        info!("Graceful shutdown complete");
-        Ok(())
+    
+    /// Check if there are any active animations that need updates
+    fn has_active_animations(&self) -> bool {
+        // Check if timeline has active animations
+        self.model.timeline_tree.get_stats().running > 0
     }
 }
 

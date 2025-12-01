@@ -24,39 +24,48 @@ pub fn update_app(model: &mut AppModel, msg: AppMsg) -> Result<Vec<AppMsg>> {
         
         AppMsg::TerminalResized(width, height) => {
             debug!("Terminal resized to {}x{}", width, height);
-            // Could trigger re-layout if needed
+            // Terminal resize affects all components
+            model.component_dirty_flags.mark_all_dirty();
         }
         
         AppMsg::Tick => {
             model.tick_animation();
+            // Animation tick only affects timeline
+            model.component_dirty_flags.timeline = true;
         }
         
         // ============== Connection Events ==============
         AppMsg::StartConnection => {
             model.set_connection_state(crate::components::realm::status_line::ConnectionState::Connecting);
             model.set_status_message(StatusSeverity::Info, "Connecting to ACP server...".to_string());
+            // Connection events affect status line
+            model.component_dirty_flags.status_line = true;
         }
         
         AppMsg::SubscriptionCreated(subscription_id) => {
             info!("Subscription created: {}", subscription_id);
             model.set_status_message(StatusSeverity::Info, 
                 format!("Connected (subscription: {})", subscription_id));
+            model.component_dirty_flags.status_line = true;
         }
         
         AppMsg::SubscriptionResumed(subscription_id) => {
             info!("Subscription resumed: {}", subscription_id);
             model.set_status_message(StatusSeverity::Info, 
                 format!("Reconnected (subscription: {})", subscription_id));
+            model.component_dirty_flags.status_line = true;
         }
         
         AppMsg::WebSocketConnected => {
             model.set_connection_state(crate::components::realm::status_line::ConnectionState::Connected);
             model.set_status_message(StatusSeverity::Info, "WebSocket connected".to_string());
+            model.component_dirty_flags.status_line = true;
         }
         
         AppMsg::WebSocketDisconnected => {
             model.set_connection_state(crate::components::realm::status_line::ConnectionState::Disconnected);
             model.set_status_message(StatusSeverity::Warning, "WebSocket disconnected".to_string());
+            model.component_dirty_flags.status_line = true;
         }
         
         AppMsg::ConnectionFailed(error) => {
@@ -65,11 +74,14 @@ pub fn update_app(model: &mut AppModel, msg: AppMsg) -> Result<Vec<AppMsg>> {
             });
             model.set_status_message(StatusSeverity::Error, 
                 format!("Connection failed: {}", error));
+            model.component_dirty_flags.status_line = true;
         }
         
         // ============== Query Events ==============
         AppMsg::QueryInputChanged(text) => {
             model.set_query(text);
+            // Query input changes affect query input component
+            model.component_dirty_flags.query_input = true;
         }
         
         AppMsg::QuerySubmitted => {
@@ -102,6 +114,9 @@ pub fn update_app(model: &mut AppModel, msg: AppMsg) -> Result<Vec<AppMsg>> {
         // ============== Timeline Events ==============
         AppMsg::StatusEventReceived(event) => {
             handle_status_event(model, event)?;
+            // Status events affect timeline and status line
+            model.component_dirty_flags.timeline = true;
+            model.component_dirty_flags.status_line = true;
         }
         
         AppMsg::TimelineScrollUp => {

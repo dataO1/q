@@ -24,8 +24,11 @@ impl PartialEq for HitlApprovalRequest {
 
 impl PartialEq for HitlDecisionRequest {
     fn eq(&self, other: &Self) -> bool {
-        // Compare based on decision type and content
-        std::mem::discriminant(self) == std::mem::discriminant(other)
+        // Compare based on all fields since this is a struct, not an enum
+        self.decision == other.decision 
+            && self.modified_content == other.modified_content 
+            && self.request_id == other.request_id
+            && self.reason == other.reason
     }
 }
 

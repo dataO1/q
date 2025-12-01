@@ -476,7 +476,7 @@ impl TimelineTree {
 }
 
 /// Statistics about the tree state
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct TreeStats {
     /// Number of running nodes
     pub running: usize,
