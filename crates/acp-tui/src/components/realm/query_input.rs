@@ -11,7 +11,7 @@ use ratatui::{
 };
 use tuirealm::{
     command::{Cmd, CmdResult},
-    event::{Key, KeyEvent as TuiKeyEvent},
+    event::{Key, KeyEvent as TuiKeyEvent, KeyModifiers as TuiKeyModifiers},
     Component, Event, MockComponent, State, StateValue, AttrValue, Attribute,
 };
 use tui_textarea::TextArea;
@@ -106,8 +106,8 @@ impl Component<AppMsg, NoUserEvent> for QueryInputRealmComponent {
                             None
                         },
                         
-                        // Submit on Tab
-                        TuiKeyEvent { code: Key::Tab, .. } => {
+                        // Submit on Enter (removed Tab to allow focus navigation)
+                        TuiKeyEvent { code: Key::Enter, modifiers } if modifiers.intersects(TuiKeyModifiers::CONTROL) => {
                             let query = self.get_query();
                             if !query.trim().is_empty() {
                                 Some(AppMsg::QuerySubmitted)

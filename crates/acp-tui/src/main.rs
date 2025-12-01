@@ -19,7 +19,7 @@ use clap::{Arg, Command};
 use config::Config;
 use tracing::{info, warn};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-use tracing_appender::{non_blocking, rolling};
+use tracing_appender::non_blocking;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -87,23 +87,33 @@ async fn main() -> Result<()> {
 }
 
 fn init_tracing(log_file: &str, log_level: &str) -> Result<()> {
-    // Set up tracing with environment filter, fallback to command line or default
+    // Create logs directory
+    std::fs::create_dir_all("./logs")
+        .context("Failed to create logs directory")?;
+    
+    // Generate timestamped log file name for this session
+    let timestamp = chrono::Utc::now().format("%Y-%m-%d-%H%M%S");
+    let log_file_path = format!("./logs/acp-tui-{}.log", timestamp);
+    
+    // Set up enhanced tracing with environment filter
+    // Default to trace level for comprehensive debugging
     let filter = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new(log_level))
-        .or_else(|_| EnvFilter::try_new("info"))
+        .or_else(|_| EnvFilter::try_new("trace"))  // Default to trace for debugging
         .context("Failed to create tracing filter")?;
 
-    // Create file appender for daily rolling logs
-    let file_appender = rolling::daily(
-        std::path::Path::new(log_file).parent().unwrap_or(std::path::Path::new(".")),
-        std::path::Path::new(log_file).file_stem().unwrap_or(std::ffi::OsStr::new("acp-tui"))
-    );
+    // Create timestamped file appender (each run gets its own file)
+    let file_appender = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(true)
+        .open(&log_file_path)
+        .context("Failed to create log file")?;
     
     // Use non-blocking writer to prevent I/O from affecting TUI performance
     let (non_blocking_appender, _guard) = non_blocking(file_appender);
     
     // Keep the guard alive for the duration of the program
-    // Note: In a real application, you'd want to store this guard properly
     std::mem::forget(_guard);
 
     tracing_subscriber::registry()
@@ -113,12 +123,15 @@ fn init_tracing(log_file: &str, log_level: &str) -> Result<()> {
                 .with_thread_ids(true)
                 .with_file(true)
                 .with_line_number(true)
-                .with_ansi(false)  // Disable ANSI colors for clean file output
+                .with_span_events(fmt::format::FmtSpan::FULL)  // Log span enter/exit
                 .with_writer(non_blocking_appender),
         )
         .with(filter)
         .try_init()
         .context("Failed to initialize tracing")?;
+
+    info!(log_file = %log_file_path, "Tracing initialized with comprehensive logging");
+    info!("All events will be logged to {} for debugging", log_file_path);
 
     Ok(())
 }

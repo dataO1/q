@@ -1,7 +1,0 @@
-2025-12-01T12:19:17.202591Z  INFO ThreadId(01) acp_tui: crates/acp-tui/src/main.rs:74: Starting ACP TUI client
-2025-12-01T12:19:17.202655Z  INFO ThreadId(01) acp_tui: crates/acp-tui/src/main.rs:75: Server: http://localhost:9999
-2025-12-01T12:19:17.202665Z  INFO ThreadId(01) acp_tui: crates/acp-tui/src/main.rs:126: Testing connectivity to ACP server...
-2025-12-01T12:19:17.260082Z  WARN ThreadId(01) acp_tui: crates/acp-tui/src/main.rs:137: ⚠ Could not connect to ACP server: Health check failed
-2025-12-01T12:19:17.260133Z  WARN ThreadId(01) acp_tui: crates/acp-tui/src/main.rs:138:   Make sure the ACP server is running at: http://localhost:9999
-2025-12-01T12:19:17.260142Z  WARN ThreadId(01) acp_tui: crates/acp-tui/src/main.rs:139:   Starting in offline mode...
-2025-12-01T12:19:17.260174Z  INFO ThreadId(01) new: acp_tui::app: crates/acp-tui/src/app.rs:215: Initializing ACP TUI application

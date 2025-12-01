@@ -50,7 +50,7 @@ impl ComponentDirtyFlags {
 }
 
 /// Core application state following Elm's Model pattern
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AppModel {
     /// Current client ID
     pub client_id: String,
