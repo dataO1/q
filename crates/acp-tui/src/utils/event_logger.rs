@@ -46,7 +46,6 @@ impl EventLogger {
     pub fn log_state_change(before: &AppModel, after: &AppModel, trigger: &str) {
         let state_changed = before.focused_component != after.focused_component
             || before.layout_mode != after.layout_mode
-            || before.query_text != after.query_text
             || before.show_help != after.show_help;
 
         if state_changed {
@@ -57,7 +56,6 @@ impl EventLogger {
                 focused_after = ?after.focused_component,
                 layout_before = ?before.layout_mode,
                 layout_after = ?after.layout_mode,
-                query_changed = (before.query_text != after.query_text),
                 help_toggled = (before.show_help != after.show_help),
                 "State changed"
             );
@@ -101,7 +99,7 @@ impl EventLogger {
 
         // Log specific message details based on type
         match msg {
-            UserEvent::QuerySubmitted => {
+            UserEvent::QuerySubmitted(query) => {
                 info!(event = "query_submitted", "Query execution started");
             }
             UserEvent::FocusNext | UserEvent::FocusPrevious => {

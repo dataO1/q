@@ -256,22 +256,22 @@ impl Component<UserEvent, APIEvent> for EventTreeRealmComponent {
                     match keyevent {
                         TuiKeyEvent { code: Key::Up, .. } => {
                             self.scroll_up();
-                            Some(UserEvent::TimelineScrollUp)
+                            None
                         }
                         TuiKeyEvent { code: Key::Down, .. } => {
                             self.scroll_down();
-                            Some(UserEvent::TimelineScrollDown)
+                            None
                         }
                         TuiKeyEvent { code: Key::PageUp, .. } => {
                             self.page_up();
-                            Some(UserEvent::TimelineScrollUp)
+                            None
                         }
                         TuiKeyEvent { code: Key::PageDown, .. } => {
                             self.page_down();
-                            Some(UserEvent::TimelineScrollDown)
+                            None
                         }
                         TuiKeyEvent { code: Key::Char('c'), .. } => {
-                            Some(UserEvent::TimelineClear)
+                            None
                         }
                         TuiKeyEvent { code: Key::Tab, .. } => Some(UserEvent::FocusNext),
                         TuiKeyEvent { code: Key::Char('q'), .. }

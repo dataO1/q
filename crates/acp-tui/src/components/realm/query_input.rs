@@ -101,7 +101,7 @@ impl Component<UserEvent, APIEvent> for QueryInputRealmComponent {
                             if modifiers.is_empty() {
                                 let query = self.get_query();
                                 if !query.trim().is_empty() {
-                                    Some(UserEvent::QuerySubmitted)
+                                    Some(UserEvent::QuerySubmitted(self.get_query()))
                                 } else {
                                     None
                                 }
@@ -140,8 +140,7 @@ impl Component<UserEvent, APIEvent> for QueryInputRealmComponent {
 
                             self.textarea.input(crossterm_event);
                             self.show_placeholder = self.textarea.lines().iter().all(|line| line.is_empty());
-                            let new_text = self.get_query();
-                                Some(UserEvent::QueryInputChanged(new_text))
+                            None
                         }
                     }
                 } else {

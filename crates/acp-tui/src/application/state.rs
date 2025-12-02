@@ -31,26 +31,14 @@ pub struct AppModel {
     /// Whether help overlay is visible
     pub show_help: bool,
 
-    /// Timeline data
-    pub timeline_tree: TimelineTree,
-
     /// HITL requests queue
     pub hitl_requests: Vec<HitlApprovalRequest>,
 
     /// Currently selected HITL request for review
     pub current_hitl_request: Option<HitlApprovalRequest>,
 
-    /// Query input text
-    pub query_text: String,
-
     /// Last execution timestamp
     pub last_execution_time: Option<DateTime<Utc>>,
-
-    /// Scroll position in timeline
-    pub timeline_scroll: usize,
-
-    /// Animation frame counter
-    pub animation_frame: usize,
 }
 
 impl AppModel {
@@ -64,13 +52,9 @@ impl AppModel {
             focused_component: ComponentId::QueryInput, // Start with input focused
             layout_mode: LayoutMode::Normal,
             show_help: false,
-            timeline_tree: TimelineTree::new(),
             hitl_requests: Vec::new(),
             current_hitl_request: None,
-            query_text: String::new(),
             last_execution_time: None,
-            timeline_scroll: 0,
-            animation_frame: 0,
         }
     }
 
@@ -165,38 +149,6 @@ impl AppModel {
             .iter()
             .position(|r| r.request_id == request_id)
             .map(|index| self.hitl_requests.remove(index))
-    }
-
-    /// Clear query text
-    pub fn clear_query(&mut self) {
-        self.query_text.clear();
-    }
-
-    /// Set query text
-    pub fn set_query(&mut self, text: String) {
-        self.query_text = text;
-    }
-
-    /// Get scroll info for timeline
-    pub fn get_scroll_info(&self) -> (usize, usize) {
-        let total_lines = self.timeline_tree.render_lines().len();
-        (self.timeline_scroll, total_lines)
-    }
-
-    /// Scroll timeline up
-    pub fn scroll_timeline_up(&mut self) {
-        self.timeline_scroll = self.timeline_scroll.saturating_sub(1);
-    }
-
-    /// Scroll timeline down
-    pub fn scroll_timeline_down(&mut self) {
-        self.timeline_scroll = self.timeline_scroll.saturating_add(1);
-    }
-
-    /// Advance animation frame
-    pub fn tick_animation(&mut self) {
-        self.animation_frame = self.animation_frame.wrapping_add(1);
-        self.timeline_tree.advance_animations();
     }
 
     /// Toggle help visibility

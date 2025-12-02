@@ -6,7 +6,7 @@ pub mod realm;
 
 // Re-export all TUIRealm components
 pub use realm::{
-    TimelineRealmComponent, QueryInputRealmComponent, StatusLineRealmComponent,
+    QueryInputRealmComponent, StatusLineRealmComponent,
     HitlReviewRealmComponent, HitlQueueRealmComponent,
 };
 

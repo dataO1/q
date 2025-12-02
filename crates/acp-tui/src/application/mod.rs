@@ -22,7 +22,7 @@ use tuirealm::{
 
 use crate::{
     client::{AcpClient, EventSource, EventType, StatusEvent}, components::realm::{
-        event_tree::EventTreeRealmComponent, help::HelpRealmComponent, root::RootRealmComponent, status_line::ConnectionState, HitlQueueRealmComponent, HitlReviewRealmComponent, QueryInputRealmComponent, StatusLineRealmComponent, TimelineRealmComponent
+        event_tree::EventTreeRealmComponent, help::HelpRealmComponent, root::RootRealmComponent, status_line::ConnectionState, HitlQueueRealmComponent, HitlReviewRealmComponent, QueryInputRealmComponent, StatusLineRealmComponent
     }, config::Config, log_state_change, message::{APIEvent, ComponentId,  StatusSeverity, UserEvent}, services::{ApiService, QueryExecutor, WebSocketManager}, time_operation, utils::{generate_client_id, EventLogger}
 };
 
@@ -181,35 +181,40 @@ impl Application {
 
         // Set up signal handling for graceful shutdown
         let mut ctrl_c = Box::pin(signal::ctrl_c());
+        let mut tick_interval = tokio::time::interval(Duration::from_millis(50)); // 10 FPS
+        tick_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         // Force initial render to show the UI immediately
         self.render();
 
         'main_loop: loop {
-            // Check for Ctrl+C (non-blocking)
-            if ctrl_c.as_mut().now_or_never().is_some() {
-                info!("Received Ctrl+C, initiating graceful shutdown");
-                break 'main_loop;
-            }
-
-            if self.animation_timer.tick().now_or_never().is_some() {
-                // Emit tick event for animations
-                if self.handle_event(UserEvent::Tick).await? {
-                    break 'main_loop;
-                }
-            }
-
-            // Block waiting for events with timeout
-            match self.app.tick(PollStrategy::UpTo(100)) {
-                Ok(events) if !events.is_empty() => {
-                    for event in events {
-                        if self.handle_event(event).await?{
-                            break 'main_loop;
+            tokio::select! {
+                // Fast terminal event polling
+                _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                    match self.app.tick(PollStrategy::Once) {
+                        Ok(events) if !events.is_empty() => {
+                            for event in events {
+                                if self.handle_event(event).await? {
+                                    break 'main_loop;
+                                }
+                            }
+                            self.render();
                         }
+                        Ok(_) => {}
+                        Err(e) => error!("Tick error: {}", e),
                     }
                 }
-                Ok(_) => {} // Timeout, no messages
-                Err(e) => {
-                    error!("Tick error: {}", e);
+
+                // Animation tick (also drains WebSocket via component)
+                _ = tick_interval.tick() => {
+                    if self.handle_event(UserEvent::Tick).await? {
+                        break 'main_loop;
+                    }
+                    self.render();
+                }
+
+                _ = ctrl_c.as_mut() => {
+                    info!("Received Ctrl+C");
+                    break 'main_loop;
                 }
             }
 
@@ -300,25 +305,8 @@ impl Application {
     /// Sync UI components with model state with comprehensive logging
     #[instrument(level = "debug", skip(self), fields(
         focused_component = ?self.model.focused_component,
-        query_length = self.model.query_text.len()
     ))]
     async fn sync_ui_with_model(&mut self) -> Result<()> {
-        // Update query input text
-        let query_sync_result = self.app.attr(
-            &ComponentId::QueryInput,
-            tuirealm::Attribute::Text,
-            tuirealm::AttrValue::String(self.model.query_text.clone()),
-        );
-
-        let sync_success = query_sync_result.is_ok();
-        let error_msg = query_sync_result.err().map(|e| e.to_string());
-        EventLogger::log_component_sync(
-            &ComponentId::QueryInput,
-            "text",
-            sync_success,
-            error_msg.as_deref(),
-        );
-
         // Get previous focus
         let previous_focus = self.app.focus().cloned().unwrap_or(ComponentId::Timeline);
 
@@ -439,7 +427,6 @@ impl Application {
     /// This is the core Update function from Elm architecture
     #[instrument(level = "debug", skip(self), fields(
         msg_type = %format!("{:?}", msg).split('(').next().unwrap_or("Unknown"),
-        query_text_len = self.model.query_text.len(),
         focused_component = ?self.model.focused_component,
     ))]
     pub async fn update(&mut self, msg: UserEvent) -> Result<()> {
@@ -453,9 +440,6 @@ impl Application {
             }
 
             UserEvent::Tick => {
-                model.tick_animation();
-                // Animation tick only affects timeline
-                //
                 let _ = self.app.attr(
                     &ComponentId::Timeline,
                     Attribute::Custom("tick"),
@@ -510,27 +494,19 @@ impl Application {
                     format!("Connection failed: {}", error));
             }
 
-            // ============== Query Events ==============
-            UserEvent::QueryInputChanged(text) => {
-                debug!(text_len = text.len(), "Query input changed");
-                model.set_query(text);
-            }
 
-            UserEvent::QuerySubmitted => {
+            UserEvent::QuerySubmitted(query) => {
                 debug!(
-                    query_text = %model.query_text,
-                    query_len = model.query_text.len(),
+                    query_text = %query,
+                    query_len = query.len(),
                     connection_state = ?model.connection_state,
                     "Processing query submission"
                 );
 
-                if !model.query_text.trim().is_empty() {
-                    let query = model.query_text.clone();
+                if !query.trim().is_empty() {
                     info!(query = %query, query_len = query.len(), "Query submitted");
                     model.last_execution_time = Some(Utc::now());
 
-                    // Clear query after submission
-                    model.clear_query();
 
                     // Trigger query execution effect
                     debug!(query = %query, "Creating QueryExecutionStarted effect");
@@ -564,28 +540,6 @@ impl Application {
                     format!("Query failed: {}", error));
             }
 
-
-            UserEvent::TimelineScrollUp => {
-                debug!("Timeline scroll up");
-                model.scroll_timeline_up();
-            }
-
-            UserEvent::TimelineScrollDown => {
-                debug!("Timeline scroll down");
-                model.scroll_timeline_down();
-            }
-
-            UserEvent::TimelineNodeToggle(node_id) => {
-                debug!(node_id = %node_id, "Timeline node toggle");
-                model.timeline_tree.toggle_expanded(&node_id);
-            }
-
-            UserEvent::TimelineClear => {
-                info!("Timeline cleared");
-                model.timeline_tree.clear();
-                model.timeline_scroll = 0;
-                model.set_status_message(StatusSeverity::Info, "Timeline cleared".to_string());
-            }
 
             // ============== HITL Events ==============
             UserEvent::HitlRequestReceived(request) => {

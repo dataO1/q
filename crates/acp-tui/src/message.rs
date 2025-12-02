@@ -182,12 +182,6 @@ pub enum UserEvent {
     FocusPrevious,
     /// Toggle help overlay
     HelpToggle,
-    /// Clear timeline
-    TimelineClear,
-    /// Scroll timeline up
-    TimelineScrollUp,
-    /// Scroll timeline down
-    TimelineScrollDown,
     /// Submit HITL decision
     HitlSubmitDecision,
     /// Cancel HITL review
@@ -209,10 +203,8 @@ pub enum UserEvent {
     ConnectionFailed(String), // error message
 
     // ============== Query Events ==============
-    /// Query input text changed
-    QueryInputChanged(String),
     /// Query was submitted for execution
-    QuerySubmitted,
+    QuerySubmitted(String),
     /// Query execution started
     QueryExecutionStarted(String), // query text
     /// Query execution completed
@@ -237,8 +229,6 @@ pub enum UserEvent {
     /// Change focus to next component
     /// Focus specific component
     FocusComponent(ComponentId),
-    /// Toggle help overlay
-    TimelineNodeToggle(String), // node_id
     // ============== Layout Events ==============
     /// Switch to normal layout (timeline + query)
     LayoutNormal,
