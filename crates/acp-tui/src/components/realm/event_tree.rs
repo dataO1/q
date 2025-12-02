@@ -57,7 +57,91 @@ impl EventTreeRealmComponent {
             tree_generation: 0,
         }
     }
+    /// Generate the full execution plan tree structure
+    fn build_execution_plan(&mut self, execution_id: &str, plan: &crate::client::types::ExecutionPlan) {
+        info!("Building execution plan with {} waves", plan.waves.len());
 
+        // ⚠️ CHECK: Does the execution root exist?
+        if self.tree.find_node(execution_id).is_none() {
+            warn!(
+                "Execution root node '{}' not found when building plan! Creating it now.",
+                execution_id
+            );
+            // Create the root if missing
+            let root = self.tree.add_root(
+                execution_id.to_string(),
+                format!("Execution: {}", execution_id),
+            );
+            root.start();
+        }
+
+        for wave_info in &plan.waves {
+            let wave_id = format!("{}/wave-{}", execution_id, wave_info.wave_index);
+            let wave_name = format!("Wave {} ({} tasks)", wave_info.wave_index, wave_info.tasks.len());
+
+            info!("Adding wave node: {} -> {}", execution_id, wave_id);
+
+            // Add wave as child of execution
+            self.tree.add_child(
+                execution_id.to_string(),
+                wave_id.clone(),
+                wave_name,
+            );
+
+            // Verify wave was added
+            if let Some(wave_node) = self.tree.find_node_mut(&wave_id) {
+                info!("✓ Wave node created: {}", wave_id);
+                wave_node.status = crate::models::tree::NodeStatus::Pending;
+            } else {
+                warn!("✗ Failed to create wave node: {}", wave_id);
+                continue;
+            }
+
+            // Add tasks under the wave
+            for task_info in &wave_info.tasks {
+                let task_id = format!("{}/{}", wave_id, task_info.task_id);
+                let task_name = format!(
+                    "{} - {} ({})",
+                    task_info.task_id,
+                    task_info.agent_type,
+                    task_info.description
+                );
+
+                info!("Adding task node: {} -> {}", wave_id, task_id);
+
+                self.tree.add_child(
+                    wave_id.clone(),
+                    task_id.clone(),
+                    task_name,
+                );
+
+                // Set task to pending
+                if let Some(task_node) = self.tree.find_node_mut(&task_id) {
+                    info!("✓ Task node created: {}", task_id);
+                    task_node.status = crate::models::tree::NodeStatus::Pending;
+
+                    // Add steps under each task
+                    for (step_idx, step_name) in task_info.steps.iter().enumerate() {
+                        let step_id = format!("{}/step-{}", task_id, step_idx);
+                        self.tree.add_child(
+                            task_id.clone(),
+                            step_id.clone(),
+                            step_name.clone(),
+                        );
+
+                        // Set step to pending
+                        if let Some(step_node) = self.tree.find_node_mut(&step_id) {
+                            step_node.status = crate::models::tree::NodeStatus::Pending;
+                        }
+                    }
+                } else {
+                    warn!("✗ Failed to create task node: {}", task_id);
+                }
+            }
+        }
+
+        info!("Execution plan build complete. Tree now has {} roots", self.tree.roots.len());
+    }
     /// Handle status event and update tree - moved from Application
     pub fn handle_status_event(&mut self, event: StatusEvent) {
         // Invalidate cache since tree will change
@@ -80,16 +164,43 @@ impl EventTreeRealmComponent {
                     info!(
                         agent_id = agent_id,
                         agent_type = ?agent_type,
+                        task_id = ?task_id,
                         context_size,
                         "Agent started"
                     );
-                    self.tree.add_child(
-                        event.execution_id.clone(),
-                        agent_id.clone(),
-                        format!("{:?} Agent (ctx: {})", agent_type, context_size),
-                    );
-                    if let Some(node) = self.tree.find_node_mut(agent_id) {
-                        node.start();
+
+                    // Try to find existing task node from execution plan
+                    let mut found_task_node = false;
+                    if let Some(task_id_str) = task_id {
+                        // Search for matching task node in the tree
+                        if let Some(task_node) = self.tree.find_node_mut(task_id_str) {
+                            task_node.start();
+                            found_task_node = true;
+
+                            // Add agent as child of task
+                            self.tree.add_child(
+                                task_id_str.clone(),
+                                agent_id.clone(),
+                                format!("{:?} Agent (ctx: {})", agent_type, context_size),
+                            );
+
+                            if let Some(agent_node) = self.tree.find_node_mut(agent_id) {
+                                agent_node.start();
+                            }
+                        }
+                    }
+
+                    // Fallback: if no task node found, add under execution root
+                    if !found_task_node {
+                        self.tree.add_child(
+                            event.execution_id.clone(),
+                            agent_id.clone(),
+                            format!("{:?} Agent (ctx: {})", agent_type, context_size),
+                        );
+
+                        if let Some(node) = self.tree.find_node_mut(agent_id) {
+                            node.start();
+                        }
                     }
                 }
             }
@@ -161,6 +272,117 @@ impl EventTreeRealmComponent {
                 if let Some(root) = self.tree.find_node_mut(&event.execution_id) {
                     root.fail(Some(error.clone()));
                 }
+            }
+            EventType::PlanningStarted => {
+                info!(executionid = event.execution_id, "Planning started");
+
+                // Ensure execution root exists
+                if self.tree.find_node(&event.execution_id).is_none() {
+                    warn!("Execution root not found, creating it for planning");
+                    let root = self.tree.add_root(
+                        event.execution_id.clone(),
+                        format!("Execution: {}", event.execution_id),
+                    );
+                    root.start();
+                }
+
+                // Add planning node under execution root
+                let planning_id = format!("{}/planning", event.execution_id);
+                info!("Creating planning node: {} -> {}", event.execution_id, planning_id);
+
+                self.tree.add_child(
+                    event.execution_id.clone(),
+                    planning_id.clone(),
+                    "Planning Phase".to_string(),
+                );
+
+                if let Some(node) = self.tree.find_node_mut(&planning_id) {
+                    info!("✓ Planning node created and started");
+                    node.start();
+                } else {
+                    warn!("✗ Failed to create planning node");
+                }
+            }
+
+            EventType::PlanningCompleted { reasoning, task_count } => {
+                info!(
+                    executionid = event.execution_id,
+                    task_count = task_count,
+                    "Planning completed"
+                );
+
+                // Complete planning node
+                let planning_id = format!("{}/planning", event.execution_id);
+                if let Some(node) = self.tree.find_node_mut(&planning_id) {
+                    node.complete();
+                    // Add reasoning as a child info node
+                    let reasoning_id = format!("{}/reasoning", planning_id);
+                    self.tree.add_child(
+                        planning_id.clone(),
+                        reasoning_id.clone(),
+                        format!("Reasoning: {}", reasoning),
+                    );
+                    if let Some(reasoning_node) = self.tree.find_node_mut(&reasoning_id) {
+                        reasoning_node.status = crate::models::tree::NodeStatus::Completed;
+                    }
+                }
+            }
+
+            EventType::WaveStarted { task_count, task_ids, wave_index } => {
+                info!(
+                    executionid = event.execution_id,
+                    wave_index = wave_index,
+                    task_count = task_count,
+                    "Wave started"
+                );
+
+                // Find and start the wave node
+                let wave_id = format!("{}/wave-{}", event.execution_id, wave_index);
+                if let Some(wave_node) = self.tree.find_node_mut(&wave_id) {
+                    wave_node.start();
+
+                    // Start all task nodes in this wave
+                    for task_id in task_ids {
+                        let full_task_id = format!("{}/{}", wave_id, task_id);
+                        if let Some(task_node) = self.tree.find_node_mut(&full_task_id) {
+                            task_node.start();
+                        }
+                    }
+                }
+            }
+
+            EventType::WaveCompleted { failure_count, success_count, wave_index } => {
+                info!(
+                    executionid = event.execution_id,
+                    wave_index = wave_index,
+                    success_count = success_count,
+                    failure_count = failure_count,
+                    "Wave completed"
+                );
+
+                // Complete or fail the wave node based on results
+                let wave_id = format!("{}/wave-{}", event.execution_id, wave_index);
+                if let Some(wave_node) = self.tree.find_node_mut(&wave_id) {
+                    if *failure_count > 0 {
+                        wave_node.fail(Some(format!(
+                            "{} task(s) failed, {} succeeded",
+                            failure_count, success_count
+                        )));
+                    } else {
+                        wave_node.complete();
+                    }
+                }
+            }
+
+            EventType::ExecutionPlanReady { plan } => {
+                info!(
+                    executionid = event.execution_id,
+                    wave_count = plan.waves.len(),
+                    "ExecutionPlanReady - building tree structure"
+                );
+
+                // Build the complete execution plan tree
+                self.build_execution_plan(&event.execution_id, plan);
             }
             _ => {
                 debug!(event_type = ?event.event, "Unhandled event type");

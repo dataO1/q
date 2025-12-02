@@ -1,1 +1,0 @@
-with open('output.bin', 'wb') as f:\n    f.write(b'Hello, binary world!')
