@@ -11,9 +11,10 @@ use ratatui::{
 use tuirealm::{
     command::{Cmd, CmdResult},
     Component, Event, MockComponent, State, StateValue, AttrValue, Attribute,
+    props::{PropPayload, PropValue},
 };
 
-use crate::message::{AppMsg, NoUserEvent, ComponentMsg};
+use crate::message::{AppMsg, NoUserEvent, ComponentMsg, StatusSeverity};
 use crate::components::{StatusMessage};
 
 /// Connection state for display
@@ -190,6 +191,34 @@ impl MockComponent for StatusLineRealmComponent {
             Attribute::Focus => {
                 if let AttrValue::Flag(focused) = value {
                     self.focused = focused;
+                }
+            }
+            Attribute::Custom(name) => {
+                if name == "connection_state" {
+                    // Extract connection state from the string
+                    if let AttrValue::Payload(PropPayload::One(PropValue::Str(ref state_str))) = value {
+                        match state_str.as_str() {
+                            "Connected" => self.connection_state = ConnectionState::Connected,
+                            "Disconnected" => self.connection_state = ConnectionState::Disconnected,
+                            _ => {} // Unknown state, keep current
+                        }
+                    }
+                }
+                if name == "status_message" {
+                    // Extract status message from string
+                    if let AttrValue::Payload(PropPayload::One(PropValue::Str(ref msg_text))) = value {
+                        if msg_text.is_empty() {
+                            self.current_message = None;
+                        } else {
+                            // Create a basic status message
+                            self.current_message = Some(StatusMessage {
+                                severity: StatusSeverity::Info,
+                                message: msg_text.clone(),
+                                timestamp: chrono::Utc::now(),
+                                error_code: None,
+                            });
+                        }
+                    }
                 }
             }
             _ => {}

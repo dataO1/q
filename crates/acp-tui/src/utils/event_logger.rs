@@ -5,7 +5,7 @@
 
 use tracing::{debug, info, trace, warn};
 use crate::{
-    application::state::{AppModel, ComponentDirtyFlags}, 
+    application::state::{AppModel},
     message::{AppMsg, ComponentId},
 };
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -73,19 +73,11 @@ impl EventLogger {
     /// Log render decisions and performance
     pub fn log_render_decision(
         needs_render: bool,
-        dirty_flags: &ComponentDirtyFlags,
         render_time_ms: Option<u128>,
     ) {
         trace!(
             event = "render_decision",
             needs_render,
-            timeline_dirty = dirty_flags.timeline,
-            query_input_dirty = dirty_flags.query_input,
-            status_line_dirty = dirty_flags.status_line,
-            hitl_queue_dirty = dirty_flags.hitl_queue,
-            hitl_review_dirty = dirty_flags.hitl_review,
-            help_dirty = dirty_flags.help,
-            any_dirty = dirty_flags.any_dirty(),
             ?render_time_ms,
             "Render decision made"
         );
@@ -117,8 +109,8 @@ impl EventLogger {
             }
             AppMsg::StatusEventReceived(event) => {
                 info!(
-                    event = "status_event", 
-                    event_data = ?event, 
+                    event = "status_event",
+                    event_data = ?event,
                     "Status event received"
                 );
             }
@@ -266,14 +258,14 @@ macro_rules! time_operation {
         let start = std::time::Instant::now();
         let result = $code;
         let duration = start.elapsed().as_millis();
-        
+
         $crate::utils::event_logger::EventLogger::log_performance_metrics(
             $operation,
             duration,
             None,
             None,
         );
-        
+
         result
     }};
 }

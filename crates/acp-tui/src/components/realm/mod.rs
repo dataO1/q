@@ -8,6 +8,7 @@ pub mod query_input;
 pub mod status_line;
 pub mod hitl_review;
 pub mod hitl_queue;
+pub mod help;
 
 pub use timeline::TimelineRealmComponent;
 pub use query_input::QueryInputRealmComponent;

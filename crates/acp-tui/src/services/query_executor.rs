@@ -23,7 +23,7 @@ impl QueryExecutor {
     }
     
     /// Execute a query asynchronously
-    pub async fn execute_query(&self, query: String) -> Result<()> {
+    pub async fn execute_query(&self, query: String, subscription_id: String) -> Result<()> {
         if query.trim().is_empty() {
             warn!("Attempted to execute empty query");
             return Ok(());
@@ -34,7 +34,7 @@ impl QueryExecutor {
         // Send query execution started message
         let _ = self.sender.send(AppMsg::QueryExecutionStarted(query.clone()));
         
-        match self.api_service.execute_query(query.clone()).await {
+        match self.api_service.execute_query(query.clone(), subscription_id).await {
             Ok(execution_id) => {
                 info!("Query execution started with ID: {}", execution_id);
                 let _ = self.sender.send(AppMsg::QueryExecutionCompleted(execution_id));

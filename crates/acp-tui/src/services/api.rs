@@ -55,12 +55,16 @@ impl ApiService {
     }
     
     /// Execute a query through the ACP API
-    pub async fn execute_query(&self, query: String) -> Result<String> {
+    pub async fn execute_query(&self, query: String, subscription_id: String) -> Result<String> {
         info!("Executing query: {}", query);
         
         let query_clone = query.clone();
+        let subscription_id_clone = subscription_id.clone();
         self.retry_with_backoff(
-            || async {
+            move || {
+                let query_clone = query_clone.clone();
+                let subscription_id_clone = subscription_id_clone.clone();
+                async move {
                 // Create the proper request using generated API types
                 let project_scope = crate::client::detect_project_scope().unwrap_or_else(|_| {
                     ProjectScope {
@@ -73,7 +77,7 @@ impl ApiService {
                 let request = QueryRequest {
                     query: query_clone.clone(),
                     project_scope,
-                    subscription_id: "".to_string(), // Empty string for no subscription
+                    subscription_id: subscription_id_clone.clone(),
                 };
                 
                 // Use the generated client's query_task method (from operationId)
@@ -87,6 +91,7 @@ impl ApiService {
                         error!("Query execution failed: {}", e);
                         Err(e.into())
                     }
+                }
                 }
             },
             "Query execution"

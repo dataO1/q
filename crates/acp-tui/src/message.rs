@@ -8,7 +8,7 @@ use crate::client::types::{StatusEvent, HitlApprovalRequest, HitlDecisionRequest
 // Implement PartialEq for the types that don't have it
 impl PartialEq for StatusEvent {
     fn eq(&self, other: &Self) -> bool {
-        self.execution_id == other.execution_id 
+        self.execution_id == other.execution_id
             && self.timestamp == other.timestamp
             // Skip source comparison for now since EventSource doesn't implement PartialEq
     }
@@ -16,7 +16,7 @@ impl PartialEq for StatusEvent {
 
 impl PartialEq for HitlApprovalRequest {
     fn eq(&self, other: &Self) -> bool {
-        self.agent_id == other.agent_id 
+        self.agent_id == other.agent_id
             && self.agent_type == other.agent_type
             && self.context == other.context
     }
@@ -25,15 +25,15 @@ impl PartialEq for HitlApprovalRequest {
 impl PartialEq for HitlDecisionRequest {
     fn eq(&self, other: &Self) -> bool {
         // Compare based on all fields since this is a struct, not an enum
-        self.decision == other.decision 
-            && self.modified_content == other.modified_content 
+        self.decision == other.decision
+            && self.modified_content == other.modified_content
             && self.request_id == other.request_id
             && self.reason == other.reason
     }
 }
 
 impl Eq for StatusEvent {}
-impl Eq for HitlApprovalRequest {}  
+impl Eq for HitlApprovalRequest {}
 impl Eq for HitlDecisionRequest {}
 impl Eq for ProjectScope {}
 
@@ -53,7 +53,7 @@ pub enum AppMsg {
     TerminalResized(u16, u16),
     /// Animation/refresh tick
     Tick,
-    
+
     // ============== Connection Events ==============
     /// Start connection flow (create subscription)
     StartConnection,
@@ -67,7 +67,7 @@ pub enum AppMsg {
     WebSocketDisconnected,
     /// Connection failed with error
     ConnectionFailed(String), // error message
-    
+
     // ============== Query Events ==============
     /// Query input text changed
     QueryInputChanged(String),
@@ -79,7 +79,7 @@ pub enum AppMsg {
     QueryExecutionCompleted(String), // result
     /// Query execution failed
     QueryExecutionFailed(String), // error
-    
+
     // ============== Timeline Events ==============
     /// Status event received from WebSocket (using generated type)
     StatusEventReceived(StatusEvent),
@@ -91,7 +91,7 @@ pub enum AppMsg {
     TimelineNodeToggle(String), // node_id
     /// Clear timeline
     TimelineClear,
-    
+
     // ============== HITL Events ==============
     /// HITL approval request received (using generated type)
     HitlRequestReceived(HitlApprovalRequest),
@@ -105,7 +105,7 @@ pub enum AppMsg {
     HitlDecisionSent(String), // request_id
     /// HITL decision sending failed
     HitlDecisionFailed(String, String), // request_id, error
-    
+
     // ============== UI Navigation Events ==============
     /// Change focus to next component
     FocusNext,
@@ -115,13 +115,13 @@ pub enum AppMsg {
     FocusComponent(ComponentId),
     /// Toggle help overlay
     HelpToggle,
-    
+
     // ============== Layout Events ==============
     /// Switch to normal layout (timeline + query)
     LayoutNormal,
     /// Switch to HITL review layout
     LayoutHitlReview,
-    
+
     // ============== Error Events ==============
     /// General error occurred
     ErrorOccurred(String),
@@ -185,7 +185,7 @@ impl StatusSeverity {
             StatusSeverity::Critical => ratatui::style::Color::LightRed,
         }
     }
-    
+
     /// Get the symbol for this severity
     pub fn symbol(&self) -> &'static str {
         match self {

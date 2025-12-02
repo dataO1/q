@@ -7,7 +7,7 @@ pub mod update;
 pub mod view;
 
 pub use state::AppModel;
-pub use update::update_app;
+pub use update::update;
 pub use view::render_app;
 
 use std::{io, sync::Arc, time::{Duration, Instant}, pin::Pin};
@@ -20,19 +20,13 @@ use tuirealm::{
     application::PollStrategy, terminal::{TerminalBridge, CrosstermTerminalAdapter},
     Application as TuiApplication, EventListenerCfg, Event,
     listener::{AsyncPort, PollAsync, ListenerResult},
+    props::{PropPayload, PropValue},
 };
 
 use crate::{
-    message::{AppMsg, ComponentId, NoUserEvent, ComponentMsg},
-    components::realm::{
-        TimelineRealmComponent, QueryInputRealmComponent, StatusLineRealmComponent,
-        HitlReviewRealmComponent, HitlQueueRealmComponent,
-    },
-    client::AcpClient,
-    services::{ApiService, QueryExecutor, WebSocketManager},
-    utils::{generate_client_id, EventLogger},
-    config::Config,
-    time_operation, log_state_change,
+    client::AcpClient, components::realm::{
+        help::HelpRealmComponent, HitlQueueRealmComponent, HitlReviewRealmComponent, QueryInputRealmComponent, StatusLineRealmComponent, TimelineRealmComponent
+    }, config::Config, log_state_change, message::{AppMsg, ComponentId, ComponentMsg, NoUserEvent}, services::{ApiService, QueryExecutor, WebSocketManager}, time_operation, utils::{generate_client_id, EventLogger}
 };
 
 /// Async channel wrapper that implements PollAsync for AppMsg
@@ -126,6 +120,8 @@ impl Application {
 
         ui_app.mount(ComponentId::HitlQueue, Box::new(HitlQueueRealmComponent::new()), vec![])
             .context("Failed to mount HitlQueue component")?;
+        ui_app.mount(ComponentId::Help, Box::new(HelpRealmComponent::new()), vec![])
+            .context("Failed to mount HelpRealmComponent component")?;
 
         // Set initial focus
         ui_app.active(&ComponentId::QueryInput)
@@ -172,47 +168,28 @@ impl Application {
         self.render();
 
         'main_loop: loop {
-            // Check for Ctrl+C
+            // Check for Ctrl+C (non-blocking)
             if ctrl_c.as_mut().now_or_never().is_some() {
                 info!("Received Ctrl+C, initiating graceful shutdown");
                 break 'main_loop;
             }
 
-            // Handle animation timer - only when animations are active
-            if self.has_active_animations() {
-                if self.animation_timer.tick().now_or_never().is_some() {
-                    let _ = self.sender.send(AppMsg::Tick);
-                }
-            }
-
-            // Use TUIRealm's tick to handle ALL events (keyboard + async port messages)
-            if let Ok(messages) = self.ui_app.tick(PollStrategy::Once) {
-                if !messages.is_empty() {
-                    trace!(
-                        message_count = messages.len(),
-                        "TUIRealm tick with AsyncPort produced messages"
-                    );
-
+            // Block waiting for events with timeout
+            match self.ui_app.tick(PollStrategy::UpTo(100)) {
+                Ok(messages) if !messages.is_empty() => {
                     for msg in messages {
-                        trace!(?msg, "Processing TUIRealm ComponentMsg (keyboard events)");
-
                         if self.handle_component_message(msg).await? {
                             break 'main_loop;
                         }
                     }
                 }
+                Ok(_) => {} // Timeout, no messages
+                Err(e) => {
+                    error!("Tick error: {}", e);
+                }
             }
 
-            // Small yield to prevent busy loop
-            tokio::task::yield_now().await;
-
-            // Only render the UI if something has changed
-            if self.needs_render || self.model.component_dirty_flags.any_dirty() {
-                self.render();
-                self.needs_render = false;
-                // Clear dirty flags after rendering
-                self.model.component_dirty_flags.clear_all();
-            }
+            self.render();
         }
 
         // Shutdown sequence - called after main loop exits
@@ -329,7 +306,7 @@ impl Application {
 
         // Update model with Elm update function
         let effects = time_operation!("model_update", {
-            update_app(&mut self.model, msg.clone())
+            update(&mut self.model, msg.clone())
         })?;
 
         // Log state changes
@@ -342,7 +319,7 @@ impl Application {
         for effect in effects {
             debug!(?effect, "Processing effect message");
             self.handle_side_effects(&effect).await?;
-            let additional_effects = update_app(&mut self.model, effect)?;
+            let additional_effects = update(&mut self.model, effect)?;
             // Could recursively handle additional effects if needed
             for additional_effect in additional_effects {
                 let _ = self.sender.send(additional_effect);
@@ -381,11 +358,20 @@ impl Application {
         match msg {
             AppMsg::QuerySubmitted => {
                 if !self.model.query_text.trim().is_empty() {
-                    let query = self.model.query_text.clone();
-                    let executor = self.query_executor.clone();
-                    tokio::spawn(async move {
-                        let _ = executor.execute_query(query).await;
-                    });
+                    if let Some(subscription_id) = self.model.get_subscription_id() {
+                        let query = self.model.query_text.clone();
+                        let subscription_id = subscription_id.to_string();
+                        let executor = self.query_executor.clone();
+                        tokio::spawn(async move {
+                            let _ = executor.execute_query(query, subscription_id).await;
+                        });
+                    } else {
+                        // Not connected - send error message
+                        let _ = self.sender.send(AppMsg::StatusMessage(
+                            crate::message::StatusSeverity::Error,
+                            "Cannot execute query: Not connected to server".to_string()
+                        ));
+                    }
                 }
             }
 
@@ -443,8 +429,26 @@ impl Application {
             error_msg.as_deref(),
         );
 
-        // Update focus with detailed logging
+        // Get previous focus
         let previous_focus = self.ui_app.focus().cloned().unwrap_or(ComponentId::Timeline);
+
+        // Blur previous component if different
+        if previous_focus != self.model.focused_component {
+            let _ = self.ui_app.attr(
+                &previous_focus,
+                tuirealm::Attribute::Focus,
+                tuirealm::AttrValue::Flag(false),
+            );
+        }
+
+        // Focus new component
+        let _ = self.ui_app.attr(
+            &self.model.focused_component,
+            tuirealm::Attribute::Focus,
+            tuirealm::AttrValue::Flag(true),
+        );
+
+        // Set as active for routing
         match self.ui_app.active(&self.model.focused_component) {
             Ok(_) => {
                 EventLogger::log_focus_change(&previous_focus, &self.model.focused_component, true);
@@ -460,8 +464,31 @@ impl Application {
             }
         }
 
-        // Sync other component states as needed
-        debug!("UI component synchronization completed");
+        // Update StatusLine component with connection state
+        let connection_state = if self.model.is_connected() {
+            crate::components::realm::status_line::ConnectionState::Connected
+        } else {
+            crate::components::realm::status_line::ConnectionState::Disconnected
+        };
+        
+        let _ = self.ui_app.attr(
+            &ComponentId::StatusLine,
+            tuirealm::Attribute::Custom("connection_state"),
+            tuirealm::AttrValue::Payload(PropPayload::One(PropValue::Str(
+                format!("{:?}", connection_state)
+            ))),
+        );
+
+        // Update StatusLine component with status message
+        let status_text = match &self.model.status_message {
+            Some(msg) => msg.message.clone(),
+            None => String::new(),
+        };
+        let _ = self.ui_app.attr(
+            &ComponentId::StatusLine,
+            tuirealm::Attribute::Custom("status_message"),
+            tuirealm::AttrValue::Payload(PropPayload::One(PropValue::Str(status_text))),
+        );
 
         Ok(())
     }
@@ -469,7 +496,6 @@ impl Application {
     /// Render the application with performance monitoring
     #[instrument(level = "trace", skip(self), fields(
         needs_render = self.needs_render,
-        dirty_flags = ?self.model.component_dirty_flags
     ))]
     fn render(&mut self) {
         let start_time = Instant::now();
@@ -483,7 +509,6 @@ impl Application {
 
         EventLogger::log_render_decision(
             self.needs_render,
-            &self.model.component_dirty_flags,
             Some(render_time.as_millis()),
         );
 
@@ -529,167 +554,6 @@ impl Application {
     fn has_active_animations(&self) -> bool {
         // Check if timeline has active animations
         self.model.timeline_tree.get_stats().running > 0
-    }
-
-    /// Translate TUIRealm events to AppMsg with comprehensive logging
-    #[instrument(level = "trace", skip(self))]
-    fn translate_tuirealm_message(&self, msg: ComponentId) -> Option<AppMsg> {
-        // TUIRealm messages are actually component IDs for focus/blur events
-        // Real keyboard events come through the event system
-        // For now, just handle component focus changes
-        match msg {
-            ComponentId::QueryInput => {
-                debug!(component = "QueryInput", "Component event received");
-                None // Component events are handled internally
-            }
-            ComponentId::Timeline => {
-                debug!(component = "Timeline", "Component event received");
-                None
-            }
-            ComponentId::StatusLine => {
-                debug!(component = "StatusLine", "Component event received");
-                None
-            }
-            ComponentId::HitlQueue => {
-                debug!(component = "HitlQueue", "Component event received");
-                None
-            }
-            ComponentId::HitlReview => {
-                debug!(component = "HitlReview", "Component event received");
-                None
-            }
-            ComponentId::Help => {
-                debug!(component = "Help", "Component event received");
-                None
-            }
-        }
-    }
-
-    /// Extract and translate keyboard events from TUIRealm
-    #[instrument(level = "debug", skip(self))]
-    fn translate_keyboard_event(&self, key_event: crossterm::event::KeyEvent, component: &ComponentId) -> Option<AppMsg> {
-        use crossterm::event::{KeyCode, KeyModifiers};
-
-        EventLogger::log_keyboard_event(
-            key_event.code,
-            key_event.modifiers,
-            component,
-            true, // Will be updated if processed
-        );
-
-        match key_event.code {
-            // Tab navigation (fixed: remove from query submit)
-            KeyCode::Tab => {
-                if key_event.modifiers.contains(KeyModifiers::SHIFT) {
-                    debug!("Shift+Tab: Focus previous component");
-                    Some(AppMsg::FocusPrevious)
-                } else {
-                    debug!("Tab: Focus next component");
-                    Some(AppMsg::FocusNext)
-                }
-            }
-
-            // Enter - context-sensitive submission
-            KeyCode::Enter => {
-                match component {
-                    ComponentId::QueryInput => {
-                        debug!("Enter in QueryInput: Submit query");
-                        Some(AppMsg::QuerySubmitted)
-                    }
-                    ComponentId::HitlReview => {
-                        debug!("Enter in HitlReview: Confirm decision");
-                        // Will be handled by component
-                        None
-                    }
-                    _ => {
-                        trace!("Enter pressed in non-input component");
-                        None
-                    }
-                }
-            }
-
-            // Escape - cancel/close
-            KeyCode::Esc => {
-                debug!("Escape: Cancel current action");
-                if self.model.show_help {
-                    Some(AppMsg::HelpToggle)
-                } else if matches!(self.model.layout_mode, crate::message::LayoutMode::HitlReview) {
-                    Some(AppMsg::LayoutNormal)
-                } else {
-                    None
-                }
-            }
-
-            // Question mark - help
-            KeyCode::Char('?') if !key_event.modifiers.contains(KeyModifiers::SHIFT) => {
-                debug!("?: Toggle help");
-                Some(AppMsg::HelpToggle)
-            }
-
-            // Q - quit
-            KeyCode::Char('q') | KeyCode::Char('Q') => {
-                debug!("Q: Quit application");
-                Some(AppMsg::Quit)
-            }
-
-            // C - clear (in appropriate contexts)
-            KeyCode::Char('c') if !key_event.modifiers.contains(KeyModifiers::CONTROL) => {
-                match component {
-                    ComponentId::Timeline => {
-                        debug!("C in Timeline: Clear timeline");
-                        Some(AppMsg::TimelineClear)
-                    }
-                    _ => None
-                }
-            }
-
-            // Arrow keys - navigation
-            KeyCode::Up => {
-                match component {
-                    ComponentId::Timeline => Some(AppMsg::TimelineScrollUp),
-                    ComponentId::HitlQueue => {
-                        debug!("Up in HitlQueue: Scroll up");
-                        // Use existing HITL navigation or focus change
-                        Some(AppMsg::FocusPrevious)
-                    }
-                    _ => None
-                }
-            }
-            KeyCode::Down => {
-                match component {
-                    ComponentId::Timeline => Some(AppMsg::TimelineScrollDown),
-                    ComponentId::HitlQueue => {
-                        debug!("Down in HitlQueue: Scroll down");
-                        // Use existing HITL navigation or focus change
-                        Some(AppMsg::FocusNext)
-                    }
-                    _ => None
-                }
-            }
-            KeyCode::PageUp => {
-                match component {
-                    ComponentId::Timeline => {
-                        debug!("PageUp in Timeline: Scroll up (multiple lines)");
-                        Some(AppMsg::TimelineScrollUp)
-                    }
-                    _ => None
-                }
-            }
-            KeyCode::PageDown => {
-                match component {
-                    ComponentId::Timeline => {
-                        debug!("PageDown in Timeline: Scroll down (multiple lines)");
-                        Some(AppMsg::TimelineScrollDown)
-                    }
-                    _ => None
-                }
-            }
-
-            _ => {
-                trace!(?key_event, ?component, "Unhandled keyboard event");
-                None
-            }
-        }
     }
 }
 

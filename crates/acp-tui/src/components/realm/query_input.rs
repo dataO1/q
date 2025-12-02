@@ -39,19 +39,19 @@ impl QueryInputRealmComponent {
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::White))
         );
-        
+
         Self {
             textarea,
             focused: false,
             show_placeholder: true,
         }
     }
-    
+
     /// Get the current query text
     pub fn get_query(&self) -> String {
         self.textarea.lines().join("\n")
     }
-    
+
     /// Clear the input
     pub fn clear(&mut self) {
         self.textarea = TextArea::default();
@@ -59,14 +59,14 @@ impl QueryInputRealmComponent {
         self.update_border_style();
         self.show_placeholder = true;
     }
-    
+
     /// Set query text (for restoring after connection)
     pub fn set_query(&mut self, query: &str) {
         self.textarea = TextArea::from([query]);
         self.update_border_style();
         self.show_placeholder = query.is_empty();
     }
-    
+
     /// Update border style based on focus
     fn update_border_style(&mut self) {
         let border_style = if self.focused {
@@ -74,7 +74,7 @@ impl QueryInputRealmComponent {
         } else {
             Style::default().fg(Color::White)
         };
-        
+
         self.textarea.set_block(
             Block::default()
                 .title("Query Input")
@@ -82,7 +82,7 @@ impl QueryInputRealmComponent {
                 .border_style(border_style)
         );
     }
-    
+
     /// Get dynamic height based on content
     pub fn get_height(&self) -> u16 {
         let input_lines = self.textarea.lines().len();
@@ -97,25 +97,22 @@ impl Component<ComponentMsg, AppMsg> for QueryInputRealmComponent {
                 if self.focused {
                     match key_event {
                         // Submit on Ctrl+Enter, regular Enter just adds newline
-                        TuiKeyEvent { code: Key::Enter, .. } => {
-                            // For simplicity, always add newline on Enter
-                            // We'll use a different key combination for submit (like Tab or Ctrl+S)
-                            let crossterm_event = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-                            self.textarea.input(crossterm_event);
-                            self.show_placeholder = self.textarea.lines().iter().all(|line| line.is_empty());
-                            None
-                        },
-                        
-                        // Submit on Enter (removed Tab to allow focus navigation)
-                        TuiKeyEvent { code: Key::Enter, modifiers } if modifiers.intersects(TuiKeyModifiers::CONTROL) => {
-                            let query = self.get_query();
-                            if !query.trim().is_empty() {
-                                Some(ComponentMsg::QuerySubmit)
-                            } else {
-                                None
+                        TuiKeyEvent { code: Key::Enter, modifiers } => {
+                            if modifiers.is_empty() {
+                                let query = self.get_query();
+                                if !query.trim().is_empty() {
+                                    Some(ComponentMsg::QuerySubmit)
+                                } else {
+                                    None
+                                }
                             }
+                            else if modifiers.intersects(TuiKeyModifiers::ALT){
+                                let crossterm_event = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+                                self.textarea.input(crossterm_event);
+                                self.show_placeholder = self.textarea.lines().iter().all(|line| line.is_empty());
+                                None
+                            }else{None}
                         },
-                        
                         // Tab navigation
                         TuiKeyEvent { code: Key::Tab, modifiers } if modifiers.intersects(TuiKeyModifiers::SHIFT) => {
                             Some(ComponentMsg::FocusPrevious)
@@ -123,17 +120,17 @@ impl Component<ComponentMsg, AppMsg> for QueryInputRealmComponent {
                         TuiKeyEvent { code: Key::Tab, .. } => {
                             Some(ComponentMsg::FocusNext)
                         },
-                        
-                        // Quit application
-                        TuiKeyEvent { code: Key::Char('q'), .. } | TuiKeyEvent { code: Key::Char('Q'), .. } => {
-                            Some(ComponentMsg::AppQuit)
-                        },
-                        
-                        // Help toggle
-                        TuiKeyEvent { code: Key::Char('?'), .. } => {
-                            Some(ComponentMsg::HelpToggle)
-                        },
-                        
+
+                        // // Quit application
+                        // TuiKeyEvent { code: Key::Char('q'), .. } | TuiKeyEvent { code: Key::Char('Q'), .. } => {
+                        //     Some(ComponentMsg::AppQuit)
+                        // },
+
+                        // // Help toggle
+                        // TuiKeyEvent { code: Key::Char('?'), .. } => {
+                        //     Some(ComponentMsg::HelpToggle)
+                        // },
+
                         // All other input
                         key => {
                             // Convert TuiKeyEvent to crossterm KeyEvent
@@ -150,7 +147,7 @@ impl Component<ComponentMsg, AppMsg> for QueryInputRealmComponent {
                                 Key::End => KeyEvent::new(KeyCode::End, crossterm_modifiers),
                                 _ => return None,
                             };
-                            
+
                             self.textarea.input(crossterm_event);
                             self.show_placeholder = self.textarea.lines().iter().all(|line| line.is_empty());
                             None
@@ -171,7 +168,7 @@ impl MockComponent for QueryInputRealmComponent {
         self.textarea.set_cursor_line_style(Style::default());
         frame.render_widget(&self.textarea, area);
     }
-    
+
     fn query(&self, attr: Attribute) -> Option<AttrValue> {
         match attr {
             Attribute::Focus => Some(AttrValue::Flag(self.focused)),
@@ -179,7 +176,7 @@ impl MockComponent for QueryInputRealmComponent {
             _ => None,
         }
     }
-    
+
     fn attr(&mut self, attr: Attribute, value: AttrValue) {
         match attr {
             Attribute::Focus => {
@@ -196,11 +193,11 @@ impl MockComponent for QueryInputRealmComponent {
             _ => {}
         }
     }
-    
+
     fn state(&self) -> State {
         State::One(StateValue::String(self.get_query()))
     }
-    
+
     fn perform(&mut self, cmd: Cmd) -> CmdResult {
         match cmd {
             Cmd::Submit => {
