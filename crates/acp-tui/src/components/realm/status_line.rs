@@ -13,7 +13,7 @@ use tuirealm::{
     Component, Event, MockComponent, State, StateValue, AttrValue, Attribute,
 };
 
-use crate::message::{AppMsg, NoUserEvent};
+use crate::message::{AppMsg, NoUserEvent, ComponentMsg};
 use crate::components::{StatusMessage};
 
 /// Connection state for display
@@ -150,8 +150,8 @@ impl StatusLineRealmComponent {
     }
 }
 
-impl Component<AppMsg, NoUserEvent> for StatusLineRealmComponent {
-    fn on(&mut self, _ev: Event<NoUserEvent>) -> Option<AppMsg> {
+impl Component<ComponentMsg, AppMsg> for StatusLineRealmComponent {
+    fn on(&mut self, _ev: Event<AppMsg>) -> Option<ComponentMsg> {
         // Status line typically doesn't handle input events
         None
     }

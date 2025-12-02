@@ -16,7 +16,7 @@ use tuirealm::{
 };
 use tui_textarea::TextArea;
 
-use crate::message::{AppMsg, NoUserEvent};
+use crate::message::{AppMsg, NoUserEvent, ComponentMsg};
 
 /// QueryInput component using TUIRealm architecture
 pub struct QueryInputRealmComponent {
@@ -90,8 +90,8 @@ impl QueryInputRealmComponent {
     }
 }
 
-impl Component<AppMsg, NoUserEvent> for QueryInputRealmComponent {
-    fn on(&mut self, ev: Event<NoUserEvent>) -> Option<AppMsg> {
+impl Component<ComponentMsg, AppMsg> for QueryInputRealmComponent {
+    fn on(&mut self, ev: Event<AppMsg>) -> Option<ComponentMsg> {
         match ev {
             Event::Keyboard(key_event) => {
                 if self.focused {
@@ -110,10 +110,28 @@ impl Component<AppMsg, NoUserEvent> for QueryInputRealmComponent {
                         TuiKeyEvent { code: Key::Enter, modifiers } if modifiers.intersects(TuiKeyModifiers::CONTROL) => {
                             let query = self.get_query();
                             if !query.trim().is_empty() {
-                                Some(AppMsg::QuerySubmitted)
+                                Some(ComponentMsg::QuerySubmit)
                             } else {
                                 None
                             }
+                        },
+                        
+                        // Tab navigation
+                        TuiKeyEvent { code: Key::Tab, modifiers } if modifiers.intersects(TuiKeyModifiers::SHIFT) => {
+                            Some(ComponentMsg::FocusPrevious)
+                        },
+                        TuiKeyEvent { code: Key::Tab, .. } => {
+                            Some(ComponentMsg::FocusNext)
+                        },
+                        
+                        // Quit application
+                        TuiKeyEvent { code: Key::Char('q'), .. } | TuiKeyEvent { code: Key::Char('Q'), .. } => {
+                            Some(ComponentMsg::AppQuit)
+                        },
+                        
+                        // Help toggle
+                        TuiKeyEvent { code: Key::Char('?'), .. } => {
+                            Some(ComponentMsg::HelpToggle)
                         },
                         
                         // All other input
@@ -130,7 +148,6 @@ impl Component<AppMsg, NoUserEvent> for QueryInputRealmComponent {
                                 Key::Down => KeyEvent::new(KeyCode::Down, crossterm_modifiers),
                                 Key::Home => KeyEvent::new(KeyCode::Home, crossterm_modifiers),
                                 Key::End => KeyEvent::new(KeyCode::End, crossterm_modifiers),
-                                Key::Tab => KeyEvent::new(KeyCode::Tab, crossterm_modifiers),
                                 _ => return None,
                             };
                             
@@ -143,6 +160,7 @@ impl Component<AppMsg, NoUserEvent> for QueryInputRealmComponent {
                     None
                 }
             },
+            Event::User(_) => None, // AppMsg events don't affect QueryInput directly
             _ => None,
         }
     }

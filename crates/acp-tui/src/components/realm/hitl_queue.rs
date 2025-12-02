@@ -16,7 +16,7 @@ use tuirealm::{
 };
 
 use crate::client::types::HitlApprovalRequest;
-use crate::message::{AppMsg, NoUserEvent};
+use crate::message::{AppMsg, NoUserEvent, ComponentMsg};
 
 /// HitlQueue component using TUIRealm architecture
 pub struct HitlQueueRealmComponent {
@@ -169,8 +169,8 @@ impl HitlQueueRealmComponent {
     }
 }
 
-impl Component<AppMsg, NoUserEvent> for HitlQueueRealmComponent {
-    fn on(&mut self, ev: Event<NoUserEvent>) -> Option<AppMsg> {
+impl Component<ComponentMsg, AppMsg> for HitlQueueRealmComponent {
+    fn on(&mut self, ev: Event<AppMsg>) -> Option<ComponentMsg> {
         if !self.visible || !self.focused {
             return None;
         }
@@ -188,8 +188,8 @@ impl Component<AppMsg, NoUserEvent> for HitlQueueRealmComponent {
                     },
                     TuiKeyEvent { code: Key::Enter, .. } => {
                         // Open selected request for review
-                        if let Some(request) = self.get_selected_request() {
-                            Some(AppMsg::HitlReviewOpen(request.agent_id.clone()))
+                        if let Some(_request) = self.get_selected_request() {
+                            Some(ComponentMsg::HitlOpenReview)
                         } else {
                             None
                         }

@@ -16,7 +16,7 @@ use tuirealm::{
 };
 
 use crate::client::types::{StatusEvent, EventType, EventSource};
-use crate::message::{AppMsg, NoUserEvent};
+use crate::message::{AppMsg, NoUserEvent, ComponentMsg};
 use crate::models::tree::TimelineTree;
 
 /// Timeline component using proper TUIRealm architecture
@@ -216,30 +216,39 @@ impl TimelineRealmComponent {
     }
 }
 
-impl Component<AppMsg, NoUserEvent> for TimelineRealmComponent {
-    fn on(&mut self, ev: Event<NoUserEvent>) -> Option<AppMsg> {
+impl Component<ComponentMsg, AppMsg> for TimelineRealmComponent {
+    fn on(&mut self, ev: Event<AppMsg>) -> Option<ComponentMsg> {
         match ev {
             Event::Keyboard(key_event) => {
                 if self.focused {
                     match key_event {
                         TuiKeyEvent { code: Key::Up, .. } => {
                             self.scroll_up();
-                            None
+                            Some(ComponentMsg::TimelineScrollUp)
                         },
                         TuiKeyEvent { code: Key::Down, .. } => {
                             self.scroll_down();
-                            None
+                            Some(ComponentMsg::TimelineScrollDown)
                         },
                         TuiKeyEvent { code: Key::PageUp, .. } => {
                             self.page_up();
-                            None
+                            Some(ComponentMsg::TimelineScrollUp)
                         },
                         TuiKeyEvent { code: Key::PageDown, .. } => {
                             self.page_down();
-                            None
+                            Some(ComponentMsg::TimelineScrollDown)
                         },
                         TuiKeyEvent { code: Key::Char('c'), .. } => {
-                            Some(AppMsg::TimelineClear)
+                            Some(ComponentMsg::TimelineClear)
+                        },
+                        TuiKeyEvent { code: Key::Tab, .. } => {
+                            Some(ComponentMsg::FocusNext)
+                        },
+                        TuiKeyEvent { code: Key::Char('q'), .. } | TuiKeyEvent { code: Key::Char('Q'), .. } => {
+                            Some(ComponentMsg::AppQuit)
+                        },
+                        TuiKeyEvent { code: Key::Char('?'), .. } => {
+                            Some(ComponentMsg::HelpToggle)
                         },
                         _ => None,
                     }
@@ -247,6 +256,7 @@ impl Component<AppMsg, NoUserEvent> for TimelineRealmComponent {
                     None
                 }
             },
+            Event::User(_) => None, // AppMsg events handled at application level
             _ => None,
         }
     }

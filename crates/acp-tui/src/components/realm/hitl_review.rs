@@ -18,7 +18,7 @@ use tuirealm::{
 use tui_textarea::TextArea;
 
 use crate::client::types::{HitlApprovalRequest, HitlDecisionRequest, HitlDecision as ApiHitlDecision};
-use crate::message::{AppMsg, NoUserEvent};
+use crate::message::{AppMsg, NoUserEvent, ComponentMsg};
 
 /// Review modes for the HITL window
 #[derive(Debug, Clone, PartialEq)]
@@ -169,8 +169,8 @@ impl HitlReviewRealmComponent {
     }
 }
 
-impl Component<AppMsg, NoUserEvent> for HitlReviewRealmComponent {
-    fn on(&mut self, ev: Event<NoUserEvent>) -> Option<AppMsg> {
+impl Component<ComponentMsg, AppMsg> for HitlReviewRealmComponent {
+    fn on(&mut self, ev: Event<AppMsg>) -> Option<ComponentMsg> {
         if !self.visible || !self.focused {
             return None;
         }
@@ -229,12 +229,10 @@ impl Component<AppMsg, NoUserEvent> for HitlReviewRealmComponent {
                     ReviewMode::Confirming => {
                         match key_event {
                             TuiKeyEvent { code: Key::Char('y'), .. } | TuiKeyEvent { code: Key::Enter, .. } => {
-                                self.submit_decision()
+                                Some(ComponentMsg::HitlSubmitDecision)
                             },
                             TuiKeyEvent { code: Key::Char('n'), .. } | TuiKeyEvent { code: Key::Esc, .. } => {
-                                self.mode = ReviewMode::Viewing;
-                                self.decision = None;
-                                None
+                                Some(ComponentMsg::HitlCancelReview)
                             },
                             _ => None,
                         }

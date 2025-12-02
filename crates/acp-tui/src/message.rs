@@ -32,6 +32,11 @@ impl PartialEq for HitlDecisionRequest {
     }
 }
 
+impl Eq for StatusEvent {}
+impl Eq for HitlApprovalRequest {}  
+impl Eq for HitlDecisionRequest {}
+impl Eq for ProjectScope {}
+
 impl PartialEq for ProjectScope {
     fn eq(&self, other: &Self) -> bool {
         self.root == other.root && self.current_file == other.current_file
@@ -39,7 +44,7 @@ impl PartialEq for ProjectScope {
 }
 
 /// Main application messages for TUIRealm
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppMsg {
     // ============== System Events ==============
     /// Application should quit
@@ -205,6 +210,35 @@ impl Default for LayoutMode {
     fn default() -> Self {
         LayoutMode::Normal
     }
+}
+
+/// Component messages generated from keyboard events and UI interactions
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ComponentMsg {
+    /// Application should quit
+    AppQuit,
+    /// Query was submitted for execution
+    QuerySubmit,
+    /// Move focus to next component
+    FocusNext,
+    /// Move focus to previous component
+    FocusPrevious,
+    /// Toggle help overlay
+    HelpToggle,
+    /// Clear timeline
+    TimelineClear,
+    /// Scroll timeline up
+    TimelineScrollUp,
+    /// Scroll timeline down
+    TimelineScrollDown,
+    /// Submit HITL decision
+    HitlSubmitDecision,
+    /// Cancel HITL review
+    HitlCancelReview,
+    /// Open HITL review
+    HitlOpenReview,
+    /// No action (default for unhandled events)
+    None,
 }
 
 /// User events (currently none, but required by TUIRealm)
