@@ -9,6 +9,8 @@ pub mod status_line;
 pub mod hitl_review;
 pub mod hitl_queue;
 pub mod help;
+pub mod root;
+pub mod event_tree;
 
 pub use timeline::TimelineRealmComponent;
 pub use query_input::QueryInputRealmComponent;

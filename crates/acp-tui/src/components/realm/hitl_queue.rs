@@ -16,7 +16,7 @@ use tuirealm::{
 };
 
 use crate::client::types::HitlApprovalRequest;
-use crate::message::{AppMsg, NoUserEvent, ComponentMsg};
+use crate::message::{APIEvent, NoUserEvent, UserEvent};
 
 /// HitlQueue component using TUIRealm architecture
 pub struct HitlQueueRealmComponent {
@@ -35,7 +35,7 @@ impl HitlQueueRealmComponent {
     pub fn new() -> Self {
         let mut list_state = ListState::default();
         list_state.select(Some(0));
-        
+
         Self {
             requests: Vec::new(),
             list_state,
@@ -43,27 +43,27 @@ impl HitlQueueRealmComponent {
             visible: false,
         }
     }
-    
+
     /// Add a new HITL request to the queue
     pub fn add_request(&mut self, request: HitlApprovalRequest) {
         self.requests.push(request);
-        
+
         // If this is the first request and nothing is selected, select it
         if self.requests.len() == 1 {
             self.list_state.select(Some(0));
         }
-        
+
         // Show the queue if we have requests
         if !self.requests.is_empty() {
             self.visible = true;
         }
     }
-    
-    /// Remove a request by ID  
+
+    /// Remove a request by ID
     pub fn remove_request(&mut self, request_id: &str) -> Option<HitlApprovalRequest> {
         if let Some(index) = self.requests.iter().position(|r| r.agent_id == request_id) {
             let removed = self.requests.remove(index);
-            
+
             // Adjust selection if necessary
             if let Some(selected) = self.list_state.selected() {
                 if selected >= self.requests.len() && !self.requests.is_empty() {
@@ -73,30 +73,30 @@ impl HitlQueueRealmComponent {
                     self.visible = false;
                 }
             }
-            
+
             Some(removed)
         } else {
             None
         }
     }
-    
+
     /// Get the currently selected request
     pub fn get_selected_request(&self) -> Option<&HitlApprovalRequest> {
         self.list_state.selected()
             .and_then(|index| self.requests.get(index))
     }
-    
+
     /// Get the number of pending requests
     pub fn request_count(&self) -> usize {
         self.requests.len()
     }
-    
+
     /// Move selection up
     pub fn select_previous(&mut self) {
         if self.requests.is_empty() {
             return;
         }
-        
+
         let selected = self.list_state.selected().unwrap_or(0);
         let new_selected = if selected == 0 {
             self.requests.len() - 1
@@ -105,13 +105,13 @@ impl HitlQueueRealmComponent {
         };
         self.list_state.select(Some(new_selected));
     }
-    
+
     /// Move selection down
     pub fn select_next(&mut self) {
         if self.requests.is_empty() {
             return;
         }
-        
+
         let selected = self.list_state.selected().unwrap_or(0);
         let new_selected = if selected >= self.requests.len() - 1 {
             0
@@ -120,24 +120,24 @@ impl HitlQueueRealmComponent {
         };
         self.list_state.select(Some(new_selected));
     }
-    
+
     /// Show the queue
     pub fn show(&mut self) {
         if !self.requests.is_empty() {
             self.visible = true;
         }
     }
-    
+
     /// Hide the queue
     pub fn hide(&mut self) {
         self.visible = false;
     }
-    
+
     /// Is the queue visible?
     pub fn is_visible(&self) -> bool {
         self.visible && !self.requests.is_empty()
     }
-    
+
     /// Format a request for display (static version to avoid borrowing issues)
     fn format_request_static(request: &HitlApprovalRequest, index: usize, selected: bool) -> ListItem {
         // Use available fields from HitlApprovalRequest
@@ -148,7 +148,7 @@ impl HitlQueueRealmComponent {
         } else {
             request.context.clone()
         };
-        
+
         let line = Line::from(vec![
             Span::raw(prefix),
             Span::styled(format!("#{} ", index + 1), Style::default().fg(Color::Gray)),
@@ -158,23 +158,23 @@ impl HitlQueueRealmComponent {
             ),
             Span::raw(context_desc),
         ]);
-        
+
         let style = if selected {
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
-        
+
         ListItem::new(line).style(style)
     }
 }
 
-impl Component<ComponentMsg, AppMsg> for HitlQueueRealmComponent {
-    fn on(&mut self, ev: Event<AppMsg>) -> Option<ComponentMsg> {
+impl Component<UserEvent, APIEvent> for HitlQueueRealmComponent {
+    fn on(&mut self, ev: Event<APIEvent>) -> Option<UserEvent> {
         if !self.visible || !self.focused {
             return None;
         }
-        
+
         match ev {
             Event::Keyboard(key_event) => {
                 match key_event {
@@ -189,7 +189,7 @@ impl Component<ComponentMsg, AppMsg> for HitlQueueRealmComponent {
                     TuiKeyEvent { code: Key::Enter, .. } => {
                         // Open selected request for review
                         if let Some(_request) = self.get_selected_request() {
-                            Some(ComponentMsg::HitlOpenReview)
+                            Some(UserEvent::HitlOpenReview)
                         } else {
                             None
                         }
@@ -211,23 +211,23 @@ impl MockComponent for HitlQueueRealmComponent {
         if !self.is_visible() {
             return;
         }
-        
+
         let border_style = if self.focused {
             Style::default().fg(Color::Yellow)
         } else {
             Style::default().fg(Color::White)
         };
-        
+
         let title = format!(" HITL Queue ({}) ", self.requests.len());
-        
-        // Create list items - avoid borrowing self 
+
+        // Create list items - avoid borrowing self
         let selected_index = self.list_state.selected();
         let mut items = Vec::new();
         for (index, request) in self.requests.iter().enumerate() {
             let selected = selected_index == Some(index);
             items.push(Self::format_request_static(request, index, selected));
         }
-        
+
         let list = List::new(items)
             .block(Block::default()
                 .title(title)
@@ -238,10 +238,10 @@ impl MockComponent for HitlQueueRealmComponent {
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
             );
-        
+
         frame.render_stateful_widget(list, area, &mut self.list_state);
     }
-    
+
     fn query(&self, attr: Attribute) -> Option<AttrValue> {
         match attr {
             Attribute::Focus => Some(AttrValue::Flag(self.focused)),
@@ -249,7 +249,7 @@ impl MockComponent for HitlQueueRealmComponent {
             _ => None,
         }
     }
-    
+
     fn attr(&mut self, attr: Attribute, value: AttrValue) {
         match attr {
             Attribute::Focus => {
@@ -269,7 +269,7 @@ impl MockComponent for HitlQueueRealmComponent {
             _ => {}
         }
     }
-    
+
     fn state(&self) -> State {
         if let Some(selected) = self.list_state.selected() {
             State::One(StateValue::Usize(selected))
@@ -277,7 +277,7 @@ impl MockComponent for HitlQueueRealmComponent {
             State::None
         }
     }
-    
+
     fn perform(&mut self, cmd: Cmd) -> CmdResult {
         match cmd {
             Cmd::Move(MoveDirection::Up) => {

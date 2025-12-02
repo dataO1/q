@@ -1,6 +1,7 @@
 //! Application state (Model in Elm architecture)
 
 use chrono::{DateTime, Utc};
+use tuirealm::{AttrValue, Attribute};
 use crate::{
     components::realm::status_line::ConnectionState,
     components::StatusMessage,
@@ -14,9 +15,6 @@ use crate::{
 pub struct AppModel {
     /// Current client ID
     pub client_id: String,
-
-    /// Current subscription ID (None when disconnected)
-    pub subscription_id: Option<String>,
 
     /// Connection state to ACP server
     pub connection_state: ConnectionState,
@@ -61,7 +59,6 @@ impl AppModel {
 
         Self {
             client_id,
-            subscription_id: None,
             connection_state: ConnectionState::Disconnected,
             status_message: None,
             focused_component: ComponentId::QueryInput, // Start with input focused
@@ -75,16 +72,6 @@ impl AppModel {
             timeline_scroll: 0,
             animation_frame: 0,
         }
-    }
-
-    /// Check if properly connected (has active subscription)
-    pub fn is_connected(&self) -> bool {
-        self.subscription_id.is_some()
-    }
-
-    /// Get the current subscription ID if connected
-    pub fn get_subscription_id(&self) -> Option<&str> {
-        self.subscription_id.as_deref()
     }
 
     /// Set status message

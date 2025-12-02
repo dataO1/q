@@ -14,7 +14,7 @@ use tuirealm::{
     props::{PropPayload, PropValue},
 };
 
-use crate::message::{AppMsg, NoUserEvent, ComponentMsg, StatusSeverity};
+use crate::message::{APIEvent, NoUserEvent, UserEvent, StatusSeverity};
 use crate::components::{StatusMessage};
 
 /// Connection state for display
@@ -22,7 +22,7 @@ use crate::components::{StatusMessage};
 pub enum ConnectionState {
     Disconnected,
     Connecting,
-    Connected,
+    Connected(String),
     Reconnecting { attempt: usize },
     Failed { error: String },
 }
@@ -33,29 +33,29 @@ impl ConnectionState {
         match self {
             ConnectionState::Disconnected => "Disconnected",
             ConnectionState::Connecting => "Connecting...",
-            ConnectionState::Connected => "Connected",
+            ConnectionState::Connected(subscription_id) => "Connected",
             ConnectionState::Reconnecting { .. } => "Reconnecting...",
             ConnectionState::Failed { .. } => "Failed",
         }
     }
-    
+
     /// Get status dot for this connection state
     pub fn status_dot(&self) -> &str {
         match self {
             ConnectionState::Disconnected => "○",
             ConnectionState::Connecting => "◐",
-            ConnectionState::Connected => "●",
+            ConnectionState::Connected(subscription_id) => "●",
             ConnectionState::Reconnecting { .. } => "◑",
             ConnectionState::Failed { .. } => "✗",
         }
     }
-    
+
     /// Get color for this connection state
     pub fn color(&self) -> Color {
         match self {
             ConnectionState::Disconnected => Color::Gray,
             ConnectionState::Connecting => Color::Yellow,
-            ConnectionState::Connected => Color::Green,
+            ConnectionState::Connected(subscription_id) => Color::Green,
             ConnectionState::Reconnecting { .. } => Color::Yellow,
             ConnectionState::Failed { .. } => Color::Red,
         }
@@ -87,32 +87,32 @@ impl StatusLineRealmComponent {
             focused: false,
         }
     }
-    
+
     /// Set status message
     pub fn set_message(&mut self, message: StatusMessage) {
         self.current_message = Some(message);
     }
-    
+
     /// Clear status message
     pub fn clear_message(&mut self) {
         self.current_message = None;
     }
-    
+
     /// Set connection state
     pub fn set_connection_state(&mut self, state: ConnectionState) {
         self.connection_state = state;
     }
-    
+
     /// Set client ID
     pub fn set_client_id(&mut self, client_id: String) {
         self.client_id = client_id;
     }
-    
+
     /// Set scroll info
     pub fn set_scroll_info(&mut self, current: usize, total: usize) {
         self.scroll_info = (current, total);
     }
-    
+
     /// Format the status line text
     fn format_status_text(&self) -> String {
         // Get status message text
@@ -121,14 +121,14 @@ impl StatusLineRealmComponent {
         } else {
             "Ready"
         };
-        
+
         // Format client ID (abbreviated)
         let client_display = if self.client_id.len() > 12 {
             format!("{}..{}", &self.client_id[..8], &self.client_id[self.client_id.len()-4..])
         } else {
             self.client_id.clone()
         };
-        
+
         // Build complete status line
         format!(
             " {} | Scroll: {}/{} | Connection: {} {} | Client: {} | Help: ?",
@@ -140,7 +140,7 @@ impl StatusLineRealmComponent {
             client_display,
         )
     }
-    
+
     /// Get the appropriate color for the status line
     fn get_status_color(&self) -> Color {
         if let Some(ref msg) = self.current_message {
@@ -151,8 +151,8 @@ impl StatusLineRealmComponent {
     }
 }
 
-impl Component<ComponentMsg, AppMsg> for StatusLineRealmComponent {
-    fn on(&mut self, _ev: Event<AppMsg>) -> Option<ComponentMsg> {
+impl Component<UserEvent, APIEvent> for StatusLineRealmComponent {
+    fn on(&mut self, _ev: Event<APIEvent>) -> Option<UserEvent> {
         // Status line typically doesn't handle input events
         None
     }
@@ -162,22 +162,22 @@ impl MockComponent for StatusLineRealmComponent {
     fn view(&mut self, frame: &mut Frame, area: Rect) {
         let status_text = self.format_status_text();
         let color = self.get_status_color();
-        
+
         let style = Style::default()
             .fg(color)
-            .add_modifier(if self.current_message.is_some() { 
-                Modifier::BOLD 
-            } else { 
-                Modifier::empty() 
+            .add_modifier(if self.current_message.is_some() {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
             });
-        
+
         let paragraph = Paragraph::new(status_text)
             .style(style)
             .block(Block::default().borders(Borders::NONE));
-        
+
         frame.render_widget(paragraph, area);
     }
-    
+
     fn query(&self, attr: Attribute) -> Option<AttrValue> {
         match attr {
             Attribute::Focus => Some(AttrValue::Flag(self.focused)),
@@ -185,7 +185,7 @@ impl MockComponent for StatusLineRealmComponent {
             _ => None,
         }
     }
-    
+
     fn attr(&mut self, attr: Attribute, value: AttrValue) {
         match attr {
             Attribute::Focus => {
@@ -198,7 +198,7 @@ impl MockComponent for StatusLineRealmComponent {
                     // Extract connection state from the string
                     if let AttrValue::Payload(PropPayload::One(PropValue::Str(ref state_str))) = value {
                         match state_str.as_str() {
-                            "Connected" => self.connection_state = ConnectionState::Connected,
+                            "Connected" => self.connection_state = ConnectionState::Connected(state_str.clone()),
                             "Disconnected" => self.connection_state = ConnectionState::Disconnected,
                             _ => {} // Unknown state, keep current
                         }
@@ -224,11 +224,11 @@ impl MockComponent for StatusLineRealmComponent {
             _ => {}
         }
     }
-    
+
     fn state(&self) -> State {
         State::One(StateValue::String(self.format_status_text()))
     }
-    
+
     fn perform(&mut self, _cmd: Cmd) -> CmdResult {
         // Status line typically doesn't perform commands
         CmdResult::None

@@ -5,8 +5,8 @@
 
 use tracing::{debug, info, trace, warn};
 use crate::{
-    application::state::{AppModel},
-    message::{AppMsg, ComponentId},
+    application::state::AppModel,
+    message::{ComponentId, UserEvent},
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use serde_json::Value;
@@ -85,7 +85,7 @@ impl EventLogger {
 
     /// Log message processing with queue metrics
     pub fn log_message_processing(
-        msg: &AppMsg,
+        msg: &UserEvent,
         queue_size_before: usize,
         queue_size_after: usize,
         processing_time_ms: Option<u128>,
@@ -101,31 +101,31 @@ impl EventLogger {
 
         // Log specific message details based on type
         match msg {
-            AppMsg::QuerySubmitted => {
+            UserEvent::QuerySubmitted => {
                 info!(event = "query_submitted", "Query execution started");
             }
-            AppMsg::FocusNext | AppMsg::FocusPrevious => {
+            UserEvent::FocusNext | UserEvent::FocusPrevious => {
                 debug!(event = "focus_change", action = ?msg, "Focus change requested");
             }
-            AppMsg::StatusEventReceived(event) => {
+            // UserEvent::StatusEventReceived(event) => {
+            //     info!(
+            //         event = "status_event",
+            //         event_data = ?event,
+            //         "Status event received"
+            //     );
+            // }
+            UserEvent::WebSocketConnected(subscription_id) => {
                 info!(
-                    event = "status_event",
-                    event_data = ?event,
-                    "Status event received"
-                );
-            }
-            AppMsg::WebSocketConnected(subscription_id) => {
-                info!(
-                    event = "websocket", 
-                    status = "connected", 
+                    event = "websocket",
+                    status = "connected",
                     subscription_id = %subscription_id,
                     "WebSocket connection established"
                 );
             }
-            AppMsg::WebSocketDisconnected => {
+            UserEvent::WebSocketDisconnected => {
                 warn!(event = "websocket", status = "disconnected", "WebSocket connection lost");
             }
-            AppMsg::Tick => {
+            UserEvent::Tick => {
                 trace!(event = "tick", "Animation tick processed");
             }
             _ => {} // Other messages logged at debug level above

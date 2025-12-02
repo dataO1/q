@@ -45,58 +45,13 @@ impl PartialEq for ProjectScope {
 
 /// Main application messages for TUIRealm
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AppMsg {
+pub enum APIEvent {
     // ============== System Events ==============
     /// Application should quit
-    Quit,
-    /// Terminal was resized
-    TerminalResized(u16, u16),
-    /// Animation/refresh tick
-    Tick,
-
-    // ============== Connection Events ==============
-    /// Start connection flow (create subscription)
-    StartConnection,
-    /// WebSocket connected successfully with subscription
-    WebSocketConnected(String), // subscription_id
-    /// Subscription was resumed (existing one found)
-    SubscriptionResumed(String), // subscription_id
-    /// WebSocket disconnected
-    WebSocketDisconnected,
-    /// Connection failed with error
-    ConnectionFailed(String), // error message
-
-    // ============== Query Events ==============
-    /// Query input text changed
-    QueryInputChanged(String),
-    /// Query was submitted for execution
-    QuerySubmitted,
-    /// Query execution started
-    QueryExecutionStarted(String), // query text
-    /// Query execution completed
-    QueryExecutionCompleted(String), // result
-    /// Query execution failed
-    QueryExecutionFailed(String), // error
 
     // ============== Timeline Events ==============
     /// Status event received from WebSocket (using generated type)
     StatusEventReceived(StatusEvent),
-    /// Scroll timeline up
-    TimelineScrollUp,
-    /// Scroll timeline down
-    TimelineScrollDown,
-    /// Toggle node expansion/collapse
-    TimelineNodeToggle(String), // node_id
-    /// Clear timeline
-    TimelineClear,
-
-    // ============== HITL Events ==============
-    /// HITL approval request received (using generated type)
-    HitlRequestReceived(HitlApprovalRequest),
-    /// Open HITL review window for specific request
-    HitlReviewOpen(String), // request_id
-    /// Close HITL review window
-    HitlReviewClose,
     /// HITL decision was made (using generated type)
     HitlDecisionMade(String, HitlDecisionRequest), // request_id, decision
     /// HITL decision was sent successfully
@@ -104,15 +59,12 @@ pub enum AppMsg {
     /// HITL decision sending failed
     HitlDecisionFailed(String, String), // request_id, error
 
-    // ============== UI Navigation Events ==============
-    /// Change focus to next component
-    FocusNext,
-    /// Change focus to previous component
-    FocusPrevious,
-    /// Focus specific component
-    FocusComponent(ComponentId),
-    /// Toggle help overlay
-    HelpToggle,
+    /// Query execution started
+    QueryExecutionStarted(String), // query text
+    /// Query execution completed
+    QueryExecutionCompleted(String), // result
+    /// Query execution failed
+    QueryExecutionFailed(String), // error
 
     // ============== Layout Events ==============
     /// Switch to normal layout (timeline + query)
@@ -123,6 +75,12 @@ pub enum AppMsg {
     // ============== Error Events ==============
     /// General error occurred
     ErrorOccurred(String),
+    /// WebSocket connected successfully with subscription
+    WebSocketConnected(String), // subscription_id
+    /// WebSocket disconnected
+    WebSocketDisconnected,
+    /// Connection failed with error
+    ConnectionFailed(String), // error message
     /// Display status message
     StatusMessage(StatusSeverity, String),
 }
@@ -130,6 +88,8 @@ pub enum AppMsg {
 /// Component identifiers for TUIRealm
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ComponentId {
+    /// Root component showing execution tree
+    Root,
     /// Timeline component showing execution tree
     Timeline,
     /// Query input text area
@@ -154,6 +114,7 @@ impl ComponentId {
             ComponentId::HitlQueue => "hitl_queue",
             ComponentId::HitlReview => "hitl_review",
             ComponentId::Help => "help",
+            ComponentId::Root => "root",
         }
     }
 }
@@ -212,11 +173,9 @@ impl Default for LayoutMode {
 
 /// Component messages generated from keyboard events and UI interactions
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ComponentMsg {
-    /// Application should quit
-    AppQuit,
-    /// Query was submitted for execution
-    QuerySubmit,
+pub enum UserEvent {
+    Quit,
+    Tick,
     /// Move focus to next component
     FocusNext,
     /// Move focus to previous component
@@ -236,7 +195,61 @@ pub enum ComponentMsg {
     /// Open HITL review
     HitlOpenReview,
     /// No action (default for unhandled events)
-    None,
+
+    // ============== Connection Events ==============
+    /// Start connection flow (create subscription)
+    StartConnection,
+    /// WebSocket connected successfully with subscription
+    WebSocketConnected(String), // subscription_id
+    /// Subscription was resumed (existing one found)
+    SubscriptionResumed(String), // subscription_id
+    /// WebSocket disconnected
+    WebSocketDisconnected,
+    /// Connection failed with error
+    ConnectionFailed(String), // error message
+
+    // ============== Query Events ==============
+    /// Query input text changed
+    QueryInputChanged(String),
+    /// Query was submitted for execution
+    QuerySubmitted,
+    /// Query execution started
+    QueryExecutionStarted(String), // query text
+    /// Query execution completed
+    QueryExecutionCompleted(String), // result
+    /// Query execution failed
+    QueryExecutionFailed(String), // error
+    // ============== HITL Events ==============
+    /// HITL approval request received (using generated type)
+    HitlRequestReceived(HitlApprovalRequest),
+    /// Open HITL review window for specific request
+    HitlReviewOpen(String), // request_id
+    /// Close HITL review window
+    HitlReviewClose,
+    /// HITL decision was made (using generated type)
+    HitlDecisionMade(String, HitlDecisionRequest), // request_id, decision
+    /// HITL decision was sent successfully
+    HitlDecisionSent(String), // request_id
+    /// HITL decision sending failed
+    HitlDecisionFailed(String, String), // request_id, error
+
+    // ============== UI Navigation Events ==============
+    /// Change focus to next component
+    /// Focus specific component
+    FocusComponent(ComponentId),
+    /// Toggle help overlay
+    TimelineNodeToggle(String), // node_id
+    // ============== Layout Events ==============
+    /// Switch to normal layout (timeline + query)
+    LayoutNormal,
+    /// Switch to HITL review layout
+    LayoutHitlReview,
+
+    // ============== Error Events ==============
+    /// General error occurred
+    ErrorOccurred(String),
+    /// Display status message
+    StatusMessage(StatusSeverity, String),
 }
 
 /// User events (currently none, but required by TUIRealm)

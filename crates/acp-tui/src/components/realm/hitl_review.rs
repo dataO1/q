@@ -18,7 +18,7 @@ use tuirealm::{
 use tui_textarea::TextArea;
 
 use crate::client::types::{HitlApprovalRequest, HitlDecisionRequest, HitlDecision as ApiHitlDecision};
-use crate::message::{AppMsg, NoUserEvent, ComponentMsg};
+use crate::message::{APIEvent, NoUserEvent, UserEvent};
 
 /// Review modes for the HITL window
 #[derive(Debug, Clone, PartialEq)]
@@ -35,7 +35,7 @@ pub enum ReviewMode {
 #[derive(Debug, Clone, PartialEq)]
 pub enum HitlDecision {
     Approve,
-    Reject, 
+    Reject,
     Modify,
 }
 
@@ -67,7 +67,7 @@ impl HitlReviewRealmComponent {
         );
         textarea.set_style(Style::default().fg(Color::White));
         textarea.set_placeholder_text("Enter your comments or modifications here...");
-        
+
         Self {
             current_request: None,
             textarea,
@@ -77,7 +77,7 @@ impl HitlReviewRealmComponent {
             focused: false,
         }
     }
-    
+
     /// Show review window with a request
     pub fn show_review(&mut self, request: HitlApprovalRequest) {
         self.current_request = Some(request);
@@ -88,7 +88,7 @@ impl HitlReviewRealmComponent {
         self.visible = true;
         self.focused = true;
     }
-    
+
     /// Hide the review window
     pub fn hide(&mut self) {
         self.visible = false;
@@ -97,7 +97,7 @@ impl HitlReviewRealmComponent {
         self.decision = None;
         self.mode = ReviewMode::Viewing;
     }
-    
+
     /// Set decision
     pub fn set_decision(&mut self, decision: HitlDecision) {
         if decision == HitlDecision::Modify {
@@ -107,32 +107,32 @@ impl HitlReviewRealmComponent {
         }
         self.decision = Some(decision);
     }
-    
+
     /// Submit the current decision
-    pub fn submit_decision(&mut self) -> Option<AppMsg> {
+    pub fn submit_decision(&mut self) -> Option<APIEvent> {
         if let (Some(ref request), Some(decision)) = (&self.current_request, &self.decision) {
             let reason = if self.textarea.lines().iter().any(|line| !line.is_empty()) {
                 Some(self.textarea.lines().join("\n"))
             } else {
                 None
             };
-            
+
             // Clone the data we need before calling self.hide()
             let request_agent_id = request.agent_id.clone();
             let decision_clone = decision.clone();
-            
+
             // Create the decision request before calling hide()
             let decision_request = HitlDecisionRequest {
-                decision: self.convert_to_api_decision(&decision_clone), 
+                decision: self.convert_to_api_decision(&decision_clone),
                 modified_content: reason.clone(),
                 request_id: request_agent_id.clone(),
                 reason,
             };
-            
+
             // Now we can call hide() since we've extracted all the data we need
             self.hide();
-            
-            Some(AppMsg::HitlDecisionMade(
+
+            Some(APIEvent::HitlDecisionMade(
                 request_agent_id,
                 decision_request
             ))
@@ -140,12 +140,12 @@ impl HitlReviewRealmComponent {
             None
         }
     }
-    
+
     /// Is the component visible?
     pub fn is_visible(&self) -> bool {
         self.visible
     }
-    
+
     /// Convert UI HitlDecision to API HitlDecision
     fn convert_to_api_decision(&self, decision: &HitlDecision) -> ApiHitlDecision {
         match decision {
@@ -154,12 +154,12 @@ impl HitlReviewRealmComponent {
             HitlDecision::Modify => ApiHitlDecision::Modify,
         }
     }
-    
+
     /// Get the popup area for centering the modal
     fn get_popup_area(&self, area: Rect) -> Rect {
         let popup_width = area.width.min(80);
         let popup_height = area.height.min(30);
-        
+
         Rect {
             x: (area.width.saturating_sub(popup_width)) / 2,
             y: (area.height.saturating_sub(popup_height)) / 2,
@@ -169,12 +169,12 @@ impl HitlReviewRealmComponent {
     }
 }
 
-impl Component<ComponentMsg, AppMsg> for HitlReviewRealmComponent {
-    fn on(&mut self, ev: Event<AppMsg>) -> Option<ComponentMsg> {
+impl Component<UserEvent, APIEvent> for HitlReviewRealmComponent {
+    fn on(&mut self, ev: Event<APIEvent>) -> Option<UserEvent> {
         if !self.visible || !self.focused {
             return None;
         }
-        
+
         match ev {
             Event::Keyboard(key_event) => {
                 match self.mode {
@@ -229,10 +229,10 @@ impl Component<ComponentMsg, AppMsg> for HitlReviewRealmComponent {
                     ReviewMode::Confirming => {
                         match key_event {
                             TuiKeyEvent { code: Key::Char('y'), .. } | TuiKeyEvent { code: Key::Enter, .. } => {
-                                Some(ComponentMsg::HitlSubmitDecision)
+                                Some(UserEvent::HitlSubmitDecision)
                             },
                             TuiKeyEvent { code: Key::Char('n'), .. } | TuiKeyEvent { code: Key::Esc, .. } => {
-                                Some(ComponentMsg::HitlCancelReview)
+                                Some(UserEvent::HitlCancelReview)
                             },
                             _ => None,
                         }
@@ -249,12 +249,12 @@ impl MockComponent for HitlReviewRealmComponent {
         if !self.visible {
             return;
         }
-        
+
         let popup_area = self.get_popup_area(area);
-        
+
         // Clear the background
         frame.render_widget(Clear, popup_area);
-        
+
         // Split into sections
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -264,7 +264,7 @@ impl MockComponent for HitlReviewRealmComponent {
                 Constraint::Length(3),    // Instructions
             ])
             .split(popup_area);
-        
+
         // Render request details
         if let Some(ref request) = self.current_request {
             let title = format!(" HITL Review - Agent {} ", request.agent_id);
@@ -273,7 +273,7 @@ impl MockComponent for HitlReviewRealmComponent {
                 ReviewMode::Editing => Color::Green,
                 ReviewMode::Confirming => Color::Red,
             };
-            
+
             let details_text = vec![
                 Line::from(""),
                 Line::from(vec![Span::styled("Agent:", Style::default().fg(Color::Green))]),
@@ -288,22 +288,22 @@ impl MockComponent for HitlReviewRealmComponent {
                 Line::from(vec![Span::styled("Proposed Changes:", Style::default().fg(Color::Cyan))]),
                 Line::from(format!("  {} files", request.proposed_changes.len())),
             ];
-            
+
             let details_widget = Paragraph::new(details_text)
                 .block(Block::default()
                     .title(title)
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(border_color)))
                 .wrap(Wrap { trim: true });
-            
+
             frame.render_widget(details_widget, chunks[0]);
         }
-        
+
         // Render text area when editing
         if self.mode == ReviewMode::Editing {
             frame.render_widget(&self.textarea, chunks[1]);
         }
-        
+
         // Render instructions
         let instructions = match self.mode {
             ReviewMode::Viewing => {
@@ -344,13 +344,13 @@ impl MockComponent for HitlReviewRealmComponent {
                 ]
             }
         };
-        
+
         let instructions_widget = Paragraph::new(instructions)
             .block(Block::default().borders(Borders::ALL));
-        
+
         frame.render_widget(instructions_widget, chunks[2]);
     }
-    
+
     fn query(&self, attr: Attribute) -> Option<AttrValue> {
         match attr {
             Attribute::Focus => Some(AttrValue::Flag(self.focused)),
@@ -358,7 +358,7 @@ impl MockComponent for HitlReviewRealmComponent {
             _ => None,
         }
     }
-    
+
     fn attr(&mut self, attr: Attribute, value: AttrValue) {
         match attr {
             Attribute::Focus => {
@@ -376,7 +376,7 @@ impl MockComponent for HitlReviewRealmComponent {
             _ => {}
         }
     }
-    
+
     fn state(&self) -> State {
         if self.visible {
             State::One(StateValue::String(format!("{:?}", self.mode)))
@@ -384,7 +384,7 @@ impl MockComponent for HitlReviewRealmComponent {
             State::None
         }
     }
-    
+
     fn perform(&mut self, cmd: Cmd) -> CmdResult {
         match cmd {
             Cmd::Submit => {

@@ -12,7 +12,7 @@ use tuirealm::{
     event::{Key, KeyEvent as TuiKeyEvent},
     Component, Event, MockComponent, State, StateValue, AttrValue, Attribute,
 };
-use crate::message::{AppMsg, NoUserEvent, ComponentMsg};
+use crate::message::{APIEvent, NoUserEvent, UserEvent};
 
 /// Help overlay component using TUIRealm architecture
 pub struct HelpRealmComponent {
@@ -61,8 +61,8 @@ impl HelpRealmComponent {
     }
 }
 
-impl Component<ComponentMsg, AppMsg> for HelpRealmComponent {
-    fn on(&mut self, ev: Event<AppMsg>) -> Option<ComponentMsg> {
+impl Component<UserEvent, APIEvent> for HelpRealmComponent {
+    fn on(&mut self, ev: Event<APIEvent>) -> Option<UserEvent> {
         // Only respond when visible
         if !self.visible {
             return None;
@@ -71,7 +71,7 @@ impl Component<ComponentMsg, AppMsg> for HelpRealmComponent {
         match ev {
             Event::Keyboard(_) => {
                 // Any key closes help
-                Some(ComponentMsg::HelpToggle)
+                Some(UserEvent::HelpToggle)
             }
             _ => None,
         }

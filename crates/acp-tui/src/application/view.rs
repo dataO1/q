@@ -9,9 +9,9 @@ use crate::{
 };
 
 /// Render the complete application UI
-pub fn render_app(
+pub fn render(
     model: &AppModel,
-    app: &mut Application<ComponentId, crate::message::ComponentMsg, crate::message::AppMsg>,
+    app: &mut Application<ComponentId, crate::message::UserEvent, crate::message::APIEvent>,
     frame: &mut Frame,
 ) {
     let area = frame.area();
@@ -32,7 +32,7 @@ pub fn render_app(
 /// Render normal layout: Timeline + QueryInput + StatusLine
 fn render_normal_layout(
     model: &AppModel,
-    app: &mut Application<ComponentId, crate::message::ComponentMsg, crate::message::AppMsg>,
+    app: &mut Application<ComponentId, crate::message::UserEvent, crate::message::APIEvent>,
     frame: &mut Frame,
     area: Rect,
 ) {
@@ -53,7 +53,7 @@ fn render_normal_layout(
 /// Render HITL review layout: HitlQueue + Timeline (smaller) + StatusLine
 fn render_hitl_layout(
     model: &AppModel,
-    app: &mut Application<ComponentId, crate::message::ComponentMsg, crate::message::AppMsg>,
+    app: &mut Application<ComponentId, crate::message::UserEvent, crate::message::APIEvent>,
     frame: &mut Frame,
     area: Rect,
 ) {
