@@ -57,12 +57,10 @@ pub enum AppMsg {
     // ============== Connection Events ==============
     /// Start connection flow (create subscription)
     StartConnection,
-    /// Subscription was created successfully
-    SubscriptionCreated(String), // subscription_id
+    /// WebSocket connected successfully with subscription
+    WebSocketConnected(String), // subscription_id
     /// Subscription was resumed (existing one found)
     SubscriptionResumed(String), // subscription_id
-    /// WebSocket connected successfully
-    WebSocketConnected,
     /// WebSocket disconnected
     WebSocketDisconnected,
     /// Connection failed with error

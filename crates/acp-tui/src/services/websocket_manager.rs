@@ -69,8 +69,8 @@ impl WebSocketManager {
                 // Connect to WebSocket  
                 match connect_async(&ws_url).await {
                     Ok((ws_stream, _)) => {
-                        info!("WebSocket connected successfully");
-                        let _ = self.sender.send(AppMsg::WebSocketConnected);
+                        info!("WebSocket connected successfully with subscription: {}", subscription_id);
+                        let _ = self.sender.send(AppMsg::WebSocketConnected(subscription_id.clone()));
                         
                         // Split the stream for concurrent reading and writing
                         let (_write, mut read) = ws_stream.split();

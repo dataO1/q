@@ -229,9 +229,21 @@ impl Application {
                 return Ok(true);
             }
             ComponentMsg::QuerySubmit => {
-                // Convert to AppMsg and process through normal flow
-                let app_msg = AppMsg::QuerySubmitted;
-                self.handle_message(app_msg).await?;
+                // Get the query text from the QueryInput component
+                if let Ok(Some(tuirealm::AttrValue::String(query_text))) = 
+                    self.ui_app.query(&ComponentId::QueryInput, tuirealm::Attribute::Text) {
+                    info!(query = %query_text, "Query text retrieved from component");
+                    
+                    // Update the model with the current query text first
+                    let update_msg = AppMsg::QueryInputChanged(query_text.clone());
+                    self.handle_message(update_msg).await?;
+                    
+                    // Then submit the query
+                    let submit_msg = AppMsg::QuerySubmitted;
+                    self.handle_message(submit_msg).await?;
+                } else {
+                    warn!("Failed to retrieve query text from QueryInput component");
+                }
             }
             ComponentMsg::FocusNext => {
                 let app_msg = AppMsg::FocusNext;
@@ -356,22 +368,31 @@ impl Application {
     /// Handle side effects (I/O operations)
     async fn handle_side_effects(&mut self, msg: &AppMsg) -> Result<()> {
         match msg {
-            AppMsg::QuerySubmitted => {
-                if !self.model.query_text.trim().is_empty() {
-                    if let Some(subscription_id) = self.model.get_subscription_id() {
-                        let query = self.model.query_text.clone();
-                        let subscription_id = subscription_id.to_string();
-                        let executor = self.query_executor.clone();
-                        tokio::spawn(async move {
-                            let _ = executor.execute_query(query, subscription_id).await;
-                        });
-                    } else {
-                        // Not connected - send error message
-                        let _ = self.sender.send(AppMsg::StatusMessage(
-                            crate::message::StatusSeverity::Error,
-                            "Cannot execute query: Not connected to server".to_string()
-                        ));
-                    }
+            AppMsg::QueryExecutionStarted(query) => {
+                info!(
+                    query = %query,
+                    subscription_id = ?self.model.subscription_id,
+                    "Handling query execution side effect"
+                );
+                
+                if let Some(subscription_id) = self.model.get_subscription_id() {
+                    let query = query.clone();
+                    let subscription_id = subscription_id.to_string();
+                    let executor = self.query_executor.clone();
+                    info!(
+                        query = %query,
+                        subscription_id = %subscription_id,
+                        "Starting query execution with subscription"
+                    );
+                    tokio::spawn(async move {
+                        let _ = executor.execute_query(query, subscription_id).await;
+                    });
+                } else {
+                    warn!("Query execution attempted without subscription");
+                    let _ = self.sender.send(AppMsg::StatusMessage(
+                        crate::message::StatusSeverity::Error,
+                        "Cannot execute query: Not connected to server".to_string()
+                    ));
                 }
             }
 

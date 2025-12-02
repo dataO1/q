@@ -114,8 +114,13 @@ impl EventLogger {
                     "Status event received"
                 );
             }
-            AppMsg::WebSocketConnected => {
-                info!(event = "websocket", status = "connected", "WebSocket connection established");
+            AppMsg::WebSocketConnected(subscription_id) => {
+                info!(
+                    event = "websocket", 
+                    status = "connected", 
+                    subscription_id = %subscription_id,
+                    "WebSocket connection established"
+                );
             }
             AppMsg::WebSocketDisconnected => {
                 warn!(event = "websocket", status = "disconnected", "WebSocket connection lost");

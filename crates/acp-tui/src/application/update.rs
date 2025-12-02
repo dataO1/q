@@ -45,12 +45,22 @@ pub fn update(model: &mut AppModel, msg: AppMsg) -> Result<Vec<AppMsg>> {
             model.set_status_message(StatusSeverity::Info, "Connecting to ACP server...".to_string());
         }
 
-        AppMsg::SubscriptionCreated(subscription_id) => {
-            info!(subscription_id = %subscription_id, "Subscription created");
+        AppMsg::WebSocketConnected(subscription_id) => {
+            info!(
+                subscription_id = %subscription_id,
+                previous_subscription = ?model.subscription_id,
+                previous_connection_state = ?model.connection_state,
+                "WebSocket connected with subscription"
+            );
             model.subscription_id = Some(subscription_id.clone());
             model.connection_state = ConnectionState::Connected;
             model.set_status_message(StatusSeverity::Info,
                 format!("Connected (subscription: {})", subscription_id));
+            info!(
+                subscription_id = %subscription_id,
+                new_connection_state = ?model.connection_state,
+                "Connection state updated"
+            );
         }
 
         AppMsg::SubscriptionResumed(subscription_id) => {
@@ -59,12 +69,6 @@ pub fn update(model: &mut AppModel, msg: AppMsg) -> Result<Vec<AppMsg>> {
             model.connection_state = ConnectionState::Connected;
             model.set_status_message(StatusSeverity::Info,
                 format!("Reconnected (subscription: {})", subscription_id));
-        }
-
-        AppMsg::WebSocketConnected => {
-            info!("WebSocket connected");
-            model.set_connection_state(crate::components::realm::status_line::ConnectionState::Connected);
-            model.set_status_message(StatusSeverity::Info, "WebSocket connected".to_string());
         }
 
         AppMsg::WebSocketDisconnected => {
@@ -91,6 +95,14 @@ pub fn update(model: &mut AppModel, msg: AppMsg) -> Result<Vec<AppMsg>> {
         }
 
         AppMsg::QuerySubmitted => {
+            debug!(
+                query_text = %model.query_text,
+                query_len = model.query_text.len(),
+                subscription_id = ?model.subscription_id,
+                connection_state = ?model.connection_state,
+                "Processing query submission"
+            );
+
             if !model.query_text.trim().is_empty() {
                 let query = model.query_text.clone();
                 info!(query = %query, query_len = query.len(), "Query submitted");
@@ -108,7 +120,12 @@ pub fn update(model: &mut AppModel, msg: AppMsg) -> Result<Vec<AppMsg>> {
         }
 
         AppMsg::QueryExecutionStarted(query) => {
-            info!(query = %query, "Query execution started");
+            info!(
+                query = %query,
+                subscription_id = ?model.subscription_id,
+                connection_state = ?model.connection_state,
+                "Query execution started"
+            );
             model.set_status_message(StatusSeverity::Info,
                 format!("Executing query: {}", query));
         }
