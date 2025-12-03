@@ -20,7 +20,7 @@ impl ApiService {
     pub fn new(client: Arc<AcpClient>) -> Self {
         Self { client }
     }
-    
+
     /// Retry an async operation with exponential backoff
     async fn retry_with_backoff<T, F, Fut>(&self, operation: F, operation_name: &str) -> Result<T>
     where
@@ -29,20 +29,20 @@ impl ApiService {
     {
         const MAX_RETRIES: u32 = 3;
         const BASE_DELAY_MS: u64 = 100;
-        
+
         let mut last_error = None;
-        
+
         for attempt in 1..=MAX_RETRIES {
             match operation().await {
                 Ok(result) => return Ok(result),
                 Err(e) => {
                     last_error = Some(e);
-                    
+
                     if attempt < MAX_RETRIES {
                         let delay = Duration::from_millis(BASE_DELAY_MS * 2_u64.pow(attempt - 1));
                         warn!(
                             "{} failed (attempt {}/{}), retrying in {:?}: {}",
-                            operation_name, attempt, MAX_RETRIES, delay, 
+                            operation_name, attempt, MAX_RETRIES, delay,
                             last_error.as_ref().unwrap()
                         );
                         tokio::time::sleep(delay).await;
@@ -50,14 +50,14 @@ impl ApiService {
                 }
             }
         }
-        
+
         Err(last_error.unwrap())
     }
-    
+
     /// Execute a query through the ACP API
     pub async fn execute_query(&self, query: String, subscription_id: String) -> Result<String> {
         info!("Executing query: {}", query);
-        
+
         let query_clone = query.clone();
         let subscription_id_clone = subscription_id.clone();
         self.retry_with_backoff(
@@ -73,13 +73,13 @@ impl ApiService {
                         language_distribution: std::collections::HashMap::new(),
                     }
                 });
-                
+
                 let request = QueryRequest {
                     query: query_clone.clone(),
                     project_scope,
                     subscription_id: subscription_id_clone.clone(),
                 };
-                
+
                 // Use the generated client's query_task method (from operationId)
                 match self.client.client().query_task(&request).await {
                     Ok(response) => {
@@ -97,39 +97,16 @@ impl ApiService {
             "Query execution"
         ).await
     }
-    
-    /// Submit HITL decision
-    pub async fn submit_hitl_decision(
-        &self,
-        request_id: String,
-        decision: HitlDecisionRequest,
-    ) -> Result<()> {
-        info!("Submitting HITL decision for request: {}", request_id);
-        
-        // Use the generated client's submit_decision method (from operationId)
-        // The method takes the request body as a parameter directly  
-        match self.client.client().submit_decision(&decision).await
-        {
-            Ok(_) => {
-                info!("HITL decision submitted successfully");
-                Ok(())
-            }
-            Err(e) => {
-                error!("HITL decision submission failed: {}", e);
-                Err(e.into())
-            }
-        }
-    }
-    
+
     /// Create subscription
     pub async fn create_subscription(&self, client_id: String) -> Result<String> {
         info!("Creating subscription for client: {}", client_id);
-        
+
         // Create subscription request using generated API types
         let request = SubscribeRequest {
             client_id: Some(client_id),
         };
-        
+
         // Use the generated client's create_subscription method (from operationId)
         // The method takes the request body as a parameter directly
         match self.client.client().create_subscription(&request).await {
@@ -144,11 +121,11 @@ impl ApiService {
             }
         }
     }
-    
+
     /// Get health status
     pub async fn get_health(&self) -> Result<HealthResponse> {
         debug!("Checking server health");
-        
+
         // Use the generated client's health check method (as shown in client.rs)
         match self.client.client().health_check().await {
             Ok(response) => {

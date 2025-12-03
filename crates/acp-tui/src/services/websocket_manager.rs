@@ -6,8 +6,7 @@ use tokio::{sync::mpsc, time::sleep};
 use tracing::{error, info, warn};
 
 use crate::{
-    message::APIEvent,
-    components::realm::status_line::ConnectionState,
+    client::StatusEvent, components::realm::status_line::ConnectionState, message::APIEvent
 };
 
 /// WebSocket connection manager with automatic reconnection
@@ -159,5 +158,9 @@ impl WebSocketManager {
     /// Reset reconnection attempts (call when manually reconnecting)
     pub fn reset_reconnect_attempts(&mut self) {
         self.reconnect_attempts = 0;
+    }
+
+    pub fn submit_hitl_decision(&self, event: StatusEvent){
+        todo!("implement hitl decision submit in websocket manager")
     }
 }

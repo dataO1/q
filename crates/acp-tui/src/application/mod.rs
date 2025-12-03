@@ -21,9 +21,9 @@ use tuirealm::{
 };
 
 use crate::{
-    client::{AcpClient, EventSource, EventType, StatusEvent}, components::realm::{
-        event_tree::EventTreeRealmComponent, help::HelpRealmComponent, root::RootRealmComponent, status_line::ConnectionState, HitlQueueRealmComponent, HitlReviewRealmComponent, QueryInputRealmComponent, StatusLineRealmComponent
-    }, config::Config, log_state_change, message::{APIEvent, ComponentId,  StatusSeverity, UserEvent}, services::{ApiService, QueryExecutor, WebSocketManager}, time_operation, utils::{generate_client_id, EventLogger}
+    client::{AcpClient, EventSource, EventType, StatusEvent}, components::{realm::{
+        event_tree::EventTreeRealmComponent, help::HelpRealmComponent, root::RootRealmComponent, status_line::ConnectionState, QueryInputRealmComponent, StatusLineRealmComponent
+    }, HitlReviewRealmComponent}, config::Config, log_state_change, message::{APIEvent, ComponentId,  StatusSeverity, UserEvent}, services::{ApiService, QueryExecutor, WebSocketManager}, time_operation, utils::{generate_client_id, EventLogger}
 };
 
 /// Async channel wrapper that implements PollAsync for AppMsg
@@ -133,9 +133,6 @@ impl Application {
 
         app.mount(ComponentId::HitlReview, Box::new(HitlReviewRealmComponent::new()), vec![])
             .context("Failed to mount HitlReview component")?;
-
-        app.mount(ComponentId::HitlQueue, Box::new(HitlQueueRealmComponent::new()), vec![])
-            .context("Failed to mount HitlQueue component")?;
 
         app.mount(ComponentId::Help, Box::new(HelpRealmComponent::new()), vec![])
             .context("Failed to mount HelpRealmComponent component")?;
@@ -540,43 +537,6 @@ impl Application {
                     format!("Query failed: {}", error));
             }
 
-
-            // ============== HITL Events ==============
-            UserEvent::HitlRequestReceived(request) => {
-                info!(request_id = %request.request_id, "HITL request received");
-                model.add_hitl_request(request);
-                model.switch_to_hitl_layout();
-            }
-
-            UserEvent::HitlReviewOpen(request_id) => {
-                info!(request_id = %request_id, "Opening HITL review");
-                if let Some(request) = model.remove_hitl_request(&request_id) {
-                    model.current_hitl_request = Some(request);
-                    model.focused_component = crate::message::ComponentId::HitlReview;
-                } else {
-                    warn!(request_id = %request_id, "HITL request not found");
-                }
-            }
-
-            UserEvent::HitlReviewClose => {
-                info!("Closing HITL review");
-                model.current_hitl_request = None;
-                model.switch_to_normal_layout();
-            }
-
-
-            UserEvent::HitlDecisionSent(request_id) => {
-                info!(request_id = %request_id, "HITL decision sent successfully");
-                model.set_status_message(StatusSeverity::Info,
-                    format!("HITL decision sent for {}", request_id));
-            }
-
-            UserEvent::HitlDecisionFailed(request_id, error) => {
-                warn!(request_id = %request_id, error = %error, "HITL decision failed");
-                model.set_status_message(StatusSeverity::Error,
-                    format!("HITL decision failed for {}: {}", request_id, error));
-            }
-
             // ============== UI Navigation Events ==============
             UserEvent::FocusNext => {
                 debug!(from = ?model.focused_component, "Focus next component");
@@ -600,17 +560,6 @@ impl Application {
                 model.toggle_help();
             }
 
-            // ============== Layout Events ==============
-            UserEvent::LayoutNormal => {
-                info!("Switching to normal layout");
-                model.switch_to_normal_layout();
-            }
-
-            UserEvent::LayoutHitlReview => {
-                info!("Switching to HITL review layout");
-                model.switch_to_hitl_layout();
-            }
-
             // ============== Error Events ==============
             UserEvent::ErrorOccurred(error) => {
                 warn!(error = %error, "Error occurred");
@@ -622,38 +571,12 @@ impl Application {
                 model.set_status_message(severity, message);
             }
 
-
-            UserEvent::HitlDecisionMade(request_id, decision) => {
-                info!(request_id = %request_id, decision = ?decision, "HITL decision made");
-                model.current_hitl_request = None;
-                if model.hitl_requests.is_empty() {
-                    model.switch_to_normal_layout();
+            UserEvent::HitlDecisionSubmit{id, approved, modified_content, reasoning } =>{
+                if let ConnectionState::Connected(conversation_id) = &self.model.connection_state{
+                    let event = EventType::HitlDecision{id: id.clone(), approved, modified_content, reasoning};
+                    let event = StatusEvent{conversation_id: conversation_id.clone(), timestamp: Utc::now(), source: EventSource::Hitl{request_id:id}, event};
+                    self.websocket_manager.submit_hitl_decision(event);
                 }
-                // Submit HITL decision to API
-                let request_id = request_id.clone();
-                let decision = decision.clone();
-                let api_service = self.api_service.clone();
-                let sender = self.sender.clone();
-
-                tokio::spawn(async move {
-                    match api_service.submit_hitl_decision(request_id.clone(), decision).await {
-                        Ok(_) => {
-                            let _ = sender.send(APIEvent::HitlDecisionSent(request_id));
-                        }
-                        Err(e) => {
-                            let _ = sender.send(APIEvent::HitlDecisionFailed(request_id, e.to_string()));
-                        }
-                    }
-                });
-            }
-            UserEvent::HitlSubmitDecision=>{
-                todo!("implementHitlSubmitDecision")
-            }
-            UserEvent::HitlCancelReview=>{
-                todo!("HitlCancelReview")
-            }
-            UserEvent::HitlOpenReview=>{
-                todo!("HitlOpenReview")
             }
         }
 

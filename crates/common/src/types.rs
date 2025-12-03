@@ -164,19 +164,19 @@ pub struct MessageMetadata {
     pub code_snippets: Vec<String>,
 }
 
-/// Real-time status event for WebSocket streaming  
+/// Real-time status event for WebSocket streaming
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct StatusEvent {
     /// Unique identifier for this execution
-    pub execution_id: String,
-    
+    pub conversation_id: String,
+
     /// When this event occurred
     pub timestamp: DateTime<Utc>,
-    
+
     /// Source that generated this event
     pub source: EventSource,
-    
+
     /// The actual event data
     pub event: EventType,
 }
@@ -188,29 +188,29 @@ pub struct StatusEvent {
 pub enum EventSource {
     /// Event from the orchestrator
     Orchestrator,
-    
+
     /// Event from a specific agent
-    Agent { 
-        agent_id: String, 
+    Agent {
+        agent_id: String,
         agent_type: AgentType,
         task_id: Option<String>,
     },
-    
+
     /// Event from a tool being used by an agent
-    Tool { 
-        tool_name: String, 
-        agent_id: String 
+    Tool {
+        tool_name: String,
+        agent_id: String
     },
-    
+
     /// Event from workflow/DAG execution
-    Workflow { 
-        node_id: String, 
-        wave: usize 
+    Workflow {
+        node_id: String,
+        wave: usize
     },
-    
+
     /// Event from human-in-the-loop system
-    Hitl { 
-        request_id: String 
+    Hitl {
+        request_id: String
     },
 }
 
@@ -247,115 +247,123 @@ pub struct TaskInfo {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventType {
     /// Execution has started
-    ExecutionStarted { 
-        query: String 
+    ExecutionStarted {
+        query: String
     },
-    
+
     /// Execution completed successfully
-    ExecutionCompleted { 
-        result: String 
+    ExecutionCompleted {
+        result: String
     },
-    
+
     /// Execution failed with an error
-    ExecutionFailed { 
-        error: String 
+    ExecutionFailed {
+        error: String
     },
-    
+
     /// An agent has started working
-    AgentStarted { 
-        context_size: usize 
+    AgentStarted {
+        context_size: usize
     },
-    
+
     /// Agent is thinking/processing (streaming thoughts)
-    AgentThinking { 
-        thought: String 
+    AgentThinking {
+        thought: String
     },
-    
+
     /// Agent has completed its task
-    AgentCompleted { 
-        result: String 
+    AgentCompleted {
+        result: String
     },
-    
+
     /// Agent failed to complete its task
-    AgentFailed { 
-        error: String 
+    AgentFailed {
+        error: String
     },
-    
+
     /// A tool has started executing
-    ToolStarted { 
-        args: serde_json::Value 
+    ToolStarted {
+        args: serde_json::Value
     },
-    
+
     /// Tool execution completed
-    ToolCompleted { 
-        result: serde_json::Value 
+    ToolCompleted {
+        result: serde_json::Value
     },
-    
+
     /// Tool execution failed
-    ToolFailed { 
-        error: String 
+    ToolFailed {
+        error: String
     },
-    
+
     /// Human-in-the-loop approval requested
-    HitlRequested { 
+    HitlRequested {
         task_description: String,
         risk_level: String,
     },
-    
+
+    /// Human-in-the-loop approval requested
+    HitlDecision{
+        id: String,
+        approved: bool,
+        modified_content: Option<String>,
+        reasoning: Option<String>,
+    },
+
     /// Human-in-the-loop decision received
-    HitlCompleted { 
+    HitlCompleted {
         approved: bool,
         reason: Option<String>,
     },
-    
+
     /// Workflow step started
-    WorkflowStepStarted { 
-        step_name: String 
+    WorkflowStepStarted {
+        step_name: String
     },
-    
+
     /// Workflow step completed
-    WorkflowStepCompleted { 
-        step_name: String 
+    WorkflowStepCompleted {
+        step_name: String
     },
-    
+
     /// Planning phase started
     PlanningStarted,
-    
+
     /// Planning phase completed
-    PlanningCompleted { 
+    PlanningCompleted {
         task_count: usize,
         reasoning: String,
     },
-    
+
     /// Execution plan ready with computed waves
     ExecutionPlanReady {
         plan: ExecutionPlan,
     },
-    
+
     /// Wave execution started
-    WaveStarted { 
+    WaveStarted {
         wave_index: usize,
         task_count: usize,
         task_ids: Vec<String>,
     },
-    
+
     /// Wave execution completed
-    WaveCompleted { 
+    WaveCompleted {
         wave_index: usize,
         success_count: usize,
         failure_count: usize,
     },
-    
+
     /// Task node started within a wave
-    TaskNodeStarted { 
+    TaskNodeStarted {
         task_id: String,
         agent_id: String,
         wave_index: usize,
         description: String,
     },
-    
+
     /// Task node completed within a wave
-    TaskNodeCompleted { 
+    TaskNodeCompleted {
         task_id: String,
         agent_id: String,
         wave_index: usize,

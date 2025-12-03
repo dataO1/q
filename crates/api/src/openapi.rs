@@ -19,11 +19,11 @@ REST API for multi-agent orchestration with real-time streaming capabilities.
 
 ## Overview
 
-This API implements the Agent Communication Protocol (ACP) standard for coordinating 
+This API implements the Agent Communication Protocol (ACP) standard for coordinating
 multiple AI agents in complex workflows. Key features:
 
 - **Asynchronous Execution**: Queries return immediately with streaming updates
-- **Conversation-based**: Multiple queries can be grouped in conversations  
+- **Conversation-based**: Multiple queries can be grouped in conversations
 - **Real-time Streaming**: WebSocket events for live progress updates
 - **Multi-agent Coordination**: Automatic task decomposition and agent routing
 
@@ -38,8 +38,8 @@ multiple AI agents in complex workflows. Key features:
 ## Event Flow
 
 ```
-ExecutionStarted → Query Analysis → Task Decomposition → 
-AgentStarted → WorkflowStepStarted → [AgentThinking*] → 
+ExecutionStarted → Query Analysis → Task Decomposition →
+AgentStarted → WorkflowStepStarted → [AgentThinking*] →
 WorkflowStepCompleted → AgentCompleted → ExecutionCompleted
 ```
 
@@ -62,7 +62,7 @@ This context allows agents to understand the codebase and provide relevant assis
 
 ## Standards Compliance
 
-This API follows the [Agent Communication Protocol](https://agentcommunicationprotocol.dev) 
+This API follows the [Agent Communication Protocol](https://agentcommunicationprotocol.dev)
 standard for agent interoperability and communication.
         ",
         version = "1.0.0",
@@ -80,9 +80,6 @@ standard for agent interoperability and communication.
         crate::routes::agents::list_capabilities,
         crate::routes::subscribe::create_subscription,
         crate::routes::subscribe::get_subscription_status,
-        crate::routes::hitl::get_pending_requests,
-        crate::routes::hitl::submit_decision,
-        crate::routes::hitl::get_request_details,
         crate::server::health_check
     ),
     components(schemas(
@@ -95,17 +92,6 @@ standard for agent interoperability and communication.
         AgentCapability,
         HealthResponse,
         ErrorResponse,
-        // HITL types
-        HitlApprovalRequest,
-        ProposedChange,
-        ChangeType,
-        HitlDecisionRequest,
-        HitlDecision,
-        HitlDecisionResponse,
-        HitlPendingResponse,
-        HitlRequestDetails,
-        HitlMetadata,
-        TaskContext,
         // Common types
         crate::types::ProjectScope,
         crate::types::StatusEvent,
@@ -118,9 +104,8 @@ standard for agent interoperability and communication.
     )),
     tags(
         (name = "query", description = "Query execution endpoints"),
-        (name = "discovery", description = "Agent capability discovery"), 
+        (name = "discovery", description = "Agent capability discovery"),
         (name = "health", description = "System health and status"),
-        (name = "HITL", description = "Human-in-the-Loop approval workflows"),
         (name = "streaming", description = "Real-time status streaming (WebSocket)")
     ),
     external_docs(
@@ -139,7 +124,7 @@ pub struct ApiDoc;
         "timestamp": "2024-01-15T14:30:00Z",
         "source": {
             "type": "agent",
-            "agent_id": "coding-agent-1", 
+            "agent_id": "coding-agent-1",
             "agent_type": "Coding"
         },
         "event": {
@@ -171,7 +156,7 @@ enum EventSourceDoc {
     Agent { agent_id: String, agent_type: String },
 }
 
-/// Event type documentation  
+/// Event type documentation
 #[derive(utoipa::ToSchema)]
 #[allow(dead_code)]
 enum EventTypeDoc {

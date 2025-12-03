@@ -11,14 +11,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use tracing::{debug, info, warn, error, instrument};
 use chrono::{DateTime, Utc};
 
 use crate::agents::AgentPool;
 use crate::coordination::CoordinationManager;
 use crate::filelocks::FileLockManager;
-use crate::hitl::{AuditLogger, DefaultApprovalQueue};
+use crate::hitl::{AuditLogger};
 use crate::sharedcontext::SharedContext;
 use crate::orchestrator::Orchestrator;
 
@@ -56,8 +56,8 @@ impl Subscription {
         let id = format!("sub_{}", Uuid::new_v4());
         let now = Utc::now();
         let expires_at = now + chrono::Duration::minutes(ttl_minutes);
-        let (sender, _) = broadcast::channel(1000);
-        
+        let (sender, receiver) = broadcast::channel(1000);
+
         Self {
             id,
             client_id,
@@ -69,58 +69,67 @@ impl Subscription {
             sender: Arc::new(sender),
         }
     }
-    
+    /// Add event to buffer and broadcast if connected
+    pub async fn get_event(&mut self) -> Result<StatusEvent, broadcast::error::RecvError> {
+        // Update activity timestamp
+        self.last_activity = Utc::now();
+        let mut receiver = self.sender.subscribe();
+
+        // Broadcast if connected
+        receiver.recv().await
+    }
+
     /// Add event to buffer and broadcast if connected
     pub fn add_event(&mut self, event: StatusEvent) {
         // Update activity timestamp
         self.last_activity = Utc::now();
-        
+
         // Always buffer events
         self.event_buffer.push_back(event.clone());
-        
+
         // Limit buffer size to prevent memory issues
         if self.event_buffer.len() > 500 {
             self.event_buffer.pop_front();
         }
-        
+
         // Broadcast if connected
         if self.connected {
             let _ = self.sender.send(event);
         }
     }
-    
+
     /// Connect WebSocket and get receiver with replay
     pub fn connect(&mut self) -> broadcast::Receiver<StatusEvent> {
         self.connected = true;
         self.last_activity = Utc::now();
-        
+
         // Create receiver
         let receiver = self.sender.subscribe();
-        
+
         // Replay buffered events
         for event in &self.event_buffer {
             let _ = self.sender.send(event.clone());
         }
-        
+
         receiver
     }
-    
+
     /// Disconnect WebSocket (but keep subscription alive for reconnection)
     pub fn disconnect(&mut self) {
         self.connected = false;
         self.last_activity = Utc::now();
     }
-    
+
     /// Check if subscription has expired
     pub fn is_expired(&self) -> bool {
         Utc::now() > self.expires_at
     }
-    
+
     /// Check if any query has been executed (has any events in buffer)
     pub fn has_executed_query(&self) -> bool {
         !self.event_buffer.is_empty()
     }
-    
+
     /// Check if subscription has been inactive for too long (for cleanup)
     pub fn is_inactive(&self, max_inactivity: chrono::Duration) -> bool {
         Utc::now() - self.last_activity > max_inactivity
@@ -154,11 +163,24 @@ impl BufferedEventSender {
             subscriptions,
         }
     }
-    
+
     /// Send an event, routing it through the subscription's buffering mechanism
+    pub async fn recv(&self) -> Result<StatusEvent, broadcast::error::RecvError> {
+        let mut subscriptions = self.subscriptions.write().await;
+
+        if let Some(subscription) = subscriptions.get_mut(&self.subscription_id) {
+            let event = subscription.get_event().await;
+            event
+        } else {
+            warn!("Tried to send event for unknown subscription: {}", self.subscription_id);
+            Err(broadcast::error::RecvError::Closed)
+        }
+    }
+
+    /// Receive an event, routing it through the subscription's buffering mechanism
     pub async fn send(&self, event: StatusEvent) -> Result<(), broadcast::error::SendError<StatusEvent>> {
         let mut subscriptions = self.subscriptions.write().await;
-        
+
         if let Some(subscription) = subscriptions.get_mut(&self.subscription_id) {
             subscription.add_event(event.clone());
             Ok(())
@@ -173,26 +195,24 @@ impl BufferedEventSender {
 pub struct ExecutionManager {
     /// Active subscriptions for buffered streaming
     subscriptions: Arc<RwLock<HashMap<String, Subscription>>>,
-    
+
     /// System configuration
     config: Arc<SystemConfig>,
-    
+
     /// Agent pool for task execution
     agent_pool: Arc<AgentPool>,
-    
+
     /// Shared context across agents
     shared_context: Arc<RwLock<SharedContext>>,
-    
+
     /// Task coordination
     coordination: Arc<CoordinationManager>,
-    
+
     /// File lock manager
     file_locks: Arc<FileLockManager>,
-    
-    /// HITL components
-    approval_queue: Arc<DefaultApprovalQueue>,
+
     audit_logger: Arc<AuditLogger>,
-    
+
     /// RAG and history
     rag: Arc<SmartMultiSourceRag>,
     history_manager: Arc<RwLock<HistoryManager>>,
@@ -204,39 +224,32 @@ impl ExecutionManager {
     #[instrument(name = "execution_manager_init", skip(config), fields(agents = config.agent_network.agents.len()))]
     pub async fn new(config: SystemConfig) -> Result<Self> {
         info!("Initializing ExecutionManager");
-        
+
         // Initialize all components
         let agent_pool = Arc::new(AgentPool::new(&config.agent_network.agents).await?);
         let shared_context = Arc::new(RwLock::new(SharedContext::new()));
         let coordination = Arc::new(CoordinationManager::new());
         let file_locks = Arc::new(FileLockManager::new(30));
-        
+
         // HITL setup
         let hitl_mode = config.agent_network.hitl.mode;
         let risk_threshold = config.agent_network.hitl.risk_threshold;
-        let approval_queue = Arc::new(DefaultApprovalQueue::new(hitl_mode, risk_threshold));
         let audit_logger = Arc::new(AuditLogger);
-        
-        // Spawn approval handler background task
-        let queue_clone = Arc::clone(&approval_queue);
-        let handler = Arc::new(crate::hitl::ConsoleApprovalHandler);
-        tokio::spawn(async move {
-            queue_clone.run_approver(handler).await;
-        });
-        
+
+
         // RAG and history setup
         let embedding_client = Arc::new(EmbeddingClient::new(
-            &config.embedding.dense_model, 
+            &config.embedding.dense_model,
             config.embedding.vector_size
         )?);
-        
+
         let rag = SmartMultiSourceRag::new(&config, embedding_client.clone()).await?;
         let history_manager = Arc::new(RwLock::new(
             HistoryManager::new(&config.storage.postgres_url, &config.rag).await?
         ));
-        
+
         info!("ExecutionManager initialized successfully");
-        
+
         Ok(Self {
             subscriptions: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(config),
@@ -244,14 +257,13 @@ impl ExecutionManager {
             shared_context,
             coordination,
             file_locks,
-            approval_queue,
             audit_logger,
             rag,
             history_manager,
             embedding_client,
         })
     }
-    
+
     /// Execute a user query with subscription_id - returns subscription_id, streams progress
     #[instrument(name = "execute_query", skip(self))]
     pub async fn execute_query(
@@ -261,57 +273,56 @@ impl ExecutionManager {
         subscription_id: &str,
     ) -> Result<String> {
         info!("Processing query with subscription: {}", subscription_id);
-        
+
         // Get subscription and mark as executed
         let mut subscriptions = self.subscriptions.write().await;
         let subscription = subscriptions.get_mut(subscription_id)
             .ok_or_else(|| anyhow::anyhow!("Subscription '{}' not found", subscription_id))?;
-        
+
         if subscription.is_expired() {
             return Err(anyhow::anyhow!("Subscription '{}' has expired", subscription_id));
         }
-        
+
         drop(subscriptions);
-        
+
         // Generate a unique execution ID for this query
         let execution_id = Uuid::new_v4().to_string();
-        
+
         // Emit execution started event
         let start_event = StatusEvent {
-            execution_id: execution_id.clone(),
+            conversation_id: execution_id.clone(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Orchestrator,
-            event: EventType::ExecutionStarted { 
-                query: query.to_string() 
+            event: EventType::ExecutionStarted {
+                query: query.to_string()
             },
         };
         self.emit_subscription_event(subscription_id, start_event).await;
-        
+
         // Clone data for background execution
         let query_clone = query.to_string();
         let project_scope_clone = project_scope.clone();
         let subscription_id_clone = subscription_id.to_string();
         let execution_id_clone = execution_id.clone();
-        
+
         // Clone all components for background task
         let config = Arc::clone(&self.config);
         let agent_pool = Arc::clone(&self.agent_pool);
         let shared_context = Arc::clone(&self.shared_context);
         let coordination = Arc::clone(&self.coordination);
         let file_locks = Arc::clone(&self.file_locks);
-        let approval_queue = Arc::clone(&self.approval_queue);
         let audit_logger = Arc::clone(&self.audit_logger);
         let rag = Arc::clone(&self.rag);
         let history_manager = Arc::clone(&self.history_manager);
         let embedding_client = Arc::clone(&self.embedding_client);
         let subscriptions = Arc::clone(&self.subscriptions);
-        
+
         // Create buffered event sender for this subscription
         let event_sender = BufferedEventSender::new(subscription_id_clone.clone(), subscriptions.clone());
-        
+
         // Generate a ConversationId for the orchestrator
         let conversation_id = ConversationId::new();
-        
+
         // Start background execution with stateless orchestrator
         tokio::spawn(async move {
             let result = Orchestrator::execute_query(
@@ -324,17 +335,16 @@ impl ExecutionManager {
                 shared_context,
                 coordination,
                 file_locks,
-                approval_queue,
                 audit_logger,
                 rag,
                 history_manager,
                 embedding_client,
             ).await;
-            
+
             // Emit completion/failure event
             let completion_event = match result {
                 Ok(result) => StatusEvent {
-                    execution_id: execution_id_clone.clone(),
+                    conversation_id: execution_id_clone.clone(),
                     timestamp: chrono::Utc::now(),
                     source: EventSource::Orchestrator,
                     event: EventType::ExecutionCompleted { result },
@@ -342,46 +352,46 @@ impl ExecutionManager {
                 Err(e) => {
                     error!("Execution failed for subscription {}: {}", subscription_id_clone, e);
                     StatusEvent {
-                        execution_id: execution_id_clone.clone(),
+                        conversation_id: execution_id_clone.clone(),
                         timestamp: chrono::Utc::now(),
                         source: EventSource::Orchestrator,
-                        event: EventType::ExecutionFailed { 
-                            error: e.to_string() 
+                        event: EventType::ExecutionFailed {
+                            error: e.to_string()
                         },
                     }
                 },
             };
-            
+
             // Emit final event to subscription
             let mut subs = subscriptions.write().await;
             if let Some(subscription) = subs.get_mut(&subscription_id_clone) {
                 subscription.add_event(completion_event);
             }
         });
-        
+
         // Return subscription_id confirming execution started
         Ok(subscription_id.to_string())
     }
-    
+
     // ============== Subscription Event Management ==============
-    
+
     /// Emit a status event to a specific subscription
     pub async fn emit_subscription_event(&self, subscription_id: &str, event: StatusEvent) {
         let mut subscriptions = self.subscriptions.write().await;
-        
+
         if let Some(subscription) = subscriptions.get_mut(subscription_id) {
             subscription.add_event(event);
         } else {
             warn!("Tried to emit event for unknown subscription: {}", subscription_id);
         }
     }
-    
+
     // ============== Subscription Management ==============
-    
+
     /// Create a new subscription or resume existing one by client_id
     pub async fn create_subscription(&self, client_id: Option<String>) -> Result<Subscription> {
         let mut subscriptions = self.subscriptions.write().await;
-        
+
         // Check if client_id already has an active subscription to resume
         if let Some(ref cid) = client_id {
             for subscription in subscriptions.values_mut() {
@@ -395,28 +405,28 @@ impl ExecutionManager {
                 }
             }
         }
-        
+
         // Create new subscription with 5 minute TTL
         let subscription = Subscription::new(client_id.clone(), 5);
         let subscription_id = subscription.id.clone();
-        
+
         info!(
             subscription_id = %subscription_id,
             client_id = ?client_id,
             "Created new subscription"
         );
-        
+
         // Store subscription
         let result = subscription.clone();
         subscriptions.insert(subscription_id.clone(), subscription);
-        
+
         Ok(result)
     }
-    
+
     /// Get subscription and connect WebSocket for streaming
     pub async fn connect_subscription(&self, subscription_id: &str) -> Option<broadcast::Receiver<StatusEvent>> {
         let mut subscriptions = self.subscriptions.write().await;
-        
+
         if let Some(subscription) = subscriptions.get_mut(subscription_id) {
             if subscription.is_expired() {
                 warn!("Attempted to connect to expired subscription: {}", subscription_id);
@@ -430,21 +440,21 @@ impl ExecutionManager {
             None
         }
     }
-    
+
     /// Disconnect WebSocket from subscription
     pub async fn disconnect_subscription(&self, subscription_id: &str) {
         let mut subscriptions = self.subscriptions.write().await;
-        
+
         if let Some(subscription) = subscriptions.get_mut(subscription_id) {
             info!("Disconnecting WebSocket from subscription: {}", subscription_id);
             subscription.disconnect();
         }
     }
-    
+
     /// Get subscription status
     pub async fn get_subscription_status(&self, subscription_id: &str) -> Option<SubscriptionStatusInfo> {
         let subscriptions = self.subscriptions.read().await;
-        
+
         if let Some(subscription) = subscriptions.get(subscription_id) {
             let status = if subscription.is_expired() {
                 "expired"
@@ -455,7 +465,7 @@ impl ExecutionManager {
             } else {
                 "waiting"
             };
-            
+
             Some(SubscriptionStatusInfo {
                 subscription_id: subscription.id.clone(),
                 status: status.to_string(),
@@ -469,16 +479,16 @@ impl ExecutionManager {
             None
         }
     }
-    
-    
+
+
     /// Clean up expired and inactive subscriptions
     pub async fn cleanup_expired_subscriptions(&self) {
         let mut subscriptions = self.subscriptions.write().await;
         let initial_count = subscriptions.len();
-        
+
         // Clean up subscriptions that are expired OR inactive for >30 minutes
         let max_inactivity = chrono::Duration::minutes(30);
-        
+
         subscriptions.retain(|subscription_id, subscription| {
             if subscription.is_expired() {
                 info!("Cleaning up expired subscription: {}", subscription_id);
@@ -495,7 +505,7 @@ impl ExecutionManager {
                 true
             }
         });
-        
+
         let cleaned_count = initial_count - subscriptions.len();
         if cleaned_count > 0 {
             info!("Cleaned up {} expired/inactive subscriptions", cleaned_count);

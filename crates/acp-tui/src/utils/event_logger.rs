@@ -45,7 +45,6 @@ impl EventLogger {
     /// Log state changes with before/after comparison
     pub fn log_state_change(before: &AppModel, after: &AppModel, trigger: &str) {
         let state_changed = before.focused_component != after.focused_component
-            || before.layout_mode != after.layout_mode
             || before.show_help != after.show_help;
 
         if state_changed {
@@ -54,8 +53,6 @@ impl EventLogger {
                 trigger,
                 focused_before = ?before.focused_component,
                 focused_after = ?after.focused_component,
-                layout_before = ?before.layout_mode,
-                layout_after = ?after.layout_mode,
                 help_toggled = (before.show_help != after.show_help),
                 "State changed"
             );

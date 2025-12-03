@@ -7,7 +7,7 @@ pub mod realm;
 // Re-export all TUIRealm components
 pub use realm::{
     QueryInputRealmComponent, StatusLineRealmComponent,
-    HitlReviewRealmComponent, HitlQueueRealmComponent,
+    HitlReviewRealmComponent,
 };
 
 // Legacy types for compatibility

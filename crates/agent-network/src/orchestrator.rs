@@ -20,7 +20,7 @@ use crate::agents::planning::{SubtaskSpec, TaskDecompositionPlan};
 use crate::sharedcontext::SharedContext;
 use crate::coordination::CoordinationManager;
 use crate::filelocks::FileLockManager;
-use crate::hitl::{AuditLogger, DefaultApprovalQueue};
+use crate::hitl::{AuditLogger};
 use crate::workflow::{WorkflowExecutor, WorkflowGraph, TaskResult, WorkflowBuilder, TaskNode, DependencyType};
 use crate::execution_manager::BufferedEventSender;
 use schemars::JsonSchema;
@@ -110,30 +110,29 @@ impl Orchestrator {
         shared_context: Arc<RwLock<SharedContext>>,
         coordination: Arc<CoordinationManager>,
         file_locks: Arc<FileLockManager>,
-        approval_queue: Arc<DefaultApprovalQueue>,
         audit_logger: Arc<AuditLogger>,
         rag: Arc<SmartMultiSourceRag>,
         history_manager: Arc<RwLock<HistoryManager>>,
         embedding_client: Arc<EmbeddingClient>,
     ) -> Result<String> {
         info!("Processing query: {}", query);
-        
+
         let conversation_id_str = conversation_id.to_string();
 
         // Step 1: Analyze the query
         let analysis = Self::analyze_query(query, &config.agent_network).await?;
         debug!("Query analysis: {:?}", analysis);
-        
+
         // Emit query analysis completed event
         let analysis_event = StatusEvent {
-            execution_id: conversation_id_str.clone(),
+            conversation_id: conversation_id_str.clone(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Orchestrator,
-            event: EventType::WorkflowStepCompleted { 
+            event: EventType::WorkflowStepCompleted {
                 step_name: format!("Query Analysis ({})", analysis.complexity as u8)
             },
         };
-        
+
         if let Err(_) = status_sender.send(analysis_event).await {
             debug!("Failed to send query analysis event");
         }
@@ -143,10 +142,10 @@ impl Orchestrator {
             Complexity::Trivial | Complexity::Simple => {
                 info!("Simple task detected, routing directly to appropriate agent");
                 Self::route_to_single_agent(
-                    &analysis, 
-                    &project_scope, 
-                    &conversation_id, 
-                    &agent_pool, 
+                    &analysis,
+                    &project_scope,
+                    &conversation_id,
+                    &agent_pool,
                     &config.agent_network
                 ).await?
             },
@@ -163,17 +162,17 @@ impl Orchestrator {
             }
         };
         info!("Generated {} tasks", tasks.len());
-        
+
         // Emit task decomposition completed event
         let decomposition_event = StatusEvent {
-            execution_id: conversation_id_str.clone(),
+            conversation_id: conversation_id_str.clone(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Orchestrator,
-            event: EventType::WorkflowStepCompleted { 
+            event: EventType::WorkflowStepCompleted {
                 step_name: format!("Task Decomposition ({} tasks)", tasks.len())
             },
         };
-        
+
         if let Err(_) = status_sender.send(decomposition_event).await {
             debug!("Failed to send task decomposition event");
         }
@@ -181,30 +180,29 @@ impl Orchestrator {
         // Step 3: Build workflow DAG
         let workflow = Self::build_workflow(&tasks).await?;
         debug!("Built workflow with {} nodes", workflow.node_count());
-        
+
         // Emit workflow construction completed event
         let workflow_event = StatusEvent {
-            execution_id: conversation_id_str.clone(),
+            conversation_id: conversation_id_str.clone(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Orchestrator,
-            event: EventType::WorkflowStepCompleted { 
+            event: EventType::WorkflowStepCompleted {
                 step_name: format!("Workflow Construction ({} nodes)", workflow.node_count())
             },
         };
-        
+
         if let Err(_) = status_sender.send(workflow_event).await {
             debug!("Failed to send workflow construction event");
         }
 
         // Step 4: Execute workflow
         let results = Self::execute_workflow(
-            workflow, 
-            project_scope, 
+            workflow,
+            project_scope,
             conversation_id,
             agent_pool,
             coordination,
             file_locks,
-            approval_queue,
             audit_logger,
             rag,
             history_manager,
@@ -214,17 +212,17 @@ impl Orchestrator {
 
         // Step 5: Synthesize results
         let final_result = Self::synthesize_results(&results).await?;
-        
+
         // Emit result synthesis completed event
         let synthesis_event = StatusEvent {
-            execution_id: conversation_id_str.clone(),
+            conversation_id: conversation_id_str.clone(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Orchestrator,
-            event: EventType::WorkflowStepCompleted { 
+            event: EventType::WorkflowStepCompleted {
                 step_name: format!("Result Synthesis ({} chars)", final_result.len())
             },
         };
-        
+
         if let Err(_) = status_sender.send(synthesis_event).await {
             debug!("Failed to send result synthesis event");
         }
@@ -347,7 +345,7 @@ impl Orchestrator {
                 "Task {}: id='{}', agent_id='{}', dependencies={:?}",
                 idx, task.id, task.agent_id, task.dependencies
             );
-            
+
             // Add dependencies between tasks
             for from_id in &task.dependencies {
                 builder.add_dependency(&from_id, &task.id, DependencyType::Sequential)?;
@@ -369,7 +367,6 @@ impl Orchestrator {
         agent_pool: Arc<AgentPool>,
         coordination: Arc<CoordinationManager>,
         file_locks: Arc<FileLockManager>,
-        approval_queue: Arc<DefaultApprovalQueue>,
         audit_logger: Arc<AuditLogger>,
         rag: Arc<SmartMultiSourceRag>,
         history_manager: Arc<RwLock<HistoryManager>>,
@@ -383,17 +380,16 @@ impl Orchestrator {
             coordination,
             file_locks,
         );
-        
+
         // Execute the workflow with HITL
         let results = executor.execute_with_hitl(
             workflow,
-            approval_queue,
-            audit_logger, 
-            project_scope, 
+            audit_logger,
+            project_scope,
             conversation_id,
             status_sender,
         ).await?;
-        
+
         Ok(results)
     }
 
@@ -411,12 +407,12 @@ impl Orchestrator {
 
         // Emit planning started event
         let planning_started_event = StatusEvent {
-            execution_id: conversation_id.to_string(),
+            conversation_id: conversation_id.to_string(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Orchestrator,
             event: EventType::PlanningStarted,
         };
-        
+
         if let Err(_) = status_sender.send(planning_started_event).await {
             debug!("Failed to send planning started event");
         }
@@ -469,7 +465,7 @@ impl Orchestrator {
         info!("Planning Context: {}", description);
 
         // Execute planning agent with extractor for structured output
-        let result = planning_agent.execute(planning_context, status_sender.clone(), None, None).await?;
+        let result = planning_agent.execute(planning_context, status_sender.clone(), None).await?;
 
         // Extract the structured plan
         let plan: TaskDecompositionPlan = result.extract()
@@ -546,7 +542,7 @@ impl Orchestrator {
 
         // Emit planning completed event
         let planning_completed_event = StatusEvent {
-            execution_id: conversation_id.to_string(),
+            conversation_id: conversation_id.to_string(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Orchestrator,
             event: EventType::PlanningCompleted {
@@ -554,7 +550,7 @@ impl Orchestrator {
                 reasoning: plan.reasoning,
             },
         };
-        
+
         if let Err(_) = status_sender.send(planning_completed_event).await {
             debug!("Failed to send planning completed event");
         }

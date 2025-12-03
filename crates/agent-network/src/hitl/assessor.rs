@@ -3,7 +3,7 @@
 use ai_agent_common::HitlMode;
 
 use crate::{
-    hitl::{HitlRequest, RiskLevel},
+    hitl::{RiskLevel},
 };
 use crate::error::AgentNetworkResult;
 

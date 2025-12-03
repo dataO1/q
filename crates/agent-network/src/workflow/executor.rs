@@ -5,7 +5,7 @@
 //! while maximizing parallelism through concurrent task spawning.
 use tracing::{info, debug, warn, error, instrument, span, Level, Instrument};
 use crate::error::{AgentNetworkError, AgentNetworkResult};
-use crate::hitl::{ApprovalRequest, AuditEvent, AuditLogger, DefaultApprovalQueue, RiskAssessment};
+use crate::hitl::{ApprovalRequest, AuditEvent, AuditLogger, RiskAssessment};
 use crate::workflow::{TaskNode, TaskResult, WorkflowGraph, DependencyType};
 use crate::agents::{AgentPool, AgentContext};
 use crate::tools::ToolSet;
@@ -147,7 +147,6 @@ impl WorkflowExecutor {
     #[instrument(name = "workflow_execution", skip(self, graph, status_sender), fields(task_count = %graph.node_count()))]
     pub async fn execute_with_hitl(&self,
             graph: WorkflowGraph,
-            approval_queue: Arc<DefaultApprovalQueue>,
             audit_logger: Arc<AuditLogger>,
             project_scope: ProjectScope,
             conversation_id: ConversationId,
@@ -174,14 +173,14 @@ impl WorkflowExecutor {
         // Create and send ExecutionPlan
         let execution_plan = self.create_execution_plan(&graph, &waves).await?;
         let execution_plan_event = StatusEvent {
-            execution_id: conversation_id.to_string(),
+            conversation_id: conversation_id.to_string(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Orchestrator,
             event: EventType::ExecutionPlanReady {
                 plan: execution_plan,
             },
         };
-        
+
         if let Err(_) = status_sender.send(execution_plan_event).await {
             debug!("Failed to send execution plan event");
         }
@@ -195,7 +194,6 @@ impl WorkflowExecutor {
                 &graph,
                 wave,
                 &all_results,
-                Arc::clone(&approval_queue),
                 Arc::clone(&audit_logger),
                 project_scope.clone(),
                 conversation_id.clone(),
@@ -237,7 +235,6 @@ impl WorkflowExecutor {
         graph: &WorkflowGraph,
         wave: &ExecutionWave,
         previous_results: &HashMap<String, TaskResult>,
-        approval_queue: Arc<DefaultApprovalQueue>,
         audit_logger: Arc<AuditLogger>,
         project_scope: ProjectScope,
         conversation_id: ConversationId,
@@ -255,9 +252,9 @@ impl WorkflowExecutor {
         let task_ids: Vec<String> = wave.task_indices.iter()
             .map(|&idx| graph[idx].task_id.clone())
             .collect();
-        
+
         let wave_started_event = ai_agent_common::StatusEvent {
-            execution_id: conversation_id.to_string(),
+            conversation_id: conversation_id.to_string(),
             timestamp: chrono::Utc::now(),
             source: ai_agent_common::EventSource::Orchestrator,
             event: ai_agent_common::EventType::WaveStarted {
@@ -266,7 +263,7 @@ impl WorkflowExecutor {
                 task_ids,
             },
         };
-        
+
         if let Err(_) = status_sender.send(wave_started_event).await {
             debug!("Failed to send wave started event");
         }
@@ -282,7 +279,6 @@ impl WorkflowExecutor {
             let timeout = self.config.task_timeout;
             let max_retries = self.config.max_retries;
             let wave_index = wave.wave_index;
-            let approval_queue_clone = Arc::clone(&approval_queue);
             let audit_logger_clone = Arc::clone(&audit_logger);
             let context_provider = self.context_provider.clone();
 
@@ -307,7 +303,6 @@ impl WorkflowExecutor {
                         agent_pool,
                         coordination,
                         file_locks,
-                        approval_queue_clone,
                         audit_logger_clone,
                         context_provider,
                         timeout,
@@ -369,7 +364,7 @@ impl WorkflowExecutor {
 
         // Emit wave completed event
         let wave_completed_event = ai_agent_common::StatusEvent {
-            execution_id: conversation_id.to_string(),
+            conversation_id: conversation_id.to_string(),
             timestamp: chrono::Utc::now(),
             source: ai_agent_common::EventSource::Orchestrator,
             event: ai_agent_common::EventType::WaveCompleted {
@@ -378,7 +373,7 @@ impl WorkflowExecutor {
                 failure_count,
             },
         };
-        
+
         if let Err(_) = status_sender.send(wave_completed_event).await {
             debug!("Failed to send wave completed event");
         }
@@ -456,10 +451,10 @@ impl WorkflowExecutor {
 
         for wave in waves {
             let mut wave_tasks = vec![];
-            
+
             for &node_idx in &wave.task_indices {
                 let task_node = &graph[node_idx];
-                
+
                 // Get agent to determine agent_type
                 let agent = self.agent_pool
                     .get_agent(&task_node.agent_id)
@@ -480,7 +475,7 @@ impl WorkflowExecutor {
                         "temp".to_string(),
                         Some(task_node.task_id.clone())
                     );
-                    
+
                     agent.define_workflow_steps(&temp_context)
                         .iter()
                         .map(|step| step.name.clone())
@@ -516,7 +511,7 @@ impl WorkflowExecutor {
 
 
 /// Execute a single task
-#[instrument(name = "task_execution", skip(agent_pool, approval_queue, audit_logger, context_provider, file_locks, previous_results), fields(
+#[instrument(name = "task_execution", skip(agent_pool, audit_logger, context_provider, file_locks, previous_results), fields(
     task_id = %task.task_id,
     agent_id = %task.agent_id,
     description = %task.description
@@ -524,7 +519,6 @@ impl WorkflowExecutor {
 async fn execute_single_task(
     task: TaskNode,
     agent_pool: Arc<AgentPool>,
-    approval_queue: Arc<DefaultApprovalQueue>,
     audit_logger: Arc<AuditLogger>,
     context_provider: Option<Arc<crate::rag::ContextProvider>>,
     file_locks: Arc<FileLockManager>,
@@ -623,9 +617,8 @@ async fn execute_single_task(
 
     // Execute agent
     info!("Starting agent execution");
-    let hitl_approval_queue = Some(approval_queue.clone());
     let hitl_audit_logger = Some(audit_logger.clone());
-    match agent.execute(agent_context, status_sender, hitl_approval_queue, hitl_audit_logger).await {
+    match agent.execute(agent_context, status_sender, hitl_audit_logger).await {
         Ok(result) => {
             info!("Agent execution completed successfully (tool executions: {})", result.tool_executions.len());
 
@@ -656,7 +649,7 @@ async fn execute_single_task(
     }
 }
 
-#[instrument(name = "task_retry_execution", skip(task, agent_pool, coordination, file_locks, approval_queue, audit_logger, context_provider, status_sender, previous_results), fields(
+#[instrument(name = "task_retry_execution", skip(task, agent_pool, coordination, file_locks, audit_logger, context_provider, status_sender, previous_results), fields(
     task_id = %task.task_id,
     agent_id = %task.agent_id,
 ))]
@@ -666,7 +659,6 @@ async fn execute_task_with_retry(
     agent_pool: Arc<AgentPool>,
     coordination: Arc<CoordinationManager>,
     file_locks: Arc<FileLockManager>,
-    approval_queue: Arc<DefaultApprovalQueue>,
     audit_logger: Arc<AuditLogger>,
     context_provider: Option<Arc<crate::rag::ContextProvider>>,
     timeout: Duration,
@@ -693,7 +685,7 @@ async fn execute_task_with_retry(
 
     // Emit task node started event
     let task_started_event = ai_agent_common::StatusEvent {
-        execution_id: conversation_id.to_string(),
+        conversation_id: conversation_id.to_string(),
         timestamp: chrono::Utc::now(),
         source: ai_agent_common::EventSource::Orchestrator,
         event: ai_agent_common::EventType::TaskNodeStarted {
@@ -703,7 +695,7 @@ async fn execute_task_with_retry(
             description: task.description.clone(),
         },
     };
-    
+
     if let Err(_) = status_sender.send(task_started_event).await {
         debug!("Failed to send task started event");
     }
@@ -716,7 +708,6 @@ async fn execute_task_with_retry(
         let result = tokio::time::timeout(timeout, execute_single_task(
             task.clone(),
             Arc::clone(&agent_pool),
-            approval_queue.clone(),
             audit_logger.clone(),
             context_provider.clone(),
             Arc::clone(&file_locks),
@@ -735,7 +726,7 @@ async fn execute_task_with_retry(
                     .await?;
 
                 // ADD HITL CHECK HERE:
-                if let (queue, logger) = (approval_queue.as_ref(), audit_logger.as_ref()) {
+                if let (logger) = (audit_logger.as_ref()) {
                     if task_result.success {
                         // Get agent for type information
                         if let Some(agent) = agent_pool.get_agent(&task.agent_id) {
@@ -751,35 +742,13 @@ async fn execute_task_with_retry(
                                 agent.agent_type(),
                                 Some(format!("Task {} completed", task.task_id)),
                             );
-
-                            if assessment.needs_hitl(queue.risk_threshold.clone()) {
-                                let req_id = Uuid::new_v4().to_string();
-
-                                queue.enqueue(ApprovalRequest {
-                                    request_id: req_id.clone(),
-                                    assessment: assessment.clone(),
-                                    decision: None,
-                                }).await;
-
-                                let audit_event = AuditEvent {
-                                    event_id: req_id.clone(),
-                                    timestamp: chrono::Utc::now(),
-                                    agent_id: task.agent_id.clone(),
-                                    task_id: task.task_id.clone(),
-                                    action: "TASK_COMPLETED_HITL".to_string(),
-                                    risk_level: format!("{:?}", assessment.risk_level),
-                                    decision: "Pending".to_string(),
-                                    metadata: std::collections::HashMap::new(),
-                                };
-                                crate::hitl::AuditLogger::log(audit_event);
-                            }
                         }
                     }
                 }
 
                 // Emit task node completed event
                 let task_completed_event = ai_agent_common::StatusEvent {
-                    execution_id: conversation_id.to_string(),
+                    conversation_id: conversation_id.to_string(),
                     timestamp: chrono::Utc::now(),
                     source: ai_agent_common::EventSource::Orchestrator,
                     event: ai_agent_common::EventType::TaskNodeCompleted {
@@ -789,7 +758,7 @@ async fn execute_task_with_retry(
                         success: true,
                     },
                 };
-                
+
                 if let Err(_) = status_sender.send(task_completed_event).await {
                     debug!("Failed to send task completed event");
                 }
@@ -835,7 +804,7 @@ async fn execute_task_with_retry(
 
     // Emit task node completed event for failed task
     let task_completed_event = ai_agent_common::StatusEvent {
-        execution_id: conversation_id.to_string(),
+        conversation_id: conversation_id.to_string(),
         timestamp: chrono::Utc::now(),
         source: ai_agent_common::EventSource::Orchestrator,
         event: ai_agent_common::EventType::TaskNodeCompleted {
@@ -845,7 +814,7 @@ async fn execute_task_with_retry(
             success: false,
         },
     };
-    
+
     if let Err(_) = status_sender.send(task_completed_event).await {
         debug!("Failed to send task completed event");
     }

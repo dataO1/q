@@ -1,7 +1,7 @@
 use ai_agent_common::SystemConfig;
 use ai_agent_network::execution_manager::ExecutionManager;
 use axum::{
-    Router, 
+    Router,
     routing::{get, post},
     middleware::from_fn,
     response::Json,
@@ -20,7 +20,6 @@ use crate::{
         stream::websocket_handler,
         agents::list_capabilities,
         subscribe::{create_subscription, get_subscription_status},
-        hitl::{get_pending_requests, submit_decision, get_request_details},
     },
     middleware::logging::logging_middleware,
     openapi::ApiDoc,
@@ -33,7 +32,7 @@ use utoipa::OpenApi;
 pub struct AppState {
     /// The execution manager from agent-network crate
     pub execution_manager: Arc<ExecutionManager>,
-    
+
     /// System configuration loaded at startup
     pub config: SystemConfig,
 }
@@ -46,18 +45,18 @@ pub struct AcpServer {
 impl AcpServer {
     /// Create a new ACP server with system configuration loaded once at startup
     pub async fn new(config: SystemConfig) -> Result<Self> {
-        info!("Initializing ACP server with config from {:?}", 
+        info!("Initializing ACP server with config from {:?}",
                std::env::current_dir().unwrap_or_default());
-        
+
         // Create execution manager with full system config
         let execution_manager = ExecutionManager::new(config.clone()).await?;
         let execution_manager = Arc::new(execution_manager);
-        
+
         let state = AppState {
             execution_manager,
             config, // Store entire config for server lifetime
         };
-        
+
         Ok(Self { state })
     }
 
@@ -67,23 +66,18 @@ impl AcpServer {
             // Core ACP endpoints
             .route("/query", post(query_task))
             .route("/stream/{subscription_id}", get(websocket_handler))
-            
+
             // Subscription management
             .route("/subscribe", post(create_subscription))
             .route("/subscribe/{subscription_id}", get(get_subscription_status))
-            
-            // HITL endpoints
-            .route("/hitl/pending", get(get_pending_requests))
-            .route("/hitl/decide", post(submit_decision))
-            .route("/hitl/{request_id}/details", get(get_request_details))
-            
+
             // Discovery and health endpoints
             .route("/capabilities", get(list_capabilities))
             .route("/health", get(health_check))
-            
+
             // OpenAPI spec endpoint
             .route("/api-doc/openapi.json", get(serve_openapi_spec))
-            
+
             // Apply state and middleware
             .with_state(self.state.clone())
             .layer(TraceLayer::new_for_http())
@@ -99,22 +93,22 @@ impl AcpServer {
     #[instrument(skip(self))]
     pub async fn run(self) -> Result<()> {
         // Use ACP config from loaded system configuration
-        let bind_addr = format!("{}:{}", 
+        let bind_addr = format!("{}:{}",
             self.state.config.agent_network.acp.host,
             self.state.config.agent_network.acp.port
         );
-        
+
         info!("Starting ACP server on {}", bind_addr);
-        
+
         let app = self.router();
         let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
-        
+
         info!("ACP server listening on http://{}", listener.local_addr()?);
         axum::serve(listener, app).await?;
-        
+
         Ok(())
     }
-    
+
     /// Get access to the application state (for testing)
     pub fn state(&self) -> &AppState {
         &self.state
@@ -122,12 +116,12 @@ impl AcpServer {
 }
 
 /// Health check endpoint
-/// 
+///
 /// Returns the current status and health of the ACP API server.
 /// Use this endpoint to verify server availability and operational status.
-/// 
+///
 /// ## Response
-/// 
+///
 /// Returns health information including:
 /// - Server status ("healthy" indicates full functionality)
 /// - Optional status message with additional details
@@ -143,9 +137,9 @@ impl AcpServer {
 #[instrument]
 pub async fn health_check() -> Json<HealthResponse> {
     use chrono::Utc;
-    
+
     info!("Health check requested");
-    
+
     Json(HealthResponse {
         status: "healthy".to_string(),
         message: Some("ACP server is running".to_string()),

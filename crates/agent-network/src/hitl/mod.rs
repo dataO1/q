@@ -4,19 +4,33 @@
 
 pub mod assessor;
 pub mod audit;
-pub mod queue;
 
 use std::collections::HashMap;
 
 use ai_agent_common::{AgentType, RiskLevel};
 pub use assessor::*;
 pub use audit::*;
-pub use queue::*;
 
 use serde::{Deserialize, Serialize};
 use anyhow::Result;
 
 use crate::AgentResult;
+
+
+#[derive(Debug, Clone)]
+pub struct ApprovalRequest {
+    pub request_id: String,
+    pub assessment: RiskAssessment,
+    pub decision: Option<ApprovalDecision>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ApprovalDecision {
+    Approved{ reasoning: Option<String> },
+    Rejected{ reasoning: Option<String> },
+    NeedsMoreInfo,
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HitlRequest {

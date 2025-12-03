@@ -35,9 +35,9 @@ impl QueryExecutor {
         let _ = self.sender.send(APIEvent::QueryExecutionStarted(query.clone()));
 
         match self.api_service.execute_query(query.clone(), subscription_id).await {
-            Ok(execution_id) => {
-                info!("Query execution started with ID: {}", execution_id);
-                let _ = self.sender.send(APIEvent::QueryExecutionCompleted(execution_id));
+            Ok(conversation_id) => {
+                info!("Query execution started with ID: {}", conversation_id);
+                let _ = self.sender.send(APIEvent::QueryExecutionCompleted(conversation_id));
                 Ok(())
             }
             Err(e) => {
