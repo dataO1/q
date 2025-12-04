@@ -6,7 +6,7 @@
 //! - Session lifecycle and cleanup
 //! - Generic StatusEvent routing (server ↔ client)
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -23,14 +23,163 @@ use crate::filelocks::FileLockManager;
 use crate::hitl::AuditLogger;
 use crate::orchestrator::Orchestrator;
 use crate::sharedcontext::SharedContext;
-
 use ai_agent_common::{
     ConversationId, ProjectScope, SystemConfig, StatusEvent, EventSource, EventType,
 };
 use ai_agent_history::HistoryManager;
 use ai_agent_rag::SmartMultiSourceRag;
 
-/// Subscription for bidirectional buffered event streaming
+/// Bidirectional event channel for communication between server components and WebSocket clients
+/// This is the CORE communication primitive - all events flow through this channel
+#[derive(Clone)]
+pub struct BidirectionalEventChannel {
+    /// Unique identifier for this channel
+    id: String,
+
+    // === OUTBOUND (Server → Client) ===
+    /// Broadcast sender for outbound events (server components broadcast to multiple subscribers)
+    outbound_tx: broadcast::Sender<StatusEvent>,
+
+    // === INBOUND (Client → Server) ===
+    /// Unbounded sender for inbound events (WebSocket sends to server components)
+    inbound_tx: mpsc::UnboundedSender<StatusEvent>,
+    /// Unbounded receiver for inbound events (wrapped in Arc<Mutex> for shared access)
+    inbound_rx: Arc<Mutex<mpsc::UnboundedReceiver<StatusEvent>>>,
+
+    /// Targeted waiters for specific events (e.g., HITL decisions)
+    /// Map: event_key → oneshot sender for direct event routing
+    event_waiters: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<StatusEvent>>>>,
+}
+
+impl fmt::Debug for BidirectionalEventChannel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BidirectionalEventChannel")
+            .field("id", &self.id)
+            .finish()
+    }
+}
+
+impl BidirectionalEventChannel {
+    /// Create a new bidirectional event channel
+    pub fn new(id: String) -> Self {
+        // Outbound: broadcast channel with buffer for multiple subscribers (server → client)
+        let (outbound_tx, _) = broadcast::channel(1000);
+
+        // Inbound: mpsc unbounded channel for client messages (client → server)
+        let (inbound_tx, inbound_rx) = mpsc::unbounded_channel();
+
+        Self {
+            id,
+            outbound_tx,
+            inbound_tx,
+            inbound_rx: Arc::new(Mutex::new(inbound_rx)),
+            event_waiters: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Send outbound event (server → client)
+    /// This broadcasts the event to all connected WebSocket subscribers
+    pub async fn send(&self, event: StatusEvent) -> Result<()> {
+        info!("📤 Broadcasting event to channel {}: {:?}", self.id, event.event);
+
+        // Broadcast to all subscribers (ignore errors if no receivers)
+        match self.outbound_tx.send(event) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                debug!("No active receivers for channel {} (this is OK if WebSocket not connected yet)", self.id);
+                Ok(()) // Not an error - WebSocket might connect later
+            }
+        }
+    }
+
+    /// Subscribe to outbound events (server → client)
+    /// WebSocket handler calls this to receive events
+    pub fn subscribe_outbound(&self) -> broadcast::Receiver<StatusEvent> {
+        info!("🔌 WebSocket subscribing to outbound events for channel {}", self.id);
+        self.outbound_tx.subscribe()
+    }
+
+    /// Send inbound event (client → server)
+    /// WebSocket handler calls this when receiving messages from client
+    pub async fn receive_inbound(&self, event: StatusEvent) -> Result<()> {
+        info!("📥 Received inbound event on channel {}: {:?}", self.id, event.event);
+
+        // Send to inbound channel
+        self.inbound_tx.send(event.clone())
+            .map_err(|_| anyhow::anyhow!("Inbound channel closed for {}", self.id))?;
+
+        // Check for targeted waiters (e.g., HITL decisions waiting for response)
+        if let Some(key) = Self::extract_event_key(&event) {
+            let mut waiters = self.event_waiters.lock().await;
+            if let Some(tx) = waiters.remove(&key) {
+                info!("✅ Routing targeted event {} to waiting agent", key);
+                let _ = tx.send(event);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Wait for specific inbound event with timeout (client → server)
+    /// Agents call this when they need human approval (HITL)
+    pub async fn wait_for(&self, event_key: String, timeout: Duration) -> Result<StatusEvent> {
+        info!("⏳ Agent waiting for targeted event: {} (timeout: {:?})", event_key, timeout);
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        // Register waiter
+        {
+            let mut waiters = self.event_waiters.lock().await;
+            waiters.insert(event_key.clone(), tx);
+        }
+
+        // Wait with timeout
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(event)) => {
+                info!("✅ Received targeted event: {}", event_key);
+                Ok(event)
+            }
+            Ok(Err(_)) => Err(anyhow::anyhow!("Event waiter channel closed for {}", event_key)),
+            Err(_) => {
+                // Cleanup on timeout
+                let mut waiters = self.event_waiters.lock().await;
+                waiters.remove(&event_key);
+                Err(anyhow::anyhow!("Timeout waiting for event: {}", event_key))
+            }
+        }
+    }
+
+    /// Try receive next inbound event (non-blocking)
+    pub async fn try_recv(&self) -> Result<Option<StatusEvent>> {
+        let mut rx = self.inbound_rx.lock().await;
+        Ok(rx.try_recv().ok())
+    }
+
+    /// Receive next inbound event (blocking)
+    pub async fn recv(&self) -> Result<StatusEvent> {
+        let mut rx = self.inbound_rx.lock().await;
+        rx.recv().await
+            .ok_or_else(|| anyhow::anyhow!("Inbound channel closed for {}", self.id))
+    }
+
+    /// Extract event key for targeted routing
+    fn extract_event_key(event: &StatusEvent) -> Option<String> {
+        match &event.event {
+            EventType::HitlDecision { id, .. } => {
+                Some(format!("hitl_decision:{}", id))
+            }
+            _ => None,
+        }
+    }
+
+    /// Get channel ID
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+/// Subscription for a client session
+/// Each subscription maintains a bidirectional channel, connection state, and event buffer
 pub struct Subscription {
     /// Unique subscription ID
     pub id: String,
@@ -50,22 +199,9 @@ pub struct Subscription {
     /// Whether WebSocket is currently connected
     pub connected: bool,
 
-    // === OUTBOUND (Server → Client) ===
-    /// Broadcast channel for outbound events (1-to-many)
-    pub outbound_tx: broadcast::Sender<StatusEvent>,
-
-    /// Buffer of events for replay on reconnect
-    pub outbound_buffer: VecDeque<StatusEvent>,
-
-    // === INBOUND (Client → Server) ===
-    /// Unbounded channel for inbound events (many-to-1)
-    /// Multiple WebSocket handlers can send, orchestrator/agents receive
-    pub inbound_tx: mpsc::UnboundedSender<StatusEvent>,
-    pub inbound_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<StatusEvent>>>,
-
-    /// Targeted waiters for specific events (e.g., HITL decisions)
-    /// Map: event_key → oneshot sender
-    pub event_waiters: Arc<tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<StatusEvent>>>>,
+    /// The bidirectional event channel for this subscription
+    /// This is the SINGLE source of truth for all communication
+    pub channel: BidirectionalEventChannel,
 }
 
 impl Subscription {
@@ -74,11 +210,8 @@ impl Subscription {
         let now = Utc::now();
         let expires_at = now + chrono::Duration::minutes(ttl_minutes);
 
-        // Outbound: broadcast channel (server → client)
-        let (outbound_tx, _) = broadcast::channel(1000);
-
-        // Inbound: mpsc channel (client → server)
-        let (inbound_tx, inbound_rx) = mpsc::unbounded_channel();
+        // Create bidirectional channel for this subscription
+        let channel = BidirectionalEventChannel::new(id.clone());
 
         Self {
             id,
@@ -87,105 +220,27 @@ impl Subscription {
             expires_at,
             last_activity: now,
             connected: false,
-            outbound_tx,
-            outbound_buffer: VecDeque::new(),
-            inbound_tx,
-            inbound_rx: Arc::new(tokio::sync::Mutex::new(inbound_rx)),
-            event_waiters: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            channel,
         }
     }
 
-    /// Send outbound event (server → client)
-    pub fn send_outbound(&mut self, event: StatusEvent) {
-        self.last_activity = Utc::now();
-
-        // Buffer event for replay
-        self.outbound_buffer.push_back(event.clone());
-        if self.outbound_buffer.len() > 500 {
-            self.outbound_buffer.pop_front();
-        }
-
-        // Broadcast to connected clients (ignore errors if no receivers)
-        let _ = self.outbound_tx.send(event);
-    }
-
-    /// Receive inbound event (client → server)
-    pub async fn receive_inbound(&self, event: StatusEvent) -> Result<()> {
-        self.inbound_tx.send(event.clone())
-            .map_err(|_| anyhow::anyhow!("Inbound channel closed"))?;
-
-        // Check for targeted waiters
-        if let Some(key) = Self::extract_event_key(&event) {
-            let mut waiters = self.event_waiters.lock().await;
-            if let Some(tx) = waiters.remove(&key) {
-                let _ = tx.send(event);
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Connect WebSocket and get outbound receiver (with buffered replay)
-    pub fn connect(&mut self) -> broadcast::Receiver<StatusEvent> {
+    /// Mark WebSocket as connected
+    pub fn connect(&mut self) {
         self.connected = true;
         self.last_activity = Utc::now();
-
-        let rx = self.outbound_tx.subscribe();
-
-        // Replay buffered events
-        for event in &self.outbound_buffer {
-            let _ = self.outbound_tx.send(event.clone());
-        }
-
-        rx
+        info!("🔌 WebSocket connected for subscription {}", self.id);
     }
 
-    /// Disconnect WebSocket
+    /// Mark WebSocket as disconnected
     pub fn disconnect(&mut self) {
         self.connected = false;
         self.last_activity = Utc::now();
+        info!("🔌 WebSocket disconnected for subscription {}", self.id);
     }
 
-    /// Get inbound sender clone (for WebSocket handler)
-    pub fn get_inbound_sender(&self) -> mpsc::UnboundedSender<StatusEvent> {
-        self.inbound_tx.clone()
-    }
-
-    /// Register waiter for specific event
-    pub async fn wait_for_event(&self, event_key: String, timeout: Duration) -> Result<StatusEvent> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-
-        {
-            let mut waiters = self.event_waiters.lock().await;
-            waiters.insert(event_key.clone(), tx);
-        }
-
-        match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(event)) => Ok(event),
-            Ok(Err(_)) => Err(anyhow::anyhow!("Event waiter channel closed")),
-            Err(_) => {
-                // Cleanup on timeout
-                let mut waiters = self.event_waiters.lock().await;
-                waiters.remove(&event_key);
-                Err(anyhow::anyhow!("Timeout waiting for event: {}", event_key))
-            }
-        }
-    }
-
-    /// Extract event key for routing
-    fn extract_event_key(event: &StatusEvent) -> Option<String> {
-        match &event.event {
-            EventType::HitlDecision { id, .. } => {
-                Some(format!("hitl_decision:{}", id))
-            }
-            // EventType::ClientCommand { command_id, .. } => {
-            //     Some(format!("client_command:{}", command_id))
-            // }
-            // EventType::UserFeedback { feedback_id, .. } => {
-            //     Some(format!("user_feedback:{}", feedback_id))
-            // }
-            _ => None,
-        }
+    /// Update last activity timestamp
+    pub fn touch(&mut self) {
+        self.last_activity = Utc::now();
     }
 
     /// Check if subscription has expired
@@ -197,6 +252,11 @@ impl Subscription {
     pub fn is_inactive(&self, max_inactivity: chrono::Duration) -> bool {
         Utc::now() - self.last_activity > max_inactivity
     }
+
+    /// Receive event
+    pub async fn receive_inbound(&self, event: StatusEvent) -> Result<()>{
+        self.channel.receive_inbound(event).await
+    }
 }
 
 /// Subscription status information for API responses
@@ -206,84 +266,14 @@ pub struct SubscriptionStatusInfo {
     pub status: String,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
-    pub buffered_events: usize,
     pub connected: bool,
     pub client_id: Option<String>,
-}
-
-/// Bidirectional event channel for agents/orchestrator
-#[derive(Clone)]
-pub struct BidirectionalEventChannel {
-    subscription_id: String,
-    subscriptions: Arc<RwLock<HashMap<String, Subscription>>>,
-}
-impl fmt::Debug for BidirectionalEventChannel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BidirectionalEventChannel")
-            .field("subscription_id", &self.subscription_id)
-            .field("subscriptions", &"<Arc<RwLock<HashMap<String, Subscription>>>>")
-            .finish()
-    }
-}
-
-impl BidirectionalEventChannel {
-    pub fn new(subscription_id: String, subscriptions: Arc<RwLock<HashMap<String, Subscription>>>) -> Self {
-        Self {
-            subscription_id,
-            subscriptions,
-        }
-    }
-
-    /// Send outbound event (server → client)
-    pub async fn send(&self, event: StatusEvent) -> Result<()> {
-        let mut subscriptions = self.subscriptions.write().await;
-        if let Some(subscription) = subscriptions.get_mut(&self.subscription_id) {
-            subscription.send_outbound(event);
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("Subscription not found: {}", self.subscription_id))
-        }
-    }
-
-    /// Wait for specific inbound event with timeout (client → server)
-    pub async fn wait_for(&self, event_key: String, timeout: Duration) -> Result<StatusEvent> {
-        let subscriptions = self.subscriptions.read().await;
-        let subscription = subscriptions.get(&self.subscription_id)
-            .ok_or_else(|| anyhow::anyhow!("Subscription not found: {}", self.subscription_id))?;
-
-        // Clone Arc and drop lock before waiting
-        let wait_future = subscription.wait_for_event(event_key, timeout);
-        drop(subscription);
-
-        wait_future.await
-    }
-
-    /// Try receive next inbound event (non-blocking)
-    pub async fn try_recv(&self) -> Result<Option<StatusEvent>> {
-        let subscriptions = self.subscriptions.read().await;
-        let subscription = subscriptions.get(&self.subscription_id)
-            .ok_or_else(|| anyhow::anyhow!("Subscription not found: {}", self.subscription_id))?;
-
-        let mut rx = subscription.inbound_rx.lock().await;
-        Ok(rx.try_recv().ok())
-    }
-
-    /// Receive next inbound event (blocking)
-    pub async fn recv(&self) -> Result<StatusEvent> {
-        let subscriptions = self.subscriptions.read().await;
-        let subscription = subscriptions.get(&self.subscription_id)
-            .ok_or_else(|| anyhow::anyhow!("Subscription not found: {}", self.subscription_id))?;
-
-        let mut rx = subscription.inbound_rx.lock().await;
-        rx.recv().await
-            .ok_or_else(|| anyhow::anyhow!("Inbound channel closed"))
-    }
 }
 
 /// Execution Manager - manages subscriptions and orchestrator lifecycle
 pub struct ExecutionManager {
     /// Active subscriptions by ID
-    subscriptions: Arc<RwLock<HashMap<String, Subscription>>>,
+    pub subscriptions: Arc<RwLock<HashMap<String, Subscription>>>,
 
     /// Agent pool
     agent_pool: Arc<AgentPool>,
@@ -307,10 +297,13 @@ pub struct ExecutionManager {
     subscription_ttl: i64,
 
     /// Last cleanup time
-    last_cleanup: Arc<tokio::sync::Mutex<Instant>>,
+    last_cleanup: Arc<Mutex<Instant>>,
+
     shared_context: Arc<RwLock<SharedContext>>,
+
     audit_logger: Arc<AuditLogger>,
-    embedding_client: Arc<ai_agent_common::llm::EmbeddingClient>,
+
+    embedding_client: Arc<EmbeddingClient>,
 }
 
 impl ExecutionManager {
@@ -325,10 +318,7 @@ impl ExecutionManager {
         let file_lock_manager = Arc::new(FileLockManager::new(30));
 
         // HITL setup
-        let hitl_mode = config.agent_network.hitl.mode;
-        let risk_threshold = config.agent_network.hitl.risk_threshold;
         let audit_logger = Arc::new(AuditLogger);
-
 
         // RAG and history setup
         let embedding_client = Arc::new(EmbeddingClient::new(
@@ -340,6 +330,7 @@ impl ExecutionManager {
         let history_manager = Arc::new(RwLock::new(
             HistoryManager::new(&config.storage.postgres_url, &config.rag).await?
         ));
+
         let last_cleanup = Arc::new(Mutex::new(Instant::now()));
 
         info!("ExecutionManager initialized successfully");
@@ -360,45 +351,49 @@ impl ExecutionManager {
         })
     }
 
-    /// Create new subscription
+    /// Create new subscription and return the subscription ID
     #[instrument(skip(self), fields(client_id = ?client_id))]
     pub async fn create_subscription(&self, client_id: Option<String>) -> Result<String> {
         let mut subscriptions = self.subscriptions.write().await;
-
         let subscription = Subscription::new(client_id.clone(), self.subscription_ttl);
         let subscription_id = subscription.id.clone();
 
         subscriptions.insert(subscription_id.clone(), subscription);
+        info!("✅ Created subscription: {} (client_id: {:?})", subscription_id, client_id);
 
-        info!("Created subscription: {} (client_id: {:?})", subscription_id, client_id);
         Ok(subscription_id)
     }
 
-    /// Connect to existing subscription (WebSocket connection)
+    /// Get the bidirectional channel for a subscription
+    /// This is what agents/orchestrator use to send events
+    pub async fn get_channel(&self, subscription_id: &str) -> Result<BidirectionalEventChannel> {
+        let subscriptions = self.subscriptions.read().await;
+        let subscription = subscriptions.get(subscription_id)
+            .ok_or_else(|| anyhow::anyhow!("Subscription not found: {}", subscription_id))?;
+
+        Ok(subscription.channel.clone())
+    }
+
+    /// Connect WebSocket to subscription and get receiver for outbound events
+    /// WebSocket handler calls this when a client connects
     pub async fn connect_subscription(&self, subscription_id: &str) -> Option<broadcast::Receiver<StatusEvent>> {
         let mut subscriptions = self.subscriptions.write().await;
 
         if let Some(subscription) = subscriptions.get_mut(subscription_id) {
-            info!("WebSocket connected to subscription: {}", subscription_id);
-            Some(subscription.connect())
+            subscription.connect();
+            Some(subscription.channel.subscribe_outbound())
         } else {
-            warn!("Subscription not found: {}", subscription_id);
+            warn!("❌ Subscription not found: {}", subscription_id);
             None
         }
     }
 
-    /// Get inbound sender for WebSocket handler
-    pub async fn get_inbound_sender(&self, subscription_id: &str) -> Option<mpsc::UnboundedSender<StatusEvent>> {
-        let subscriptions = self.subscriptions.read().await;
-        subscriptions.get(subscription_id).map(|s| s.get_inbound_sender())
-    }
-
-    /// Disconnect from subscription (WebSocket disconnection)
+    /// Disconnect from subscription
+    /// WebSocket handler calls this when a client disconnects
     pub async fn disconnect_subscription(&self, subscription_id: &str) {
         let mut subscriptions = self.subscriptions.write().await;
 
         if let Some(subscription) = subscriptions.get_mut(subscription_id) {
-            info!("WebSocket disconnected from subscription: {}", subscription_id);
             subscription.disconnect();
         }
     }
@@ -406,19 +401,18 @@ impl ExecutionManager {
     /// Get subscription info
     pub async fn get_subscription_info(&self, subscription_id: &str) -> Option<SubscriptionStatusInfo> {
         let subscriptions = self.subscriptions.read().await;
-
         subscriptions.get(subscription_id).map(|sub| SubscriptionStatusInfo {
             subscription_id: sub.id.clone(),
             status: if sub.connected { "connected".to_string() } else { "disconnected".to_string() },
             created_at: sub.created_at,
             expires_at: sub.expires_at,
-            buffered_events: sub.outbound_buffer.len(),
             connected: sub.connected,
             client_id: sub.client_id.clone(),
         })
     }
 
     /// Execute query asynchronously
+    /// This creates a background task that uses the subscription's bidirectional channel
     #[instrument(skip(self, query), fields(query_len = query.len()))]
     pub async fn execute_query(
         &self,
@@ -426,12 +420,11 @@ impl ExecutionManager {
         project_scope: ProjectScope,
         subscription_id: &String,
     ) -> Result<()> {
-        let event_channel = BidirectionalEventChannel::new(
-            subscription_id.clone(),
-            self.subscriptions.clone(),
-        );
-
+        // Get the bidirectional channel for this subscription
+        let event_channel = self.get_channel(subscription_id).await?;
         let conversation_id = ConversationId::new();
+
+        info!("🚀 Starting query execution for subscription {}", subscription_id);
 
         // Send execution started event
         event_channel.send(StatusEvent {
@@ -442,6 +435,8 @@ impl ExecutionManager {
                 query: query.clone(),
             },
         }).await?;
+
+        // Clone all necessary data for the background task
         let query_clone = query.clone();
         let project_scope_clone = project_scope.clone();
         let conversation_id_clone = conversation_id.clone();
@@ -455,11 +450,29 @@ impl ExecutionManager {
         let rag_clone = self.rag.clone();
         let history_manager_clone = self.history_manager.clone();
         let embedding_client_clone = self.embedding_client.clone();
+
         // Execute in background task
         tokio::spawn(async move {
-            match Orchestrator::execute_query(&query_clone, project_scope_clone, conversation_id_clone, event_channel_clone, config_clone, agent_pool_clone, shared_context_clone, coordination_manager_clone, file_lock_manager_clone, audit_logger_clone, rag_clone, history_manager_clone, embedding_client_clone).await {
+            info!("🔄 Background task started for conversation {}", conversation_id);
+
+            match Orchestrator::execute_query(
+                &query_clone,
+                project_scope_clone,
+                conversation_id_clone,
+                event_channel_clone.clone(),
+                config_clone,
+                agent_pool_clone,
+                shared_context_clone,
+                coordination_manager_clone,
+                file_lock_manager_clone,
+                audit_logger_clone,
+                rag_clone,
+                history_manager_clone,
+                embedding_client_clone
+            ).await {
                 Ok(result) => {
-                    let _ = event_channel.send(StatusEvent {
+                    info!("✅ Query execution completed successfully");
+                    let _ = event_channel_clone.send(StatusEvent {
                         conversation_id: conversation_id.to_string(),
                         timestamp: Utc::now(),
                         source: EventSource::Orchestrator,
@@ -470,8 +483,8 @@ impl ExecutionManager {
                     Ok(result)
                 }
                 Err(e) => {
-                    error!("Query execution failed: {}", e);
-                    let _ = event_channel.send(StatusEvent {
+                    error!("❌ Query execution failed: {}", e);
+                    let _ = event_channel_clone.send(StatusEvent {
                         conversation_id: conversation_id.to_string(),
                         timestamp: Utc::now(),
                         source: EventSource::Orchestrator,
@@ -483,6 +496,7 @@ impl ExecutionManager {
                 }
             }
         });
+
         Ok(())
     }
 
@@ -503,8 +517,8 @@ impl ExecutionManager {
                              (sub.connected || !sub.is_inactive(chrono::Duration::hours(1)));
 
             if !should_keep {
-                info!("Cleaning up subscription: {} (expired={}, inactive={})",
-                    id, sub.is_expired(), sub.is_inactive(chrono::Duration::hours(1)));
+                info!("🧹 Cleaning up subscription: {} (expired={}, inactive={})",
+                      id, sub.is_expired(), sub.is_inactive(chrono::Duration::hours(1)));
             }
 
             should_keep
@@ -514,7 +528,7 @@ impl ExecutionManager {
         let removed = initial_count - subscriptions.len();
 
         if removed > 0 {
-            info!("Cleaned up {} expired/inactive subscriptions", removed);
+            info!("🧹 Cleaned up {} expired/inactive subscriptions", removed);
         }
 
         removed

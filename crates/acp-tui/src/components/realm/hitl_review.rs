@@ -542,9 +542,9 @@ impl HitlReviewRealmComponent {
 impl Component<UserEvent, APIEvent> for HitlReviewRealmComponent {
     fn on(&mut self, ev: Event<APIEvent>) -> Option<UserEvent> {
         // Only handle events when visible
-        if !self.visible {
-            return None;
-        }
+        // if !self.visible {
+        //     return None;
+        // }
 
         match ev {
             // Keyboard events - HANDLE BOTH MODES
@@ -802,7 +802,3 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         ])
         .split(popup_layout[1])[1]
 }
-
-// NoUserEvent placeholder (use your actual definition)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NoUserEvent;

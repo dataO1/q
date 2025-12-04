@@ -153,7 +153,6 @@ pub async fn get_subscription_status(
         status: status_info.status,
         created_at: status_info.created_at,
         expires_at: status_info.expires_at,
-        buffered_events: status_info.buffered_events,
         connected: status_info.connected,
         client_id: status_info.client_id,
     };

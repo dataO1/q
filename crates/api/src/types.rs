@@ -201,10 +201,6 @@ pub struct SubscriptionStatus {
     /// When this subscription expires
     pub expires_at: DateTime<Utc>,
 
-    /// Number of events buffered for this subscription
-    #[schema(example = 5)]
-    pub buffered_events: usize,
-
     /// Whether a WebSocket is currently connected
     pub connected: bool,
 
