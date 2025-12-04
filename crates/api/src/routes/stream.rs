@@ -78,11 +78,16 @@ async fn handle_socket(socket: WebSocket, subscription_id: String, state: AppSta
                     match serde_json::from_str::<ai_agent_common::StatusEvent>(&text) {
                         Ok(event) => {
                             info!("Parsed inbound event: {:?}", event.event);
+                            // Get the channel WITHOUT holding the lock during async operations
+                            let channel = {
+                                let subscriptions = state_clone.execution_manager.subscriptions.read().await;  // ✅ read lock
+                                subscriptions.get(&sub_id_receiver)
+                                    .map(|sub| sub.channel.clone())  // ✅ clone the channel (Arc-backed)
+                            };
 
-                            // Route to subscription (which routes to waiting agents via event_waiters)
-                            let mut subscriptions = state_clone.execution_manager.subscriptions.write().await;
-                            if let Some(subscription) = subscriptions.get_mut(&sub_id_receiver) {
-                                if let Err(e) = subscription.receive_inbound(event).await {
+                            // Now process the event WITHOUT holding any locks
+                            if let Some(channel) = channel {
+                                if let Err(e) = channel.receive_inbound(event).await {
                                     warn!("Failed to route inbound event: {}", e);
                                 } else {
                                     info!("✅ Successfully routed inbound event to waiting agent");

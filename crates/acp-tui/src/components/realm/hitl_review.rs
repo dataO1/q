@@ -98,9 +98,6 @@ pub struct HitlReviewRealmComponent {
     /// Current scroll position in preview
     scroll_offset: usize,
 
-    /// Whether the modal is visible
-    visible: bool,
-
     /// Auto-approve timer (seconds remaining for low-risk)
     auto_approve_timer: Option<u32>,
 
@@ -132,7 +129,6 @@ impl HitlReviewRealmComponent {
             current_request: None,
             request_queue: Vec::new(),
             scroll_offset: 0,
-            visible: false,
             auto_approve_timer: None,
             timer_paused: false,
             input_mode: InputMode::Normal,
@@ -148,7 +144,7 @@ impl HitlReviewRealmComponent {
         self.reasoning_textarea.set_block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Reasoning (Ctrl+S to submit, Esc to cancel)")
+                .title("Reasoning (Enter to submit, Esc to cancel)")
                 .border_style(Style::default().fg(Color::Yellow)),
         );
     }
@@ -205,18 +201,6 @@ impl HitlReviewRealmComponent {
 
     /// Handle approval decision (prompts for reasoning)
     fn approve(&mut self) -> Option<UserEvent> {
-        self.start_reasoning_input(true);
-        None // Don't emit event yet, wait for reasoning
-    }
-
-    /// Handle rejection decision (prompts for reasoning)
-    fn reject(&mut self) -> Option<UserEvent> {
-        self.start_reasoning_input(false);
-        None // Don't emit event yet, wait for reasoning
-    }
-
-    /// Quick approve without reasoning (Shift+A)
-    fn quick_approve(&mut self) -> Option<UserEvent> {
         if let Some(request) = &self.current_request {
             info!("HITL quick approved (no reasoning): {}", request.tool_name);
 
@@ -234,23 +218,10 @@ impl HitlReviewRealmComponent {
         }
     }
 
-    /// Quick reject without reasoning (Shift+R)
-    fn quick_reject(&mut self) -> Option<UserEvent> {
-        if let Some(request) = &self.current_request {
-            info!("HITL quick rejected (no reasoning): {}", request.tool_name);
-
-            let event = UserEvent::HitlDecisionSubmit {
-                id: request.id.clone(),
-                approved: false,
-                modified_content: None,
-                reasoning: None,
-            };
-
-            self.next_request();
-            Some(event)
-        } else {
-            None
-        }
+    /// Handle rejection decision (prompts for reasoning)
+    fn reject(&mut self) -> Option<UserEvent> {
+        self.start_reasoning_input(false);
+        None // Don't emit event yet, wait for reasoning
     }
 
     /// Add a new HITL request to the queue
@@ -278,7 +249,6 @@ impl HitlReviewRealmComponent {
         };
 
         self.current_request = Some(request);
-        self.visible = true;
         self.scroll_offset = 0;
         self.timer_paused = false;
     }
@@ -291,7 +261,6 @@ impl HitlReviewRealmComponent {
         } else {
             // No more requests, hide modal
             self.current_request = None;
-            self.visible = false;
             None
         }
     }
@@ -350,11 +319,6 @@ impl HitlReviewRealmComponent {
         format!("[1/{}]", total)
     }
 
-    /// Check if modal should be visible
-    pub fn is_visible(&self) -> bool {
-        self.visible
-    }
-
     /// Render the modal content
     fn render_modal(&mut self, frame: &mut Frame, area: Rect) {
         if let Some(request) = &self.current_request {
@@ -382,9 +346,9 @@ impl HitlReviewRealmComponent {
             self.render_body(frame, chunks[1], request);
 
             // Render reasoning textarea
-            frame.render_widget(&self.reasoning_textarea, chunks[2]);
-
-            // Render footer
+            if self.input_mode == InputMode::EditingReasoning{
+                frame.render_widget(&self.reasoning_textarea, chunks[2]);
+            }
             self.render_footer(frame, chunks[3], request);
         }
     }
@@ -511,9 +475,9 @@ impl HitlReviewRealmComponent {
         let actions = match self.input_mode {
             InputMode::EditingReasoning => {
                 if self.pending_decision == Some(true) {
-                    "Approving with reason | Ctrl+S: Submit | Esc: Cancel"
+                    "Approving with reason | Enter: Submit | Esc: Cancel"
                 } else {
-                    "Rejecting with reason | Ctrl+S: Submit | Esc: Cancel"
+                    "Rejecting with reason | Enter: Submit | Esc: Cancel"
                 }
             }
             InputMode::Normal => {
@@ -541,22 +505,18 @@ impl HitlReviewRealmComponent {
 
 impl Component<UserEvent, APIEvent> for HitlReviewRealmComponent {
     fn on(&mut self, ev: Event<APIEvent>) -> Option<UserEvent> {
-        // Only handle events when visible
-        // if !self.visible {
-        //     return None;
-        // }
 
         match ev {
             // Keyboard events - HANDLE BOTH MODES
-            Event::Keyboard(keyevent) if self.visible => {
+            Event::Keyboard(keyevent) => {
                 match self.input_mode {
                     InputMode::EditingReasoning => {
                         // In reasoning mode, pass keys to textarea
                         match keyevent {
                             // Submit reasoning with Ctrl+S
                             TuiKeyEvent {
-                                code: Key::Char('s'),
-                                modifiers: KeyModifiers::CONTROL,
+                                code: Key::Enter,
+                                modifiers: KeyModifiers::NONE,
                             } => self.submit_with_reasoning(),
 
                             // Cancel with Esc
@@ -643,7 +603,7 @@ impl Component<UserEvent, APIEvent> for HitlReviewRealmComponent {
                                 code: Key::Char('a'),
                                 modifiers: KeyModifiers::SHIFT,
                             } => {
-                                self.quick_approve()
+                                self.approve()
                             }
 
                             // Reject (prompts for reasoning)
@@ -660,7 +620,7 @@ impl Component<UserEvent, APIEvent> for HitlReviewRealmComponent {
                                 code: Key::Char('r'),
                                 modifiers: KeyModifiers::SHIFT,
                             }  => {
-                                self.quick_reject()
+                                self.reject()
                             }
 
                             TuiKeyEvent { code: Key::Char('d'), .. }
@@ -681,7 +641,7 @@ impl Component<UserEvent, APIEvent> for HitlReviewRealmComponent {
                                 None
                             }
 
-                            TuiKeyEvent { code: Key::Esc, .. } => self.quick_reject(),
+                            TuiKeyEvent { code: Key::Esc, .. } => self.reject(),
 
                             _ => None,
                         }
@@ -710,7 +670,7 @@ impl Component<UserEvent, APIEvent> for HitlReviewRealmComponent {
                 };
 
                 self.push_request(request);
-                None // Don't propagate, handled internally
+                Some(UserEvent::HitlDecisionPending)
             },
 
                 // Handle HITL completion - CLOSE MODAL
@@ -751,16 +711,11 @@ impl Component<UserEvent, APIEvent> for HitlReviewRealmComponent {
 
 impl MockComponent for HitlReviewRealmComponent {
     fn view(&mut self, frame: &mut Frame, area: Rect) {
-        if self.visible {
-            self.render_modal(frame, area);
-        }
+        self.render_modal(frame, area);
     }
 
     fn query(&self, attr: Attribute) -> Option<AttrValue> {
-        match attr {
-            Attribute::Custom("visible") => Some(AttrValue::Flag(self.visible)),
-            _ => None,
-        }
+        None
     }
 
     fn attr(&mut self, attr: Attribute, value: AttrValue) {

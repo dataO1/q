@@ -642,7 +642,7 @@ pub trait TypedAgent: Send + Sync {
         let decision = match event {
             // TODO: check or receive only message for the respective id
             StatusEvent{ conversation_id, timestamp, source, event: EventType::HitlDecision{ id, approved, modified_content, reasoning } } =>{
-                let decision = if approved{ApprovalDecision::Approved{reasoning}}else{ApprovalDecision::Rejected{reasoning}};
+                let decision = if approved{ApprovalDecision::Approved{reasoning}}else{ApprovalDecision::Rejected{reasoning: reasoning.unwrap()}};
 
                 // Send completion event
                 let completion_event = StatusEvent {
@@ -780,7 +780,7 @@ pub trait TypedAgent: Send + Sync {
         let mut tool_executions = Vec::new();
         let mut final_response = String::new();
 
-        for iteration in 0..max_iter {
+        'outer_loop: for iteration in 0..max_iter {
             debug!(target: "agent_execution", "ReAct iteration {}/{} for step '{}'", iteration + 1, max_iter, step.name);
 
             // Build request for this iteration
@@ -900,15 +900,11 @@ pub trait TypedAgent: Send + Sync {
                                     // Add rejection message to conversation
                                     messages.push(ChatCompletionRequestMessage::Tool(
                                         async_openai::types::ChatCompletionRequestToolMessageArgs::default()
-                                            .content(format!("Tool execution was rejected by human reviewer. Please try a different approach or ask for guidance."))
+                                            .content(format!("Tool execution was rejected by human reviewer with reason: {}", reasoning))
                                             .tool_call_id(tool_call.id.clone())
                                             .build()?
                                     ));
-
-                                    if let Some(reasoning) = reasoning{
-                                        // Add tool result to conversation
-                                        messages.push(ChatCompletionRequestUserMessage::from(format!("## HITL Feedback:\n{}",reasoning)).into());
-                                    }
+                                    continue 'outer_loop;
                                 }
                                 ApprovalDecision::NeedsMoreInfo => {
                                     info!(target: "agent_execution", "HITL requested more info for tool: {}", function.name);

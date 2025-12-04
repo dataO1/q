@@ -27,7 +27,7 @@ pub struct ApprovalRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ApprovalDecision {
     Approved{ reasoning: Option<String> },
-    Rejected{ reasoning: Option<String> },
+    Rejected{ reasoning: String },
     NeedsMoreInfo,
 }
 

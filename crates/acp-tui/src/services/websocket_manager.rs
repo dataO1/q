@@ -206,37 +206,43 @@ impl WebSocketManager {
         let state = Arc::clone(&self.state);
 
         tokio::spawn(async move {
-            info!(subscription_id = %subscription_id, "WebSocket reader task started");
-
+            info!(subscription_id = %subscription_id, "📥 WebSocket reader task started");
             let mut message_count = 0u64;
 
+            // 🔥 ADD THIS: Log that we're entering the loop
+            info!("🔄 Entering WebSocket message receive loop");
+
             while let Some(result) = read.next().await {
+                // 🔥 ADD THIS: Log EVERY iteration
+                debug!("🔄 Received WebSocket message result");
+
                 match result {
                     Ok(Message::Text(text)) => {
                         message_count += 1;
-                         // ADD THIS: Log raw message
-                        debug!(
+
+                        // 🔥 CRITICAL: Log raw message ALWAYS
+                        info!(
                             message_count,
+                            message_len = text.len(),
                             message_preview = %text.chars().take(200).collect::<String>(),
-                            "Raw WebSocket message received"
+                            "📥 Raw WebSocket TEXT message received"
                         );
 
                         // Parse StatusEvent
                         match serde_json::from_str::<StatusEvent>(&text) {
                             Ok(event) => {
-                                debug!(
+                                info!(
                                     event_type = ?event.event,
                                     conversation_id = %event.conversation_id,
-                                    "Parsed StatusEvent successfully"
+                                    "✅ Parsed StatusEvent successfully"
                                 );
-
                                 let _ = event_sender.send(APIEvent::StatusEventReceived(event));
                             }
                             Err(e) => {
                                 warn!(
                                     error = %e,
                                     message_preview = %text.chars().take(100).collect::<String>(),
-                                    "Failed to parse StatusEvent from WebSocket message"
+                                    "❌ Failed to parse StatusEvent from WebSocket message"
                                 );
                             }
                         }
@@ -245,49 +251,47 @@ impl WebSocketManager {
                         info!(
                             close_frame = ?close_frame,
                             messages_received = message_count,
-                            "WebSocket connection closed by server"
+                            "🔌 WebSocket connection closed by server"
                         );
-
-                        // Update state
                         let mut state_guard = state.write().await;
                         *state_guard = WsConnectionState::Disconnected;
-
                         let _ = event_sender.send(APIEvent::WebSocketDisconnected);
                         break;
                     }
                     Ok(Message::Ping(data)) => {
-                        debug!(data_length = data.len(), "Received ping");
-                        // Pong is handled automatically by tungstenite
+                        info!(data_length = data.len(), "🏓 Received ping");
                     }
                     Ok(Message::Pong(_)) => {
-                        debug!("Received pong");
+                        debug!("🏓 Received pong");
                     }
                     Ok(msg) => {
-                        debug!(message_type = ?msg, "Received other message type");
+                        info!(message_type = ?msg, "📨 Received other message type");
                     }
                     Err(e) => {
                         error!(
                             error = %e,
+                            error_debug = ?e,
                             messages_received = message_count,
-                            "WebSocket error occurred"
+                            "❌ WebSocket error occurred"
                         );
-
-                        // Update state
                         let mut state_guard = state.write().await;
                         *state_guard = WsConnectionState::Disconnected;
-
                         let _ = event_sender.send(APIEvent::WebSocketDisconnected);
                         break;
                     }
                 }
             }
 
+            // 🔥 ADD THIS: Log when loop exits
             info!(
                 total_messages = message_count,
                 subscription_id = %subscription_id,
-                "WebSocket reader task terminated"
+                "🔚 WebSocket reader loop EXITED (stream ended)"
             );
         });
+
+        // 🔥 ADD THIS: Log that spawn completed
+        info!("✅ Reader task spawned successfully");
     }
 
     /// Disconnect the WebSocket connection gracefully

@@ -162,6 +162,7 @@ pub enum UserEvent {
         modified_content: Option<String>,
         reasoning: Option<String>,
     },
+    HitlDecisionPending,
 
     // ============== UI Navigation Events ==============
     /// Change focus to next component

@@ -578,11 +578,17 @@ impl Application {
                 model.set_status_message(severity, message);
             }
 
+            UserEvent::HitlDecisionPending =>{
+                model.hitl_popup_open();
+            }
+
             UserEvent::HitlDecisionSubmit{id, approved, modified_content, reasoning } =>{
-                if let ConnectionState::Connected(conversation_id) = &self.model.connection_state{
+                if let ConnectionState::Connected(conversation_id) = &model.connection_state{
                     let event = EventType::HitlDecision{id: id.clone(), approved, modified_content, reasoning};
                     let event = StatusEvent{conversation_id: conversation_id.clone(), timestamp: Utc::now(), source: EventSource::Hitl{request_id:id}, event};
-                    self.websocket_manager.submit_hitl_decision(event);
+                    if let Ok(()) = self.websocket_manager.submit_hitl_decision(event).await{
+                        model.hitl_popup_close();
+                    };
                 }
             }
         }

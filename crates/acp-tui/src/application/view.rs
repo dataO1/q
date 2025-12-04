@@ -28,4 +28,14 @@ pub fn render(
     app.view(&ComponentId::Timeline, frame, chunks[0]);
     app.view(&ComponentId::QueryInput, frame, chunks[1]);
     app.view(&ComponentId::StatusLine, frame, chunks[2]);
+
+    if model.show_hitl_popup {
+        // Render over the entire screen (full overlay)
+        app.view(&ComponentId::HitlReview, frame, area);
+    }
+
+    // Render help overlay last (highest z-index)
+    if model.show_help {
+        app.view(&ComponentId::Help, frame, area);
+    }
 }

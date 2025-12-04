@@ -27,6 +27,9 @@ pub struct AppModel {
     /// Whether help overlay is visible
     pub show_help: bool,
 
+    /// Whether hitl overlay is visible
+    pub show_hitl_popup: bool,
+
     /// Last execution timestamp
     pub last_execution_time: Option<DateTime<Utc>>,
 }
@@ -41,6 +44,7 @@ impl AppModel {
             status_message: None,
             focused_component: ComponentId::QueryInput, // Start with input focused
             show_help: false,
+            show_hitl_popup: false,
             last_execution_time: None,
         }
     }
@@ -53,6 +57,18 @@ impl AppModel {
             timestamp: Utc::now(),
             error_code: None,
         });
+    }
+
+    /// open popup model
+    pub fn hitl_popup_open(&mut self){
+        self.show_hitl_popup = true;
+        self.focused_component = ComponentId::HitlReview;
+    }
+
+    /// close popup model
+    pub fn hitl_popup_close(&mut self){
+        self.show_hitl_popup = false;
+        self.focused_component = ComponentId::Timeline;
     }
 
     /// Clear status message
