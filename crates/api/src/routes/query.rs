@@ -1,7 +1,7 @@
 use axum::{
-    http::StatusCode, 
-    Json, 
-    extract::{State, Request}, 
+    http::StatusCode,
+    Json,
+    extract::{State, Request},
     response::Result,
     body::Bytes
 };
@@ -14,54 +14,54 @@ use crate::{
 };
 
 /// Execute a query asynchronously
-/// 
+///
 /// Starts background execution of a user query and returns immediately with a conversation_id.
 /// Real-time progress updates are available via WebSocket streaming at the returned stream_url.
-/// 
+///
 /// ## Behavior
-/// 
+///
 /// - **Immediate Response**: Returns conversation_id without waiting for completion
-/// - **Background Execution**: Query processing happens asynchronously  
+/// - **Background Execution**: Query processing happens asynchronously
 /// - **Streaming Updates**: Connect to WebSocket for real-time progress
 /// - **Conversation Context**: Reuse conversation_id for related queries
-/// 
+///
 /// ## Project Scope
-/// 
+///
 /// The `project_scope` field must be populated by the client with:
 /// - Project root directory path
-/// - Detected programming languages  
+/// - Detected programming languages
 /// - Key files and their purposes
 /// - Active development areas
-/// 
+///
 /// This context allows agents to understand the codebase structure and provide
 /// relevant assistance with appropriate tools.
-/// 
+///
 /// ## WebSocket Events
-/// 
+///
 /// After calling this endpoint, connect to the WebSocket stream to receive:
-/// 
+///
 /// 1. `ExecutionStarted` - Processing has begun
 /// 2. `AgentStarted` - An agent has been assigned
-/// 3. `WorkflowStepStarted/Completed` - Step-by-step progress  
+/// 3. `WorkflowStepStarted/Completed` - Step-by-step progress
 /// 4. `AgentThinking` - Intermediate thoughts (optional)
 /// 5. `AgentCompleted` - Agent finished with results
 /// 6. `ExecutionCompleted` - Final results available
-/// 
+///
 /// ## Error Handling
-/// 
+///
 /// - API errors return `ErrorResponse` immediately
 /// - Execution errors are streamed as `ExecutionFailed` events
 /// - WebSocket disconnections don't affect background processing
-/// 
+///
 /// ## Example Usage
-/// 
+///
 /// ```bash
 /// # Start execution
 /// curl -X POST /query \
 ///   -H "Content-Type: application/json" \
 ///   -d '{"query": "Analyze the auth module", "project_scope": {...}}'
-/// 
-/// # Connect to stream  
+///
+/// # Connect to stream
 /// wscat -c "ws://localhost:3000/stream/{conversation_id}"
 /// ```
 /// Extract JSON body and parse with detailed error reporting
@@ -202,7 +202,7 @@ async fn extract_and_validate_json(
         // Validate language_distribution is an object
         if let Some(lang_dist) = project_scope.get("language_distribution") {
             if !lang_dist.is_object() {
-                error!("Invalid language_distribution format: expected object, got {}", 
+                error!("Invalid language_distribution format: expected object, got {}",
                        if lang_dist.is_array() { "array" } else { "primitive" });
                 return Err((
                     StatusCode::UNPROCESSABLE_ENTITY,
@@ -213,7 +213,7 @@ async fn extract_and_validate_json(
                     })
                 ));
             }
-            
+
             // Validate object contains valid key-value pairs
             if let Some(obj) = lang_dist.as_object() {
                 for (key, value) in obj.iter() {
@@ -222,7 +222,7 @@ async fn extract_and_validate_json(
                         return Err((
                             StatusCode::UNPROCESSABLE_ENTITY,
                             Json(ErrorResponse {
-                                error: format!("Value for language '{}' in 'language_distribution' must be a number (percentage), not a {}.", 
+                                error: format!("Value for language '{}' in 'language_distribution' must be a number (percentage), not a {}.",
                                               key, if value.is_string() { "string" } else { "non-number value" }),
                                 code: Some("INVALID_LANGUAGE_DISTRIBUTION_PERCENTAGE".to_string()),
                                 timestamp: Utc::now(),
@@ -252,7 +252,7 @@ async fn extract_and_validate_json(
                 json_preview = %serde_json::to_string(&json_value).unwrap_or_else(|_| "failed to serialize".to_string()).chars().take(500).collect::<String>(),
                 "Failed to deserialize QueryRequest structure"
             );
-            
+
             // Try to provide more specific error information
             let error_msg = if e.to_string().contains("language_distribution") {
                 "Invalid 'language_distribution' format. Expected an object with language names as keys and percentages as values like {\"rust\": 0.8, \"typescript\": 0.2}.".to_string()
@@ -261,7 +261,7 @@ async fn extract_and_validate_json(
             } else {
                 format!("Invalid request structure: {}", e)
             };
-            
+
             Err((
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Json(ErrorResponse {
@@ -277,7 +277,7 @@ async fn extract_and_validate_json(
 /// Validate parsed query request with detailed logging
 #[instrument(skip(_state, req))]
 async fn validate_parsed_query_request(
-    _state: &AppState, 
+    _state: &AppState,
     req: QueryRequest,
 ) -> Result<QueryRequest, (StatusCode, Json<ErrorResponse>)> {
     info!(
@@ -288,7 +288,7 @@ async fn validate_parsed_query_request(
         subscription_id = %req.subscription_id,
         "Validating parsed query request"
     );
-    
+
     // Basic validation - Axum already handled JSON parsing
     if req.query.trim().is_empty() {
         warn!("Empty query provided");
@@ -301,7 +301,7 @@ async fn validate_parsed_query_request(
             })
         ));
     }
-    
+
     if req.project_scope.root.trim().is_empty() {
         warn!("Empty project root provided");
         return Err((
@@ -313,7 +313,7 @@ async fn validate_parsed_query_request(
             })
         ));
     }
-    
+
     if req.project_scope.language_distribution.is_empty() {
         warn!("Empty language distribution provided");
         return Err((
@@ -325,7 +325,7 @@ async fn validate_parsed_query_request(
             })
         ));
     }
-    
+
     info!(
         query_length = req.query.len(),
         project_root = %req.project_scope.root,
@@ -338,7 +338,7 @@ async fn validate_parsed_query_request(
 #[utoipa::path(
     post,
     path = "/query",
-    tag = "execution", 
+    tag = "execution",
     request_body = QueryRequest,
     responses(
         (status = 200, description = "Execution started successfully", body = QueryResponse),
@@ -373,9 +373,9 @@ pub async fn query_task(
     ).await;
 
     match result {
-        Ok(subscription_id_str) => {
+        Ok(()) => {
             info!(
-                subscription_id = %subscription_id_str,
+                subscription_id = %req.subscription_id,
                 query_length = %req.query.len(),
                 "Query execution started successfully"
             );

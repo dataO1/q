@@ -8,6 +8,7 @@ batch_size= 16
 enable_qa_metadata = false  # ← Enable this for better retrieval (slower)
 
 [embedding]
+# ollama_host= "http://192.168.178.60" #windows ollama
 ollama_host= "http://localhost"
 ollama_port= 11434
 # dense_model= "jeffh/intfloat-e5-base-v2:f32" # too much for lenovo T14
@@ -85,7 +86,7 @@ required_tools = ["read_file", "write_file"]
 [[agent_network.agents]]
 id = "planning-1"
 agent_type = "Planning"
-model = "qwen2.5-coder:3b"
+model = "qwen2.5-coder:7b"
 temperature = 0.4
 max_tokens = 32768
 system_prompt = """You are a planning agent that decomposes complex tasks.

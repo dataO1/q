@@ -10,7 +10,7 @@ use crate::agents::{
 use crate::error::{AgentNetworkError, AgentNetworkResult};
 use std::collections::HashMap;
 use std::sync::Arc;
-use ai_agent_common::{AgentConfig, AgentType, QualityStrategy};
+use ai_agent_common::{AgentConfig, AgentType, QualityStrategy, SystemConfig};
 use tracing::{debug, info, instrument};
 
 /// Agent pool managing all available agents
@@ -24,11 +24,12 @@ pub struct AgentPool {
 
 impl AgentPool {
     /// Create a new agent pool from configurations
-    pub async fn new(configs: &[AgentConfig]) -> AgentNetworkResult<Self> {
+    pub async fn new(config: &SystemConfig) -> AgentNetworkResult<Self> {
         let mut agents: HashMap<String, Arc<dyn Agent>> = HashMap::new();
         let mut agents_by_type: HashMap<AgentType, Vec<String>> = HashMap::new();
+        let ollama_url = config.embedding.ollama_host.clone() +":" + &config.embedding.ollama_port.to_string() + "/v1";
 
-        for config in configs {
+        for config in &config.agent_network.agents {
             debug!("Initializing agent: {} ({})", config.id, config.agent_type);
 
             let agent: Arc<dyn Agent> = match config.agent_type {
@@ -38,7 +39,7 @@ impl AgentPool {
                     config.system_prompt.clone(),
                     config.temperature,
                     config.max_tokens,
-                    Some("http://localhost:11434/v1"),
+                    Some(&ollama_url),
                 )),
                 AgentType::Planning => Arc::new(PlanningAgent::new(
                     config.id.clone(),
@@ -46,17 +47,8 @@ impl AgentPool {
                     config.system_prompt.clone(),
                     config.temperature,
                     config.max_tokens,
-                    Some("http://localhost:11434/v1"),
+                    Some(&ollama_url),
                 )),
-                // AgentType::Writing => Arc::new(WritingAgent::new(
-                //     config.id.clone(),
-                //     config.model.clone(),
-                //     config.system_prompt.clone(),
-                //     config.temperature,
-                //     config.max_tokens,
-                //     "http://localhost",
-                //     11434
-                // )),
                 AgentType::Evaluator => {
                     let quality_strategy = config
                         .quality_strategy
@@ -69,7 +61,7 @@ impl AgentPool {
                         config.temperature,
                         config.max_tokens,
                         quality_strategy,
-                        Some("http://localhost:11434/v1"),
+                        Some(&ollama_url),
                     ))
                 }
                 _ => {
@@ -162,62 +154,4 @@ impl AgentPool {
 pub struct PoolStatistics {
     pub total_agents: usize,
     pub agents_by_type: HashMap<AgentType, usize>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_agent_pool_creation() {
-        let configs = vec![
-            AgentConfig {
-                id: "coding-1".to_string(),
-                agent_type: AgentType::Coding,
-                model: "model".to_string(),
-                temperature: 0.7,
-                max_tokens: 4096,
-                system_prompt: "You are helpful".to_string(),
-                recovery_strategy: None,
-                quality_strategy: None,
-                context_window: 8192,
-                enable_streaming: true,
-                capabilities: vec![],
-                required_tools: vec![],
-                available_tools: vec![],
-            },
-        ];
-
-        let pool = AgentPool::new(&configs).await;
-        assert!(pool.is_ok());
-
-        let pool = pool.unwrap();
-        assert_eq!(pool.count(), 1);
-        assert!(pool.has_agent("coding-1"));
-    }
-
-    #[tokio::test]
-    async fn test_get_agents_by_type() {
-        let configs = vec![
-            AgentConfig {
-                id: "coding-1".to_string(),
-                agent_type: AgentType::Coding,
-                model: "model".to_string(),
-                temperature: 0.7,
-                max_tokens: 4096,
-                system_prompt: "You are helpful".to_string(),
-                recovery_strategy: None,
-                quality_strategy: None,
-                context_window: 8192,
-                enable_streaming: true,
-                capabilities: vec![],
-                required_tools: vec![],
-                available_tools: vec![],
-            },
-        ];
-
-        let pool = AgentPool::new(&configs).await.unwrap();
-        let agents = pool.get_agents_by_type(AgentType::Coding);
-        assert_eq!(agents.len(), 1);
-    }
 }

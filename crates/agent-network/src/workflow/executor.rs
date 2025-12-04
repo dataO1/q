@@ -11,7 +11,7 @@ use crate::agents::{AgentPool, AgentContext};
 use crate::tools::ToolSet;
 use crate::coordination::CoordinationManager;
 use crate::filelocks::FileLockManager;
-use crate::execution_manager::BufferedEventSender;
+use crate::execution_manager::BidirectionalEventChannel;
 use ai_agent_common::{ConversationId, ProjectScope, StatusEvent, EventSource, EventType, ExecutionPlan, WaveInfo, TaskInfo};
 use petgraph::algo::toposort;
 use petgraph::graph::NodeIndex;
@@ -144,13 +144,13 @@ impl WorkflowExecutor {
     }
 
     /// Execute workflow with wave-based parallel execution
-    #[instrument(name = "workflow_execution", skip(self, graph, status_sender), fields(task_count = %graph.node_count()))]
+    #[instrument(name = "workflow_execution", skip(self, graph, event_channel), fields(task_count = %graph.node_count()))]
     pub async fn execute_with_hitl(&self,
             graph: WorkflowGraph,
             audit_logger: Arc<AuditLogger>,
             project_scope: ProjectScope,
             conversation_id: ConversationId,
-            status_sender: BufferedEventSender,
+            event_channel: BidirectionalEventChannel,
         ) -> AgentNetworkResult<Vec<TaskResult>> {
         let start_time = Instant::now();
         info!("Starting workflow execution: {} tasks", graph.node_count());
@@ -181,7 +181,7 @@ impl WorkflowExecutor {
             },
         };
 
-        if let Err(_) = status_sender.send(execution_plan_event).await {
+        if let Err(_) = event_channel.send(execution_plan_event).await {
             debug!("Failed to send execution plan event");
         }
 
@@ -197,7 +197,7 @@ impl WorkflowExecutor {
                 Arc::clone(&audit_logger),
                 project_scope.clone(),
                 conversation_id.clone(),
-                status_sender.clone(),
+                event_channel.clone(),
             ).await?;
 
             for result in wave_results {
@@ -238,7 +238,7 @@ impl WorkflowExecutor {
         audit_logger: Arc<AuditLogger>,
         project_scope: ProjectScope,
         conversation_id: ConversationId,
-        status_sender: BufferedEventSender,
+        event_channel: BidirectionalEventChannel,
     ) -> AgentNetworkResult<Vec<TaskResult>> {
         debug!("Executing wave {}: {} parallel tasks", wave.wave_index, wave.task_indices.len());
         // Log wave information with structured fields
@@ -264,7 +264,7 @@ impl WorkflowExecutor {
             },
         };
 
-        if let Err(_) = status_sender.send(wave_started_event).await {
+        if let Err(_) = event_channel.send(wave_started_event).await {
             debug!("Failed to send wave started event");
         }
 
@@ -284,7 +284,7 @@ impl WorkflowExecutor {
 
             let project_scope = project_scope.clone();
             let conversation_id = conversation_id.clone();
-            let status_sender = status_sender.clone();
+            let event_channel = event_channel.clone();
 
             let previous_results_clone = previous_results.clone();
 
@@ -310,7 +310,7 @@ impl WorkflowExecutor {
                         wave_index,
                         project_scope,
                         conversation_id,
-                        status_sender,
+                        event_channel,
                         &previous_results_clone
                     )
                     .await
@@ -374,7 +374,7 @@ impl WorkflowExecutor {
             },
         };
 
-        if let Err(_) = status_sender.send(wave_completed_event).await {
+        if let Err(_) = event_channel.send(wave_completed_event).await {
             debug!("Failed to send wave completed event");
         }
 
@@ -524,7 +524,7 @@ async fn execute_single_task(
     file_locks: Arc<FileLockManager>,
     project_scope: ProjectScope,
     conversation_id: ConversationId,
-    status_sender: BufferedEventSender,
+    event_channel: BidirectionalEventChannel,
     previous_results: &HashMap<String, TaskResult>
 ) -> AgentNetworkResult<TaskResult> {
     // Get agent
@@ -618,7 +618,7 @@ async fn execute_single_task(
     // Execute agent
     info!("Starting agent execution");
     let hitl_audit_logger = Some(audit_logger.clone());
-    match agent.execute(agent_context, status_sender, hitl_audit_logger).await {
+    match agent.execute(agent_context, event_channel, hitl_audit_logger).await {
         Ok(result) => {
             info!("Agent execution completed successfully (tool executions: {})", result.tool_executions.len());
 
@@ -649,7 +649,7 @@ async fn execute_single_task(
     }
 }
 
-#[instrument(name = "task_retry_execution", skip(task, agent_pool, coordination, file_locks, audit_logger, context_provider, status_sender, previous_results), fields(
+#[instrument(name = "task_retry_execution", skip(task, agent_pool, coordination, file_locks, audit_logger, context_provider, event_channel, previous_results), fields(
     task_id = %task.task_id,
     agent_id = %task.agent_id,
 ))]
@@ -666,7 +666,7 @@ async fn execute_task_with_retry(
     wave_index: usize,
     project_scope: ProjectScope,
     conversation_id: ConversationId,
-    status_sender: BufferedEventSender,
+    event_channel: BidirectionalEventChannel,
     previous_results: &HashMap<String, TaskResult>
 ) -> AgentNetworkResult<TaskResult> {
 
@@ -696,7 +696,7 @@ async fn execute_task_with_retry(
         },
     };
 
-    if let Err(_) = status_sender.send(task_started_event).await {
+    if let Err(_) = event_channel.send(task_started_event).await {
         debug!("Failed to send task started event");
     }
 
@@ -713,7 +713,7 @@ async fn execute_task_with_retry(
             Arc::clone(&file_locks),
             project_scope.clone(),
             conversation_id.clone(),
-            status_sender.clone(),
+            event_channel.clone(),
             previous_results
         ))
         .await;
@@ -759,7 +759,7 @@ async fn execute_task_with_retry(
                     },
                 };
 
-                if let Err(_) = status_sender.send(task_completed_event).await {
+                if let Err(_) = event_channel.send(task_completed_event).await {
                     debug!("Failed to send task completed event");
                 }
 
@@ -815,7 +815,7 @@ async fn execute_task_with_retry(
         },
     };
 
-    if let Err(_) = status_sender.send(task_completed_event).await {
+    if let Err(_) = event_channel.send(task_completed_event).await {
         debug!("Failed to send task completed event");
     }
 

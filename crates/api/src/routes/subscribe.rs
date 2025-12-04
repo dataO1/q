@@ -1,8 +1,10 @@
 //! Subscription management endpoints
 //!
 //! This module handles the creation and management of event stream subscriptions.
-//! The two-phase subscription model prevents race conditions between query 
+//! The two-phase subscription model prevents race conditions between query
 //! execution and WebSocket connection.
+
+use std::time::{self, Duration};
 
 use axum::{
     extract::{Path, State},
@@ -24,12 +26,12 @@ use crate::{server::AppState, types::*};
 /// - If `client_id` already has an active subscription, it will be resumed
 /// - Otherwise, a new subscription is created
 /// - Disconnected subscriptions are kept alive for 30 minutes for reconnection
-/// 
+///
 /// **Client ID Generation (TUI should implement):**
 /// ```rust
 /// // Stable hardware-based ID using MAC address or similar
 /// use sha2::{Sha256, Digest};
-/// let client_id = format!("client_{}", 
+/// let client_id = format!("client_{}",
 ///     hex::encode(&Sha256::digest(get_primary_mac_address().as_bytes())[..8])
 /// );
 /// ```
@@ -73,7 +75,7 @@ pub async fn create_subscription(
     );
 
     // Create subscription through execution manager
-    let subscription = match state.execution_manager
+    let subscription_id = match state.execution_manager
         .create_subscription(req.client_id.clone())
         .await
     {
@@ -95,16 +97,18 @@ pub async fn create_subscription(
         }
     };
 
+    let expires_at = Utc::now() + Duration::from_secs(300);
+
     let response = SubscribeResponse {
-        subscription_id: subscription.id.clone(),
-        stream_url: format!("/stream/{}", subscription.id),
-        expires_at: subscription.expires_at,
+        subscription_id: subscription_id.clone(),
+        stream_url: format!("/stream/{}", subscription_id),
+        expires_at
     };
 
     info!(
-        subscription_id = %subscription.id,
+        subscription_id = %subscription_id,
         client_id = ?req.client_id,
-        expires_at = %subscription.expires_at,
+        // expires_at = %subscription.expires_at,
         "Subscription created successfully"
     );
 
@@ -129,7 +133,7 @@ pub async fn get_subscription_status(
     State(state): State<AppState>,
     Path(subscription_id): Path<String>,
 ) -> Result<Json<SubscriptionStatus>, (StatusCode, Json<ErrorResponse>)> {
-    let status_info = match state.execution_manager.get_subscription_status(&subscription_id).await {
+    let status_info = match state.execution_manager.get_subscription_info(&subscription_id).await {
         Some(status) => status,
         None => {
             return Err((

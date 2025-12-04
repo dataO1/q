@@ -17,8 +17,8 @@ use serde_json::Value;
 use tokio::sync::{Mutex, broadcast};
 use tracing::{debug, info, error, warn, instrument, Instrument};
 use std::{collections::{HashMap, HashSet}, sync::Arc};
-use chrono;
-use crate::{execution_manager::BufferedEventSender, hitl::ApprovalDecision};
+use chrono::{self, Duration};
+use crate::{execution_manager::BidirectionalEventChannel, hitl::ApprovalDecision};
 use schemars::JsonSchema;
 use anyhow::{Context, Result, anyhow};
 
@@ -185,7 +185,7 @@ pub trait TypedAgent: Send + Sync {
         context: AgentContext,
         workflow_steps: Vec<WorkflowStep>,
         tools: Arc<ToolSet>,
-        status_sender: BufferedEventSender,
+        event_channel: BidirectionalEventChannel,
         audit_logger: Option<Arc<AuditLogger>>,
     ) -> Result<AgentResult> {
         // Emit agent started event
@@ -209,7 +209,7 @@ pub trait TypedAgent: Send + Sync {
             },
         };
 
-        if let Err(_) = status_sender.send(agent_started_event).await {
+        if let Err(_) = event_channel.send(agent_started_event).await {
             debug!("Failed to send agent started event");
         }
 
@@ -234,7 +234,7 @@ pub trait TypedAgent: Send + Sync {
                 },
             };
 
-            if let Err(_) = status_sender.send(step_started_event).await {
+            if let Err(_) = event_channel.send(step_started_event).await {
                 debug!("Failed to send workflow step started event");
             }
 
@@ -249,7 +249,7 @@ pub trait TypedAgent: Send + Sync {
                     self.execute_step_oneshot(&updated_context, step).await
                 }
                 StepExecutionMode::ReAct { max_iterations } => {
-                    self.execute_step_react(&updated_context, step, Arc::clone(&tools), *max_iterations, &status_sender, &audit_logger).await
+                    self.execute_step_react(&updated_context, step, Arc::clone(&tools), *max_iterations, &event_channel, &audit_logger).await
                 }
             };
 
@@ -282,7 +282,7 @@ pub trait TypedAgent: Send + Sync {
                         },
                     };
 
-                    if let Err(_) = status_sender.send(step_completed_event).await {
+                    if let Err(_) = event_channel.send(step_completed_event).await {
                         debug!("Failed to send workflow step completed event");
                     }
                 }
@@ -313,7 +313,7 @@ pub trait TypedAgent: Send + Sync {
                         },
                     };
 
-                    if let Err(_) = status_sender.send(agent_failed_event).await {
+                    if let Err(_) = event_channel.send(agent_failed_event).await {
                         debug!("Failed to send agent failed event");
                     }
 
@@ -351,7 +351,7 @@ pub trait TypedAgent: Send + Sync {
             },
         };
 
-        if let Err(_) = status_sender.send(agent_completed_event).await {
+        if let Err(_) = event_channel.send(agent_completed_event).await {
             debug!("Failed to send agent completed event");
         }
 
@@ -567,7 +567,7 @@ pub trait TypedAgent: Send + Sync {
         tool_name: &str,
         tool_args: &str,
         agent_context: &AgentContext,
-        status_sender: &BufferedEventSender,
+        event_channel: &BidirectionalEventChannel,
         risk_level: RiskLevel,
     ) -> Result<ApprovalDecision> {
         let request_id = format!("hitl_{}_{}",
@@ -607,7 +607,7 @@ pub trait TypedAgent: Send + Sync {
             },
         };
 
-        if let Err(_) = status_sender.send(hitl_event).await {
+        if let Err(_) = event_channel.send(hitl_event).await {
             warn!("Failed to send HITL requested event");
         }
 
@@ -632,41 +632,42 @@ pub trait TypedAgent: Send + Sync {
 
         info!("HITL approval requested for {} tool {} (risk: {:?})",
               self.agent_type(), tool_name, risk_level);
+        // Step 2: Wait for HITL decision from client (inbound: client → server)
+        let event_key = format!("hitl_decision:{}", request_id);
+        let timeout = std::time::Duration::from_secs(3000) ; // 5 minutes
 
-        let decision = match status_sender.recv().await {
-            Ok(event) => {
-                match event {
-                    // TODO: check or receive only message for the respective id
-                    StatusEvent{ conversation_id, timestamp, source, event: EventType::HitlDecision{ id, approved, modified_content, reasoning } } =>{
-                        let decision = if approved{ApprovalDecision::Approved{reasoning}}else{ApprovalDecision::Rejected{reasoning}};
+        let event = event_channel.wait_for(event_key, timeout).await
+            .context("Timeout or error waiting for HITL decision")?;
 
-                        // Send completion event
-                        let completion_event = StatusEvent {
-                            conversation_id: agent_context.conversation_id
-                                .as_ref()
-                                .map(|id| id.to_string())
-                                .unwrap_or_else(|| "unknown".to_string()),
-                            timestamp: chrono::Utc::now(),
-                            source: EventSource::Agent {
-                                agent_id: self.id().to_string(),
-                                agent_type: self.agent_type(),
-                                task_id: agent_context.task_id.clone(),
-                            },
-                            event: EventType::HitlCompleted {
-                                approved: matches!(decision, ApprovalDecision::Approved{reasoning: None}),
-                                reason: Some(format!("Policy decision for {:?} risk: {:?}", risk_level, decision)),
-                            },
-                        };
+        let decision = match event {
+            // TODO: check or receive only message for the respective id
+            StatusEvent{ conversation_id, timestamp, source, event: EventType::HitlDecision{ id, approved, modified_content, reasoning } } =>{
+                let decision = if approved{ApprovalDecision::Approved{reasoning}}else{ApprovalDecision::Rejected{reasoning}};
 
-                        if let Err(_) = status_sender.send(completion_event).await {
-                            warn!("Failed to send HITL completed event");
-                        }
-                        decision
+                // Send completion event
+                let completion_event = StatusEvent {
+                    conversation_id: agent_context.conversation_id
+                        .as_ref()
+                        .map(|id| id.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    timestamp: chrono::Utc::now(),
+                    source: EventSource::Agent {
+                        agent_id: self.id().to_string(),
+                        agent_type: self.agent_type(),
+                        task_id: agent_context.task_id.clone(),
                     },
-                    _ =>{ApprovalDecision::Approved{reasoning: None}}
+                    event: EventType::HitlCompleted {
+                        approved: matches!(decision, ApprovalDecision::Approved{reasoning: None}),
+                        reason: Some(format!("Policy decision for {:?} risk: {:?}", risk_level, decision)),
+                    },
+                };
+
+                if let Err(_) = event_channel.send(completion_event).await {
+                    warn!("Failed to send HITL completed event");
                 }
-            }
-            Err(err) => {ApprovalDecision::Rejected{reasoning: Some(err.to_string())}}
+                decision
+            },
+            _ =>{ApprovalDecision::Approved{reasoning: None}}
         };
 
         // // Apply approval policy based on risk level and business rules
@@ -738,7 +739,7 @@ pub trait TypedAgent: Send + Sync {
         step: &WorkflowStep,
         tools: Arc<ToolSet>,
         max_iterations: Option<usize>,
-        status_sender: &BufferedEventSender,
+        event_channel: &BidirectionalEventChannel,
         audit_logger: &Option<Arc<AuditLogger>>,
     ) -> Result<StepResult> {
         // Record comprehensive input details as span attributes for Jaeger visibility
@@ -873,7 +874,7 @@ pub trait TypedAgent: Send + Sync {
                                 &function.name,
                                 &function.arguments,
                                 context,
-                                status_sender,
+                                event_channel,
                                 risk_level,
                             ).await? {
                                 ApprovalDecision::Approved{reasoning} => {
@@ -1172,7 +1173,7 @@ pub trait Agent: Send + Sync {
     async fn execute(
         &self,
         context: AgentContext,
-        status_sender: BufferedEventSender,
+        event_channel: BidirectionalEventChannel,
         audit_logger: Option<Arc<AuditLogger>>,
     ) -> Result<AgentResult>;
 
@@ -1192,17 +1193,17 @@ where
     fn model(&self) -> &str { TypedAgent::model(self) }
     fn client(&self) -> &Client<OpenAIConfig> { TypedAgent::client(self) }
 
-    #[instrument(name = "agent_workflow_execution", skip(self, context, status_sender, audit_logger), fields(agent_id = %self.id(), agent_type = %self.agent_type()))]
+    #[instrument(name = "agent_workflow_execution", skip(self, context, event_channel, audit_logger), fields(agent_id = %self.id(), agent_type = %self.agent_type()))]
     async fn execute(
         &self,
         context: AgentContext,
-        status_sender: BufferedEventSender,
+        event_channel: BidirectionalEventChannel,
         audit_logger: Option<Arc<AuditLogger>>,
     ) -> Result<AgentResult> {
         // All agents use workflow execution
         let workflow_steps = self.define_workflow_steps(&context);
         let tools = Arc::new(ToolSet::new(&context.clone().project_scope.unwrap().root));
-        self.execute_workflow(context, workflow_steps, tools, status_sender, audit_logger).await
+        self.execute_workflow(context, workflow_steps, tools, event_channel, audit_logger).await
     }
 
     fn define_workflow_steps(&self, context: &AgentContext) -> Vec<WorkflowStep> {

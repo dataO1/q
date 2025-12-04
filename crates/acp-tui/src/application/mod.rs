@@ -131,7 +131,14 @@ impl Application {
         app.mount(ComponentId::StatusLine, Box::new(StatusLineRealmComponent::new()), vec![])
             .context("Failed to mount StatusLine component")?;
 
-        app.mount(ComponentId::HitlReview, Box::new(HitlReviewRealmComponent::new()), vec![])
+        app.mount(ComponentId::HitlReview, Box::new(HitlReviewRealmComponent::new()),
+            vec![
+                Sub::new(
+                    SubEventClause::Any,
+                    SubClause::Always,      // Always receive them
+                ),
+            ],
+        )
             .context("Failed to mount HitlReview component")?;
 
         app.mount(ComponentId::Help, Box::new(HelpRealmComponent::new()), vec![])
@@ -146,7 +153,7 @@ impl Application {
         let acp_client = Arc::new(AcpClient::new(&config.server_url)?);
         let api_service = ApiService::new(acp_client.clone());
         let query_executor = QueryExecutor::new(api_service.clone(), sender.clone());
-        let websocket_manager = WebSocketManager::new(config.server_url.clone(), sender.clone());
+        let websocket_manager = WebSocketManager::new(config.server_url.clone(), sender.clone())?;
 
         // Animation timer - configurable rate for smooth animations when needed
         let animation_timer = interval(Duration::from_millis(config.ui.animation_interval_ms));

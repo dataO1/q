@@ -17,12 +17,12 @@ use tracing::{debug, info, warn, error, instrument};
 
 use crate::agents::{AgentContext, AgentPool};
 use crate::agents::planning::{SubtaskSpec, TaskDecompositionPlan};
+use crate::execution_manager::BidirectionalEventChannel;
 use crate::sharedcontext::SharedContext;
 use crate::coordination::CoordinationManager;
 use crate::filelocks::FileLockManager;
 use crate::hitl::{AuditLogger};
 use crate::workflow::{WorkflowExecutor, WorkflowGraph, TaskResult, WorkflowBuilder, TaskNode, DependencyType};
-use crate::execution_manager::BufferedEventSender;
 use schemars::JsonSchema;
 
 use ai_agent_common::{
@@ -104,7 +104,7 @@ impl Orchestrator {
         query: &str,
         project_scope: ProjectScope,
         conversation_id: ConversationId,
-        status_sender: BufferedEventSender,
+        event_channel: BidirectionalEventChannel,
         config: Arc<SystemConfig>,
         agent_pool: Arc<AgentPool>,
         shared_context: Arc<RwLock<SharedContext>>,
@@ -133,7 +133,7 @@ impl Orchestrator {
             },
         };
 
-        if let Err(_) = status_sender.send(analysis_event).await {
+        if let Err(_) = event_channel.send(analysis_event).await {
             debug!("Failed to send query analysis event");
         }
 
@@ -157,7 +157,7 @@ impl Orchestrator {
                     &conversation_id,
                     &agent_pool,
                     &config.agent_network,
-                    status_sender.clone(),
+                    event_channel.clone(),
                 ).await?
             }
         };
@@ -173,7 +173,7 @@ impl Orchestrator {
             },
         };
 
-        if let Err(_) = status_sender.send(decomposition_event).await {
+        if let Err(_) = event_channel.send(decomposition_event).await {
             debug!("Failed to send task decomposition event");
         }
 
@@ -191,7 +191,7 @@ impl Orchestrator {
             },
         };
 
-        if let Err(_) = status_sender.send(workflow_event).await {
+        if let Err(_) = event_channel.send(workflow_event).await {
             debug!("Failed to send workflow construction event");
         }
 
@@ -206,7 +206,7 @@ impl Orchestrator {
             audit_logger,
             rag,
             history_manager,
-            status_sender.clone(),
+            event_channel.clone(),
         ).await?;
         info!("Workflow execution completed with {} results", results.len());
 
@@ -223,7 +223,7 @@ impl Orchestrator {
             },
         };
 
-        if let Err(_) = status_sender.send(synthesis_event).await {
+        if let Err(_) = event_channel.send(synthesis_event).await {
             debug!("Failed to send result synthesis event");
         }
 
@@ -370,7 +370,7 @@ impl Orchestrator {
         audit_logger: Arc<AuditLogger>,
         rag: Arc<SmartMultiSourceRag>,
         history_manager: Arc<RwLock<HistoryManager>>,
-        status_sender: BufferedEventSender,
+        event_channel: BidirectionalEventChannel,
     ) -> Result<Vec<TaskResult>> {
         debug!("Executing workflow with {} nodes", workflow.node_count());
 
@@ -387,7 +387,7 @@ impl Orchestrator {
             audit_logger,
             project_scope,
             conversation_id,
-            status_sender,
+            event_channel,
         ).await?;
 
         Ok(results)
@@ -401,7 +401,7 @@ impl Orchestrator {
         conversation_id: &ConversationId,
         agent_pool: &Arc<AgentPool>,
         config: &AgentNetworkConfig,
-        status_sender: BufferedEventSender,
+        event_channel: BidirectionalEventChannel,
     ) -> Result<Vec<DecomposedTask>> {
         info!("Decomposing query using LLM planning agent: {}", analysis.query);
 
@@ -413,7 +413,7 @@ impl Orchestrator {
             event: EventType::PlanningStarted,
         };
 
-        if let Err(_) = status_sender.send(planning_started_event).await {
+        if let Err(_) = event_channel.send(planning_started_event).await {
             debug!("Failed to send planning started event");
         }
 
@@ -465,7 +465,7 @@ impl Orchestrator {
         info!("Planning Context: {}", description);
 
         // Execute planning agent with extractor for structured output
-        let result = planning_agent.execute(planning_context, status_sender.clone(), None).await?;
+        let result = planning_agent.execute(planning_context, event_channel.clone(), None).await?;
 
         // Extract the structured plan
         let plan: TaskDecompositionPlan = result.extract()
@@ -551,7 +551,7 @@ impl Orchestrator {
             },
         };
 
-        if let Err(_) = status_sender.send(planning_completed_event).await {
+        if let Err(_) = event_channel.send(planning_completed_event).await {
             debug!("Failed to send planning completed event");
         }
 
