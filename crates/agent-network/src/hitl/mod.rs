@@ -17,13 +17,6 @@ use anyhow::Result;
 use crate::AgentResult;
 
 
-#[derive(Debug, Clone)]
-pub struct ApprovalRequest {
-    pub request_id: String,
-    pub assessment: RiskAssessment,
-    pub decision: Option<ApprovalDecision>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ApprovalDecision {
     Approved{ reasoning: Option<String> },
@@ -31,16 +24,6 @@ pub enum ApprovalDecision {
     NeedsMoreInfo,
 }
 
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HitlRequest {
-    pub request_id: String,
-    pub task_id: String,
-    pub agent_id: String,
-    pub description: String,
-    pub risk_level: RiskLevel,
-    pub proposed_action: String,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RiskAssessment {
@@ -73,11 +56,4 @@ impl RiskAssessment {
         self.metadata.insert(key.to_string(), value.to_string());
         self
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HitlResponse {
-    pub request_id: String,
-    pub approved: bool,
-    pub feedback: Option<String>,
 }

@@ -92,6 +92,9 @@ standard for agent interoperability and communication.
         AgentCapability,
         HealthResponse,
         ErrorResponse,
+        HitlRequest,
+        HitlMetadata,
+        HitlPreview,
         // Common types
         crate::types::ProjectScope,
         crate::types::StatusEvent,

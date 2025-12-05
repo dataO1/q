@@ -1,5 +1,6 @@
 //! Individual filesystem tools for file operations using tokio::fs
 
+use ai_agent_common::{HitlMetadata, HitlPreview, HitlRequest};
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use std::path::{Path, PathBuf};
@@ -150,6 +151,18 @@ impl TypedTool for ReadFileTool {
         "Read the contents of a file. Provide a relative path."
     }
 
+    async fn hitl_request(&self, params: Self::Params) -> Result<HitlRequest>{
+        let metadata = HitlMetadata{
+            file_path: Some(params.path),
+            file_size: None,
+            is_new_file: false,
+            is_destructive: false,
+            requires_network: false,
+        };
+        let preview = HitlPreview::None;
+        Ok(HitlRequest{preview, metadata})
+    }
+
     #[instrument(name = "read_file_tool", skip(self), fields(
         tool_name = "read_file",
         path = tracing::field::Empty,
@@ -222,6 +235,18 @@ impl TypedTool for WriteFileTool {
 
     fn description(&self) -> &str {
         "Write content to a file. Creates parent directories if needed. Provide relative path and content."
+    }
+
+    async fn hitl_request(&self, params: Self::Params) -> Result<HitlRequest>{
+        let metadata = HitlMetadata{
+            file_path: Some(params.path),
+            file_size: Some(params.content.len()),
+            is_new_file: true,
+            is_destructive: false,
+            requires_network: false,
+        };
+        let preview = HitlPreview::Text(params.content.clone());
+        Ok(HitlRequest{preview, metadata})
     }
 
     #[instrument(name = "write_file_tool", skip(self), fields(
@@ -306,6 +331,18 @@ impl TypedTool for ListDirectoryTool {
 
     fn description(&self) -> &str {
         "List the contents of a directory. Provide a relative path to a directory."
+    }
+
+    async fn hitl_request(&self, params: Self::Params) -> Result<HitlRequest>{
+        let metadata = HitlMetadata{
+            file_path: Some(params.path),
+            file_size: None,
+            is_new_file: false,
+            is_destructive: false,
+            requires_network: false,
+        };
+        let preview = HitlPreview::None;
+        Ok(HitlRequest{preview, metadata})
     }
 
     #[instrument(name = "list_directory_tool", skip(self), fields(
@@ -394,6 +431,18 @@ impl TypedTool for CreateDirectoryTool {
         "Create a directory and all parent directories if they don't exist. Provide a relative path."
     }
 
+    async fn hitl_request(&self, params: Self::Params) -> Result<HitlRequest>{
+        let metadata = HitlMetadata{
+            file_path: Some(params.path),
+            file_size: None,
+            is_new_file: true,
+            is_destructive: false,
+            requires_network: false,
+        };
+        let preview = HitlPreview::None; // TODO:: add tree of resulting directory tree
+        Ok(HitlRequest{preview, metadata})
+    }
+
     #[instrument(name = "create_directory_tool", skip(self), fields(
         tool_name = "create_directory",
         path = tracing::field::Empty,
@@ -462,6 +511,18 @@ impl TypedTool for DeleteFileTool {
 
     fn description(&self) -> &str {
         "Delete a file. Provide a relative path to the file to delete."
+    }
+
+    async fn hitl_request(&self, params: Self::Params) -> Result<HitlRequest>{
+        let metadata = HitlMetadata{
+            file_path: Some(params.path),
+            file_size: None,
+            is_new_file: false,
+            is_destructive: true,
+            requires_network: false,
+        };
+        let preview = HitlPreview::None; // TODO:: add filecontent preview of the file to delete
+        Ok(HitlRequest{preview, metadata})
     }
 
     #[instrument(name = "delete_file_tool", skip(self), fields(
@@ -534,6 +595,19 @@ impl TypedTool for FileExistsTool {
         "Check if a file or directory exists. Provide a relative path."
     }
 
+    async fn hitl_request(&self, params: Self::Params) -> Result<HitlRequest>{
+        let metadata = HitlMetadata{
+            file_path: Some(params.path),
+            file_size: None,
+            is_new_file: false,
+            is_destructive: false,
+            requires_network: false,
+        };
+
+        let preview = HitlPreview::None; // TODO:: add filecontent preview of the file to delete
+        Ok(HitlRequest{preview, metadata})
+    }
+
     #[instrument(name = "file_exists_tool", skip(self), fields(
         tool_name = "file_exists",
         path = tracing::field::Empty,
@@ -596,6 +670,19 @@ impl TypedTool for FileMetadataTool {
 
     fn description(&self) -> &str  {
         "Get metadata information about a file or directory (size, type, permissions). Provide a relative path."
+    }
+
+    async fn hitl_request(&self, params: Self::Params) -> Result<HitlRequest>{
+        let metadata = HitlMetadata{
+            file_path: Some(params.path),
+            file_size: None,
+            is_new_file: false,
+            is_destructive: false,
+            requires_network: false,
+        };
+
+        let preview = HitlPreview::None; // TODO:: add filecontent preview of the file to delete
+        Ok(HitlRequest{preview, metadata})
     }
 
     #[instrument(name = "file_metadata_tool", skip(self), fields(

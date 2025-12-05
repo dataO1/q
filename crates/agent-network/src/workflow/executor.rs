@@ -5,7 +5,7 @@
 //! while maximizing parallelism through concurrent task spawning.
 use tracing::{info, debug, warn, error, instrument, span, Level, Instrument};
 use crate::error::{AgentNetworkError, AgentNetworkResult};
-use crate::hitl::{ApprovalRequest, AuditEvent, AuditLogger, RiskAssessment};
+use crate::hitl::{AuditEvent, AuditLogger, RiskAssessment};
 use crate::workflow::{TaskNode, TaskResult, WorkflowGraph, DependencyType};
 use crate::agents::{AgentPool, AgentContext};
 use crate::tools::ToolSet;

@@ -20,7 +20,7 @@ use tuirealm::{
 };
 use tracing::{debug, info, warn};
 
-use crate::{client::{EventType, StatusEvent}, message::{APIEvent, UserEvent}};
+use crate::{client::{EventType, HitlPreview, HitlRequest, StatusEvent}, message::{APIEvent, UserEvent}};
 
 /// Input mode for the modal
 #[derive(Debug, Clone, PartialEq)]
@@ -30,67 +30,15 @@ enum InputMode {
     /// Editing reasoning text
     EditingReasoning,
 }
-/// Risk level for HITL requests
-#[derive(Debug, Clone, PartialEq)]
-pub enum RiskLevel {
-    High,    // write_file, bash_command, delete
-    Medium,  // install, network calls
-    Low,     // read_file, search
-}
 
-impl RiskLevel {
-    pub fn from_string(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "high" => Self::High,
-            "medium" => Self::Medium,
-            "low" => Self::Low,
-            _ => Self::Medium, // Default to medium if unknown
-        }
-    }
-
-    pub fn color(&self) -> Color {
-        match self {
-            Self::High => Color::Red,
-            Self::Medium => Color::Yellow,
-            Self::Low => Color::Blue,
-        }
-    }
-
-    pub fn icon(&self) -> &'static str {
-        match self {
-            Self::High => "🚨",
-            Self::Medium => "⚠️ ",
-            Self::Low => "ℹ️ ",
-        }
-    }
-}
-
-/// HITL request data
-#[derive(Debug, Clone)]
-pub struct HitlRequest {
-    pub id: String,
-    pub tool_name: String,
-    pub description: String,
-    pub risk_level: RiskLevel,
-    pub preview: String,
-    pub reasoning: Option<String>,
-    pub metadata: HitlMetadata,
-}
-
-/// Metadata about the HITL request
-#[derive(Debug, Clone)]
-pub struct HitlMetadata {
-    pub file_path: Option<String>,
-    pub file_size: Option<usize>,
-    pub is_new_file: bool,
-    pub dependencies: Vec<String>,
-    pub command: Option<String>,
-}
 
 /// HITL Review Modal Component
 pub struct HitlReviewRealmComponent {
     /// Current HITL request being displayed
     current_request: Option<HitlRequest>,
+
+    /// Current event_id for tracking async event streams
+    current_event_id: Option<String>,
 
     /// Queue of pending requests
     request_queue: Vec<HitlRequest>,
@@ -127,6 +75,7 @@ impl HitlReviewRealmComponent {
 
         Self {
             current_request: None,
+            current_event_id: None,
             request_queue: Vec::new(),
             scroll_offset: 0,
             auto_approve_timer: None,
@@ -181,7 +130,7 @@ impl HitlReviewRealmComponent {
 
             if let Some(request) = &self.current_request {
                 let event = UserEvent::HitlDecisionSubmit {
-                    id: request.id.clone(),
+                    id: self.current_event_id.clone().unwrap(),
                     approved,
                     modified_content: None,
                     reasoning
@@ -202,10 +151,10 @@ impl HitlReviewRealmComponent {
     /// Handle approval decision (prompts for reasoning)
     fn approve(&mut self) -> Option<UserEvent> {
         if let Some(request) = &self.current_request {
-            info!("HITL quick approved (no reasoning): {}", request.tool_name);
+            info!("HITL quick approved (no reasoning): {:?}", request.metadata);
 
             let event = UserEvent::HitlDecisionSubmit {
-                id: request.id.clone(),
+                id: self.current_event_id.clone().unwrap(),
                 approved: true,
                 modified_content: None,
                 reasoning: None
@@ -227,8 +176,8 @@ impl HitlReviewRealmComponent {
     /// Add a new HITL request to the queue
     pub fn push_request(&mut self, request: HitlRequest) {
         info!(
-            "HITL request queued: {} by {}",
-            request.tool_name, request.id
+            "HITL request queued: {:?}",
+            request.metadata
         );
 
         // If no current request, show immediately
@@ -241,13 +190,12 @@ impl HitlReviewRealmComponent {
 
     /// Show a request in the modal
     fn show_request(&mut self, request: HitlRequest) {
-        // Set auto-approve timer for low-risk operations
-        self.auto_approve_timer = if request.risk_level == RiskLevel::Low {
+        // Set auto-approve timer for safe operations (non-destructive, no network)
+        self.auto_approve_timer = if !request.metadata.is_destructive && !request.metadata.requires_network {
             Some(10) // 10 seconds
         } else {
             None
         };
-
         self.current_request = Some(request);
         self.scroll_offset = 0;
         self.timer_paused = false;
@@ -268,7 +216,7 @@ impl HitlReviewRealmComponent {
     /// Handle defer decision
     fn defer(&mut self) -> Option<UserEvent> {
         if let Some(request) = self.current_request.take() {
-            info!("HITL deferred: {}", request.tool_name);
+            info!("HITL deferred: {:?}", request.metadata);
 
             // Put at end of queue
             self.request_queue.push(request);
@@ -354,14 +302,27 @@ impl HitlReviewRealmComponent {
     }
 
     fn render_header(&self, frame: &mut Frame, area: Rect, request: &HitlRequest) {
-        let risk_color = request.risk_level.color();
-        let risk_icon = request.risk_level.icon();
+        // Determine risk color from metadata
+        let (risk_color, risk_icon) = if request.metadata.is_destructive {
+            (Color::Red, "🚨")
+        } else if request.metadata.requires_network {
+            (Color::Yellow, "⚠️ ")
+        } else {
+            (Color::Blue, "ℹ️ ")
+        };
+
+        // Extract operation type from preview
+        let operation = match &request.preview {
+            HitlPreview::None => "Operation",
+            HitlPreview::Text(_) => "File Operation",
+            HitlPreview::Diff { .. } => "File Modification",
+        };
 
         let title = format!(
-            "{} {}                    {}    {}",
+            "{} {} {} {}",
             risk_icon,
-            request.tool_name,
-            request.id,
+            operation,
+            self.current_event_id.clone().unwrap(),
             self.queue_position()
         );
 
@@ -374,100 +335,142 @@ impl HitlReviewRealmComponent {
                     .border_style(Style::default().fg(risk_color))
                     .border_type(ratatui::widgets::BorderType::Double),
             );
-
         frame.render_widget(header, area);
     }
 
     fn render_body(&self, frame: &mut Frame, area: Rect, request: &HitlRequest) {
         let mut lines = Vec::new();
 
-        // File/command info
+        // File/path info
         if let Some(ref path) = request.metadata.file_path {
             let size_info = if let Some(size) = request.metadata.file_size {
-                format!(" ({} lines{})", size, if request.metadata.is_new_file { ", NEW" } else { "" })
+                format!(" ({} bytes{})", size, if request.metadata.is_new_file { ", NEW" } else { "" })
             } else {
                 String::new()
             };
-
             lines.push(Line::from(vec![
                 Span::styled("File: ", Style::default().add_modifier(Modifier::BOLD)),
                 Span::raw(format!("{}{}", path, size_info)),
             ]));
         }
 
-        if let Some(ref cmd) = request.metadata.command {
-            lines.push(Line::from(vec![
-                Span::styled("$ ", Style::default().fg(Color::Green)),
-                Span::raw(cmd),
-            ]));
+        // Risk indicators
+        let mut risk_tags = Vec::new();
+        if request.metadata.is_destructive {
+            risk_tags.push(Span::styled("DESTRUCTIVE", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
+        }
+        if request.metadata.requires_network {
+            risk_tags.push(Span::styled("NETWORK", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
+        }
+        if request.metadata.is_new_file {
+            risk_tags.push(Span::styled("NEW FILE", Style::default().fg(Color::Cyan)));
         }
 
-        // Dependencies
-        if !request.metadata.dependencies.is_empty() {
+        if !risk_tags.is_empty() {
             lines.push(Line::from(vec![
-                Span::styled("Deps: ", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(request.metadata.dependencies.join(", ")),
-            ]));
+                Span::styled("Tags: ", Style::default().add_modifier(Modifier::BOLD)),
+            ].into_iter().chain(
+                risk_tags.into_iter()
+                    .flat_map(|tag| vec![tag, Span::raw(" ")])
+            ).collect::<Vec<_>>()));
         }
 
         lines.push(Line::from("")); // Blank line
 
-        // Preview box
-        lines.push(Line::from("┌────────────────────────────────────────────────────────────┐"));
+        // Render preview based on type
+        match &request.preview {
+            HitlPreview::None => {
+                lines.push(Line::from(Span::styled(
+                    "No preview available",
+                    Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC)
+                )));
+            }
+            HitlPreview::Text(content) => {
+                lines.push(Line::from("┌────────────────────────────────────────────────────────────┐"));
+                let preview_lines: Vec<&str> = content.lines().collect();
+                let visible_lines = 10;
 
-        let preview_lines: Vec<&str> = request.preview.lines().collect();
-        let visible_lines = 10; // Max lines to show
-        for (_i, line) in preview_lines.iter()
-            .skip(self.scroll_offset)
-            .take(visible_lines)
-            .enumerate()
-        {
-            let truncated = if line.len() > 58 {
-                format!("{}...", &line[..55])
-            } else {
-                format!("{:<58}", line)
-            };
-            lines.push(Line::from(format!("│ {} │", truncated)));
+                for line in preview_lines.iter()
+                    .skip(self.scroll_offset)
+                    .take(visible_lines)
+                {
+                    let truncated = if line.len() > 58 {
+                        format!("{}...", &line[..55])
+                    } else {
+                        format!("{:<58}", line)
+                    };
+                    lines.push(Line::from(format!("│ {} │", truncated)));
+                }
+
+                // Scroll indicator
+                let scroll_indicator = if preview_lines.len() > visible_lines {
+                    format!("[L{}/{:3}] ↓↑", self.scroll_offset + 1, preview_lines.len())
+                } else {
+                    format!("[{} lines]", preview_lines.len())
+                };
+                lines.push(Line::from(format!("│{:>60}│", scroll_indicator)));
+                lines.push(Line::from("└────────────────────────────────────────────────────────────┘"));
+            }
+            HitlPreview::Diff { old, new, path } => {
+                lines.push(Line::from(vec![
+                    Span::styled("Diff: ", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(path),
+                ]));
+                lines.push(Line::from("┌────────────────────────────────────────────────────────────┐"));
+
+                let old_lines: Vec<&str> = old.lines().collect();
+                let new_lines: Vec<&str> = new.lines().collect();
+                let max_lines = old_lines.len().max(new_lines.len());
+                let visible_lines = 10;
+
+                for i in self.scroll_offset..(self.scroll_offset + visible_lines).min(max_lines) {
+                    let old_line = old_lines.get(i).unwrap_or(&"");
+                    let new_line = new_lines.get(i).unwrap_or(&"");
+
+                    if old_line != new_line {
+                        if !old_line.is_empty() {
+                            lines.push(Line::from(vec![
+                                Span::styled("│- ", Style::default().fg(Color::Red)),
+                                Span::styled(format!("{:<56}", old_line.chars().take(56).collect::<String>()), Style::default().fg(Color::Red)),
+                                Span::raw("│"),
+                            ]));
+                        }
+                        if !new_line.is_empty() {
+                            lines.push(Line::from(vec![
+                                Span::styled("│+ ", Style::default().fg(Color::Green)),
+                                Span::styled(format!("{:<56}", new_line.chars().take(56).collect::<String>()), Style::default().fg(Color::Green)),
+                                Span::raw("│"),
+                            ]));
+                        }
+                    } else {
+                        lines.push(Line::from(format!("│  {:<56}│", old_line.chars().take(56).collect::<String>())));
+                    }
+                }
+
+                lines.push(Line::from(format!("│{:>60}│", format!("[{}/{}]", self.scroll_offset + 1, max_lines))));
+                lines.push(Line::from("└────────────────────────────────────────────────────────────┘"));
+            }
         }
 
-        // Scroll indicator
-        let scroll_indicator = if preview_lines.len() > visible_lines {
-            format!("[L{}/{:3}] ↓↑", self.scroll_offset + 1, preview_lines.len())
-        } else {
-            format!("[{} lines]", preview_lines.len())
-        };
-        lines.push(Line::from(format!("│{:>60}│", scroll_indicator)));
-        lines.push(Line::from("└────────────────────────────────────────────────────────────┘"));
-
-        lines.push(Line::from("")); // Blank line
-
-        // Reasoning
-        if let Some(ref reasoning) = request.reasoning {
-            lines.push(Line::from(vec![
-                Span::styled("\"", Style::default().fg(Color::Gray)),
-                Span::styled(reasoning, Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC)),
-                Span::styled("\"", Style::default().fg(Color::Gray)),
-            ]));
-        }
-
-        // Auto-approve timer
-        if let Some(timer) = self.auto_approve_timer {
-            lines.push(Line::from(""));
-            let timer_text = if self.timer_paused {
-                format!("⏸  Auto-approve PAUSED (was {}s)", timer)
-            } else {
-                format!("⏰ Auto-approving in {}s...", timer)
-            };
-            lines.push(Line::from(Span::styled(
-                timer_text,
-                Style::default().fg(Color::Yellow),
-            )));
+        // Auto-approve timer (only for non-destructive operations)
+        if !request.metadata.is_destructive && !request.metadata.requires_network {
+            if let Some(timer) = self.auto_approve_timer {
+                lines.push(Line::from(""));
+                let timer_text = if self.timer_paused {
+                    format!("⏸ Auto-approve PAUSED (was {}s)", timer)
+                } else {
+                    format!("⏰ Auto-approving in {}s...", timer)
+                };
+                lines.push(Line::from(Span::styled(
+                    timer_text,
+                    Style::default().fg(Color::Yellow),
+                )));
+            }
         }
 
         let body = Paragraph::new(lines)
             .block(Block::default().borders(Borders::ALL))
             .wrap(Wrap { trim: false });
-
         frame.render_widget(body, area);
     }
 
@@ -481,10 +484,10 @@ impl HitlReviewRealmComponent {
                 }
             }
             InputMode::Normal => {
-                if request.risk_level == RiskLevel::Low {
-                    "[A] Approve  [R] Reject  [Space] Pause  [↓↑] Scroll  [Shift+A/R] Quick"
+                if !request.metadata.is_destructive && !request.metadata.requires_network {
+                    "[A] Approve [R] Reject [Space] Pause [↓↑] Scroll [Shift+A/R] Quick"
                 } else {
-                    "[A] Approve  [R] Reject  [D] Defer  [↓↑] Scroll  [Shift+A/R] Quick"
+                    "[A] Approve [R] Reject [D] Defer [↓↑] Scroll [Shift+A/R] Quick"
                 }
             }
         };
@@ -648,28 +651,11 @@ impl Component<UserEvent, APIEvent> for HitlReviewRealmComponent {
                     }
                 }
             }
-            Event::User(APIEvent::StatusEventReceived(StatusEvent{event: EventType::HitlRequested { task_description, risk_level }, id: event_id, source, timestamp })) => {
+            Event::User(APIEvent::StatusEventReceived(StatusEvent{event: EventType::HitlRequested {request}, id: event_id, source, timestamp })) => {
                 debug!("HITL request received, opening modal");
 
-                // Parse task_description to extract structured data
-                // For now, create a basic request - you'll need to enhance this parsing
-                let request = HitlRequest {
-                    id: event_id,  // TODO: Extract from task_description
-                    tool_name: "unknown".to_string(), // TODO: Extract from task_description
-                    description: task_description.clone(),
-                    risk_level: RiskLevel::from_string(&risk_level),
-                    preview: task_description.clone(), // TODO: Extract actual preview
-                    reasoning: None,
-                    metadata: HitlMetadata {
-                        file_path: None,
-                        file_size: None,
-                        is_new_file: false,
-                        dependencies: vec![],
-                        command: None,
-                    },
-                };
-
                 self.push_request(request);
+                self.current_event_id = Some(event_id);
                 Some(UserEvent::HitlDecisionPending)
             },
 
@@ -683,17 +669,17 @@ impl Component<UserEvent, APIEvent> for HitlReviewRealmComponent {
 
                 if let Some(request) = &self.current_request {
                     // Emit decision event with current request context
-                    let event = UserEvent::HitlDecisionSubmit {
-                        id: request.id.clone(),
-                        approved,
-                        modified_content: None,
-                        reasoning: request.reasoning.clone(),
-                    };
+                    // let event = UserEvent::HitlDecisionSubmit {
+                    //     id: request.id.clone(),
+                    //     approved,
+                    //     modified_content: None,
+                    //     reasoning: request.reasoning.clone(),
+                    // };
 
                     // Move to next request or close modal
                     self.next_request();
 
-                    Some(event)
+                    None
                 } else {
                     warn!("Received HitlCompleted but no current request");
                     None

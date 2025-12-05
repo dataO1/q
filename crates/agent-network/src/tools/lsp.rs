@@ -1,3 +1,4 @@
+use ai_agent_common::{HitlMetadata, HitlPreview, HitlRequest};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use tracing::debug;
@@ -55,6 +56,19 @@ impl TypedTool for LspTool {
 
     fn description(&self) -> &str {
         "Language Server Protocol tool for code analysis and completion"
+    }
+
+    async fn hitl_request(&self, params: Self::Params) -> Result<HitlRequest>{
+        let metadata = HitlMetadata{
+            file_path: None,
+            file_size: None,
+            is_new_file: false,
+            is_destructive: false,
+            requires_network: false,
+        };
+
+        let preview = HitlPreview::None; // TODO:: add filecontent preview of the file to delete
+        Ok(HitlRequest{preview, metadata})
     }
 
     async fn call(&self, params: Self::Params) -> Result<ToolResult> {

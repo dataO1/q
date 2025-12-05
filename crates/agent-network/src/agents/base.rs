@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use derive_more::Display;
 use async_openai::{
     config::OpenAIConfig, types::{
-        ChatCompletionRequestAssistantMessage, ChatCompletionRequestAssistantMessageContent, ChatCompletionRequestDeveloperMessageContent, ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage, ChatCompletionRequestSystemMessageContent, ChatCompletionRequestToolMessageArgs, ChatCompletionRequestToolMessageContent, ChatCompletionRequestUserMessage, ChatCompletionRequestUserMessageContent, ChatCompletionResponseMessage, ChatCompletionTool, ChatCompletionToolChoiceOption, CreateChatCompletionRequest, CreateChatCompletionRequestArgs, CreateChatCompletionResponse, ResponseFormat, ResponseFormatJsonSchema, Role
+        ChatCompletionRequestAssistantMessage, ChatCompletionRequestAssistantMessageContent, ChatCompletionRequestDeveloperMessageContent, ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage, ChatCompletionRequestSystemMessageContent, ChatCompletionRequestToolMessageArgs, ChatCompletionRequestToolMessageContent, ChatCompletionRequestUserMessage, ChatCompletionRequestUserMessageContent, ChatCompletionResponseMessage, ChatCompletionTool, ChatCompletionToolChoiceOption, CreateChatCompletionRequest, CreateChatCompletionRequestArgs, CreateChatCompletionResponse, FunctionCall, ResponseFormat, ResponseFormatJsonSchema, Role
     }, Client
 };
 use futures::StreamExt;
@@ -564,8 +564,8 @@ pub trait TypedAgent: Send + Sync {
     /// Request HITL approval for a tool call
     async fn request_hitl_approval(
         &self,
-        tool_name: &str,
-        tool_args: &str,
+        function_call: &FunctionCall,
+        tools: Arc<ToolSet>,
         agent_context: &AgentContext,
         event_channel: &BidirectionalEventChannel,
         risk_level: RiskLevel,
@@ -582,12 +582,14 @@ pub trait TypedAgent: Send + Sync {
             confidence: 0.5, // Requesting approval indicates low confidence
             requires_hitl: true,
             tokens_used: None,
-            reasoning: Some(format!("Tool {} requires human approval due to {:?} risk", tool_name, risk_level)),
+            reasoning: Some(format!("Tool {} requires human approval due to {:?} risk",function_call.name, risk_level)),
             tool_executions: vec![],
         };
 
         let risk_assessment = RiskAssessment::new(&agent_result, self.agent_type(),
-            Some(format!("Tool {} requires approval: risk={:?}, args={}", tool_name, risk_level, tool_args)));
+            Some(format!("Tool {} requires approval: risk={:?}, args={}", function_call.name, risk_level, function_call.arguments)));
+
+        let hitl_request = tools.hitl_request(function_call).await?;
 
         // Send HITL requested event to notify TUI
         let hitl_event = StatusEvent {
@@ -598,10 +600,7 @@ pub trait TypedAgent: Send + Sync {
                 agent_type: self.agent_type(),
                 task_id: agent_context.task_id.clone(),
             },
-            event: EventType::HitlRequested {
-                risk_level: format!("{:?}", risk_level),
-                task_description: format!("{}: {} with args: {}", self.agent_type(), tool_name, tool_args),
-            },
+            event: EventType::HitlRequested{ request: hitl_request },
         };
 
         if let Err(_) = event_channel.send(hitl_event).await {
@@ -615,12 +614,12 @@ pub trait TypedAgent: Send + Sync {
             timestamp: chrono::Utc::now(),
             agent_id: self.id().to_string(),
             task_id: agent_context.task_id.as_ref().unwrap_or(&"unknown".to_string()).clone(),
-            action: format!("HITL_REQUEST:{}", tool_name),
+            action: format!("HITL_REQUEST:{}",&function_call.name),
             risk_level: format!("{:?}", risk_level),
             decision: "PENDING".to_string(),
             metadata: [
-                ("tool_name".to_string(), tool_name.to_string()),
-                ("tool_args".to_string(), tool_args.to_string()),
+                ("tool_name".to_string(),function_call.clone().name),
+                ("tool_args".to_string(),function_call.clone().arguments),
                 ("agent_type".to_string(), format!("{:?}", self.agent_type())),
             ].into(),
         };
@@ -628,7 +627,7 @@ pub trait TypedAgent: Send + Sync {
         AuditLogger::log(audit_event);
 
         info!("HITL approval requested for {} tool {} (risk: {:?})",
-              self.agent_type(), tool_name, risk_level);
+              self.agent_type(),function_call.name, risk_level);
         // Step 2: Wait for HITL decision from client (inbound: client → server)
         let timeout = std::time::Duration::from_secs(3000) ; // 5 minutes
 
@@ -696,19 +695,19 @@ pub trait TypedAgent: Send + Sync {
             timestamp: chrono::Utc::now(),
             agent_id: self.id().to_string(),
             task_id: agent_context.task_id.as_ref().unwrap_or(&"unknown".to_string()).clone(),
-            action: format!("HITL_DECISION:{}", tool_name),
+            action: format!("HITL_DECISION:{}",function_call.clone().name),
             risk_level: format!("{:?}", risk_level),
             decision: format!("{:?}", decision),
             metadata: [
-                ("tool_name".to_string(), tool_name.to_string()),
-                ("tool_args".to_string(), tool_args.to_string()),
+                ("tool_name".to_string(),function_call.clone().name),
+                ("tool_args".to_string(),function_call.clone().name),
                 ("decision_reason".to_string(), format!("Auto-policy for {:?} risk level", risk_level)),
             ].into(),
         };
 
         AuditLogger::log(decision_audit);
 
-        info!("HITL decision for {} tool {}: {:?}", self.agent_type(), tool_name, decision);
+        info!("HITL decision for {} tool {}: {:?}", self.agent_type(),function_call.clone().name, decision);
         Ok(decision)
     }
 
@@ -868,8 +867,8 @@ pub trait TypedAgent: Send + Sync {
                             ));
 
                             match self.request_hitl_approval(
-                                &function.name,
-                                &function.arguments,
+                                &function,
+                                tools.clone(),
                                 context,
                                 event_channel,
                                 risk_level,

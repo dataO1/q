@@ -1,8 +1,9 @@
+use ai_agent_common::HitlRequest;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use schemars::JsonSchema;
 use anyhow::{Result, anyhow};
-use async_openai::types::{ChatCompletionTool, ChatCompletionToolType, FunctionObject};
+use async_openai::types::{ChatCompletionTool, ChatCompletionToolType, FunctionCall, FunctionObject};
 pub mod filesystem;
 // pub mod git;
 pub mod lsp;
@@ -62,6 +63,8 @@ pub trait Tool: Send + Sync + std::fmt::Debug{
             },
         }
     }
+
+    async fn hitl_request(&self, arguments: &str) -> Result<HitlRequest>;
 }
 
 /// Helper trait for tools that use typed parameters
@@ -85,6 +88,8 @@ pub trait TypedTool: Send + Sync {
         let schema = schemars::schema_for!(Self::Params);
         serde_json::to_value(schema).unwrap_or_default()
     }
+
+    async fn hitl_request(&self, params: Self::Params) -> Result<HitlRequest>;
 }
 
 /// Blanket implementation: any TypedTool automatically becomes a Tool
@@ -111,7 +116,14 @@ where
         let schema = schemars::schema_for!(T::Params);
         serde_json::to_value(schema).unwrap_or_default()
     }
+
+    async fn hitl_request(&self, params: &str) -> Result<HitlRequest>{
+        let params: T::Params = serde_json::from_str(params)
+            .map_err(|e| anyhow!("Failed to parse arguments for {}: {}", self.name(), e))?;
+        self.hitl_request(params).await
+    }
 }
+
 
 /// Collection of available tools
 #[derive(Debug)]
@@ -148,6 +160,15 @@ impl ToolSet {
             .filter_map(|name| self.tools.get(name).map(|t| t.to_openai_tool()))
             .collect::<Vec<_>>();
         Ok(tools)
+    }
+
+
+    pub async fn hitl_request(&self, function_call: &FunctionCall) -> Result<HitlRequest>{
+        if let Some(tool) = self.tools.get(&function_call.name){
+            tool.hitl_request(&function_call.arguments).await
+        }else{
+            Err(anyhow!("No such tool found"))
+        }
     }
 
     pub async fn execute_tool(&self, tool_name: &str, arguments: &str) -> Result<ToolExecution> {

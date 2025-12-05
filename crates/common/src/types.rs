@@ -9,6 +9,8 @@ use schemars::JsonSchema;
 use derive_builder::Builder;
 use derive_more::Display as MoreDisplay;
 
+use crate::RiskLevel;
+
 /// Unique identifier for tasks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TaskId(pub Uuid);
@@ -297,10 +299,7 @@ pub enum EventType {
     },
 
     /// Human-in-the-loop approval requested
-    HitlRequested {
-        task_description: String,
-        risk_level: String,
-    },
+    HitlRequested{ request: HitlRequest },
 
     /// Human-in-the-loop approval requested
     HitlDecision{
@@ -368,6 +367,57 @@ pub enum EventType {
         wave_index: usize,
         success: bool,
     },
+}
+
+/// Preview content with formatting hints
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct HitlRequest {
+    /// The preview of the Hitl Request
+    pub preview: HitlPreview,
+    /// Some metadata about the Hitl Request
+    pub metadata: HitlMetadata,
+}
+
+/// Preview content with formatting hints
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum HitlPreview {
+    /// No preview available (i.e for read file operations or web)
+    None,
+    /// Plain text content
+    Text(String),
+
+    /// Diff view (old vs new)
+    Diff { old: String, new: String, path: String },
+
+    // /// Command with args breakdown
+    // Command {
+    //     command: String,
+    //     args: Vec<String>,
+    //     env: Vec<(String, String)>,
+    //     working_dir: Option<String>,
+    // },
+    //
+    // /// Multiple sections (for complex tools)
+    // Sections(Vec<(String, Box<HitlPreview>)>),
+}
+
+
+/// Some HITL request metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct HitlMetadata {
+    /// If so which file/path is affected
+    pub file_path: Option<String>,
+    /// file size
+    pub file_size: Option<usize>,
+    /// is new file?
+    pub is_new_file: bool,
+    /// delete, remove, write etc.
+    pub is_destructive: bool, // delete, overwrite
+    /// searching the interent?
+    pub requires_network: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, Display)]
