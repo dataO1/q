@@ -58,32 +58,32 @@ impl EventTreeRealmComponent {
         }
     }
     /// Generate the full execution plan tree structure
-    fn build_execution_plan(&mut self, conversation_id: &str, plan: &crate::client::types::ExecutionPlan) {
+    fn build_execution_plan(&mut self, id: &str, plan: &crate::client::types::ExecutionPlan) {
         info!("Building execution plan with {} waves", plan.waves.len());
 
         // ⚠️ CHECK: Does the execution root exist?
-        if self.tree.find_node(conversation_id).is_none() {
+        if self.tree.find_node(id).is_none() {
             warn!(
                 "Execution root node '{}' not found when building plan! Creating it now.",
-                conversation_id
+                id
             );
             // Create the root if missing
             let root = self.tree.add_root(
-                conversation_id.to_string(),
-                format!("Execution: {}", conversation_id),
+                id.to_string(),
+                format!("Execution: {}", id),
             );
             root.start();
         }
 
         for wave_info in &plan.waves {
-            let wave_id = format!("{}/wave-{}", conversation_id, wave_info.wave_index);
+            let wave_id = format!("{}/wave-{}", id, wave_info.wave_index);
             let wave_name = format!("Wave {} ({} tasks)", wave_info.wave_index, wave_info.tasks.len());
 
-            info!("Adding wave node: {} -> {}", conversation_id, wave_id);
+            info!("Adding wave node: {} -> {}", id, wave_id);
 
             // Add wave as child of execution
             self.tree.add_child(
-                conversation_id.to_string(),
+                id.to_string(),
                 wave_id.clone(),
                 wave_name,
             );
@@ -147,14 +147,14 @@ impl EventTreeRealmComponent {
         // Invalidate cache since tree will change
         self.invalidate_cache();
 
-        debug!(?event.event, executionid = event.conversation_id, "Processing status event in Timeline");
+        debug!(?event.event, executionid = event.id, "Processing status event in Timeline");
 
         // Convert StatusEvent to tree operations following the original pattern
         match &event.event {
             EventType::ExecutionStarted { query } => {
                 info!(query = query, "Execution started");
                 let root = self.tree.add_root(
-                    event.conversation_id.clone(),
+                    event.id.clone(),
                     format!("Query: {}", query),
                 );
                 root.start();
@@ -193,7 +193,7 @@ impl EventTreeRealmComponent {
                     // Fallback: if no task node found, add under execution root
                     if !found_task_node {
                         self.tree.add_child(
-                            event.conversation_id.clone(),
+                            event.id.clone(),
                             agent_id.clone(),
                             format!("{:?} Agent (ctx: {})", agent_type, context_size),
                         );
@@ -258,40 +258,40 @@ impl EventTreeRealmComponent {
                 }
             }
             EventType::ExecutionCompleted { result } => {
-                info!(executionid = event.conversation_id, "Execution completed");
-                if let Some(root) = self.tree.find_node_mut(&event.conversation_id) {
+                info!(executionid = event.id, "Execution completed");
+                if let Some(root) = self.tree.find_node_mut(&event.id) {
                     root.complete();
                 }
             }
             EventType::ExecutionFailed { error } => {
                 warn!(
-                    executionid = event.conversation_id,
+                    executionid = event.id,
                     error = error,
                     "Execution failed"
                 );
-                if let Some(root) = self.tree.find_node_mut(&event.conversation_id) {
+                if let Some(root) = self.tree.find_node_mut(&event.id) {
                     root.fail(Some(error.clone()));
                 }
             }
             EventType::PlanningStarted => {
-                info!(executionid = event.conversation_id, "Planning started");
+                info!(executionid = event.id, "Planning started");
 
                 // Ensure execution root exists
-                if self.tree.find_node(&event.conversation_id).is_none() {
+                if self.tree.find_node(&event.id).is_none() {
                     warn!("Execution root not found, creating it for planning");
                     let root = self.tree.add_root(
-                        event.conversation_id.clone(),
-                        format!("Execution: {}", event.conversation_id),
+                        event.id.clone(),
+                        format!("Execution: {}", event.id),
                     );
                     root.start();
                 }
 
                 // Add planning node under execution root
-                let planning_id = format!("{}/planning", event.conversation_id);
-                info!("Creating planning node: {} -> {}", event.conversation_id, planning_id);
+                let planning_id = format!("{}/planning", event.id);
+                info!("Creating planning node: {} -> {}", event.id, planning_id);
 
                 self.tree.add_child(
-                    event.conversation_id.clone(),
+                    event.id.clone(),
                     planning_id.clone(),
                     "Planning Phase".to_string(),
                 );
@@ -306,13 +306,13 @@ impl EventTreeRealmComponent {
 
             EventType::PlanningCompleted { reasoning, task_count } => {
                 info!(
-                    executionid = event.conversation_id,
+                    executionid = event.id,
                     task_count = task_count,
                     "Planning completed"
                 );
 
                 // Complete planning node
-                let planning_id = format!("{}/planning", event.conversation_id);
+                let planning_id = format!("{}/planning", event.id);
                 if let Some(node) = self.tree.find_node_mut(&planning_id) {
                     node.complete();
                     // Add reasoning as a child info node
@@ -330,14 +330,14 @@ impl EventTreeRealmComponent {
 
             EventType::WaveStarted { task_count, task_ids, wave_index } => {
                 info!(
-                    executionid = event.conversation_id,
+                    executionid = event.id,
                     wave_index = wave_index,
                     task_count = task_count,
                     "Wave started"
                 );
 
                 // Find and start the wave node
-                let wave_id = format!("{}/wave-{}", event.conversation_id, wave_index);
+                let wave_id = format!("{}/wave-{}", event.id, wave_index);
                 if let Some(wave_node) = self.tree.find_node_mut(&wave_id) {
                     wave_node.start();
 
@@ -353,7 +353,7 @@ impl EventTreeRealmComponent {
 
             EventType::WaveCompleted { failure_count, success_count, wave_index } => {
                 info!(
-                    executionid = event.conversation_id,
+                    executionid = event.id,
                     wave_index = wave_index,
                     success_count = success_count,
                     failure_count = failure_count,
@@ -361,7 +361,7 @@ impl EventTreeRealmComponent {
                 );
 
                 // Complete or fail the wave node based on results
-                let wave_id = format!("{}/wave-{}", event.conversation_id, wave_index);
+                let wave_id = format!("{}/wave-{}", event.id, wave_index);
                 if let Some(wave_node) = self.tree.find_node_mut(&wave_id) {
                     if *failure_count > 0 {
                         wave_node.fail(Some(format!(
@@ -376,13 +376,13 @@ impl EventTreeRealmComponent {
 
             EventType::ExecutionPlanReady { plan } => {
                 info!(
-                    executionid = event.conversation_id,
+                    executionid = event.id,
                     wave_count = plan.waves.len(),
                     "ExecutionPlanReady - building tree structure"
                 );
 
                 // Build the complete execution plan tree
-                self.build_execution_plan(&event.conversation_id, plan);
+                self.build_execution_plan(&event.id, plan);
             }
             _ => {
                 debug!(event_type = ?event.event, "Unhandled event type");

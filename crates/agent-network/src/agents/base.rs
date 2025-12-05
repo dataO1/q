@@ -195,7 +195,7 @@ pub trait TypedAgent: Send + Sync {
             .unwrap_or_else(|| "unknown".to_string());
 
         let agent_started_event = StatusEvent {
-            conversation_id: conversation_id.clone(),
+            id: conversation_id.clone(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Agent {
                 agent_id: self.id().to_string(),
@@ -222,7 +222,7 @@ pub trait TypedAgent: Send + Sync {
 
             // Emit workflow step started event
             let step_started_event = StatusEvent {
-                conversation_id: conversation_id.clone(),
+                id: conversation_id.clone(),
                 timestamp: chrono::Utc::now(),
                 source: EventSource::Agent {
                     agent_id: self.id().to_string(),
@@ -270,7 +270,7 @@ pub trait TypedAgent: Send + Sync {
 
                     // Emit workflow step completed event
                     let step_completed_event = StatusEvent {
-                        conversation_id: conversation_id.clone(),
+                        id: conversation_id.clone(),
                         timestamp: chrono::Utc::now(),
                         source: EventSource::Agent {
                             agent_id: self.id().to_string(),
@@ -301,7 +301,7 @@ pub trait TypedAgent: Send + Sync {
 
                     // Emit agent failed event
                     let agent_failed_event = StatusEvent {
-                        conversation_id: conversation_id.clone(),
+                        id: conversation_id.clone(),
                         timestamp: chrono::Utc::now(),
                         source: EventSource::Agent {
                             agent_id: self.id().to_string(),
@@ -339,7 +339,7 @@ pub trait TypedAgent: Send + Sync {
 
         // Emit agent completed event
         let agent_completed_event = StatusEvent {
-            conversation_id: conversation_id.clone(),
+            id: conversation_id.clone(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Agent {
                 agent_id: self.id().to_string(),
@@ -570,7 +570,7 @@ pub trait TypedAgent: Send + Sync {
         event_channel: &BidirectionalEventChannel,
         risk_level: RiskLevel,
     ) -> Result<ApprovalDecision> {
-        let request_id = format!("hitl_{}_{}",
+        let event_id = format!("hitl_{}_{}",
             agent_context.task_id.as_ref().unwrap_or(&"unknown".to_string()),
             chrono::Utc::now().timestamp_millis()
         );
@@ -591,10 +591,7 @@ pub trait TypedAgent: Send + Sync {
 
         // Send HITL requested event to notify TUI
         let hitl_event = StatusEvent {
-            conversation_id: agent_context.conversation_id
-                .as_ref()
-                .map(|id| id.to_string())
-                .unwrap_or_else(|| "unknown".to_string()),
+            id: event_id.clone(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Agent {
                 agent_id: self.id().to_string(),
@@ -614,7 +611,7 @@ pub trait TypedAgent: Send + Sync {
 
         // Create audit event for the request
         let audit_event = AuditEvent {
-            event_id: request_id.clone(),
+            event_id: event_id.clone(),
             timestamp: chrono::Utc::now(),
             agent_id: self.id().to_string(),
             task_id: agent_context.task_id.as_ref().unwrap_or(&"unknown".to_string()).clone(),
@@ -633,23 +630,19 @@ pub trait TypedAgent: Send + Sync {
         info!("HITL approval requested for {} tool {} (risk: {:?})",
               self.agent_type(), tool_name, risk_level);
         // Step 2: Wait for HITL decision from client (inbound: client → server)
-        let event_key = format!("hitl_decision:{}", request_id);
         let timeout = std::time::Duration::from_secs(3000) ; // 5 minutes
 
-        let event = event_channel.wait_for(event_key, timeout).await
+        let event = event_channel.wait_for(event_id.clone(), timeout).await
             .context("Timeout or error waiting for HITL decision")?;
 
         let decision = match event {
             // TODO: check or receive only message for the respective id
-            StatusEvent{ conversation_id, timestamp, source, event: EventType::HitlDecision{ id, approved, modified_content, reasoning } } =>{
+            StatusEvent{ id, timestamp, source, event: EventType::HitlDecision{ approved, modified_content, reasoning } } =>{
                 let decision = if approved{ApprovalDecision::Approved{reasoning}}else{ApprovalDecision::Rejected{reasoning: reasoning.unwrap()}};
 
                 // Send completion event
                 let completion_event = StatusEvent {
-                    conversation_id: agent_context.conversation_id
-                        .as_ref()
-                        .map(|id| id.to_string())
-                        .unwrap_or_else(|| "unknown".to_string()),
+                    id,
                     timestamp: chrono::Utc::now(),
                     source: EventSource::Agent {
                         agent_id: self.id().to_string(),
@@ -699,7 +692,7 @@ pub trait TypedAgent: Send + Sync {
 
         // Log the final decision
         let decision_audit = AuditEvent {
-            event_id: format!("{}_decision", request_id),
+            event_id: format!("{}_decision", event_id),
             timestamp: chrono::Utc::now(),
             agent_id: self.id().to_string(),
             task_id: agent_context.task_id.as_ref().unwrap_or(&"unknown".to_string()).clone(),
@@ -780,7 +773,11 @@ pub trait TypedAgent: Send + Sync {
         let mut tool_executions = Vec::new();
         let mut final_response = String::new();
 
-        'outer_loop: for iteration in 0..max_iter {
+        let mut iteration = 0;
+        'outer_loop: loop {
+            if iteration >= max_iter {
+                break;  // Reached max iterations
+            }
             debug!(target: "agent_execution", "ReAct iteration {}/{} for step '{}'", iteration + 1, max_iter, step.name);
 
             // Build request for this iteration
@@ -939,6 +936,7 @@ pub trait TypedAgent: Send + Sync {
                     break;
                 }
             }
+            iteration +=1;
         }
 
         current_span.record("total_tool_executions", tool_executions.len());

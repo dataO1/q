@@ -233,7 +233,7 @@ impl WebSocketManager {
                             Ok(event) => {
                                 info!(
                                     event_type = ?event.event,
-                                    conversation_id = %event.conversation_id,
+                                    id = %event.id,
                                     "✅ Parsed StatusEvent successfully"
                                 );
                                 let _ = event_sender.send(APIEvent::StatusEventReceived(event));
@@ -378,10 +378,10 @@ impl WebSocketManager {
     ///
     /// # Returns
     /// Result indicating success or failure
-    #[instrument(skip(self), fields(request_id = %decision.conversation_id))]
+    #[instrument(skip(self), fields(request_id = %decision.id))]
     pub async fn submit_hitl_decision(&self, decision: StatusEvent) -> Result<()> {
         info!(
-            conversation_id = %decision.conversation_id,
+            id = %decision.id,
             decision_type = ?decision.event,
             "Submitting HITL decision via WebSocket"
         );
@@ -420,7 +420,7 @@ impl WebSocketManager {
                 .await
                 .context("Failed to send HITL decision through WebSocket")?;
 
-            info!(conversation_id = %decision.conversation_id, "HITL decision sent successfully");
+            info!(id = %decision.id, "HITL decision sent successfully");
             Ok(())
         } else {
             warn!("WebSocket writer not available");
@@ -435,7 +435,7 @@ impl WebSocketManager {
     pub async fn send_status_event(&self, event: StatusEvent) -> Result<()> {
         debug!(
             event_type = ?event.event,
-            conversation_id = %event.conversation_id,
+            id = %event.id,
             "Sending StatusEvent via WebSocket"
         );
 

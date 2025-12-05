@@ -125,7 +125,7 @@ impl Orchestrator {
 
         // Emit query analysis completed event
         let analysis_event = StatusEvent {
-            conversation_id: conversation_id_str.clone(),
+            id: conversation_id_str.clone(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Orchestrator,
             event: EventType::WorkflowStepCompleted {
@@ -165,7 +165,7 @@ impl Orchestrator {
 
         // Emit task decomposition completed event
         let decomposition_event = StatusEvent {
-            conversation_id: conversation_id_str.clone(),
+            id: conversation_id_str.clone(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Orchestrator,
             event: EventType::WorkflowStepCompleted {
@@ -183,7 +183,7 @@ impl Orchestrator {
 
         // Emit workflow construction completed event
         let workflow_event = StatusEvent {
-            conversation_id: conversation_id_str.clone(),
+            id: conversation_id_str.clone(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Orchestrator,
             event: EventType::WorkflowStepCompleted {
@@ -215,7 +215,7 @@ impl Orchestrator {
 
         // Emit result synthesis completed event
         let synthesis_event = StatusEvent {
-            conversation_id: conversation_id_str.clone(),
+            id: conversation_id_str.clone(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Orchestrator,
             event: EventType::WorkflowStepCompleted {
@@ -407,7 +407,7 @@ impl Orchestrator {
 
         // Emit planning started event
         let planning_started_event = StatusEvent {
-            conversation_id: conversation_id.to_string(),
+            id: conversation_id.to_string(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Orchestrator,
             event: EventType::PlanningStarted,
@@ -542,7 +542,7 @@ impl Orchestrator {
 
         // Emit planning completed event
         let planning_completed_event = StatusEvent {
-            conversation_id: conversation_id.to_string(),
+            id: conversation_id.to_string(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Orchestrator,
             event: EventType::PlanningCompleted {

@@ -8,7 +8,7 @@ use crate::client::types::{StatusEvent, ProjectScope};
 // Implement PartialEq for the types that don't have it
 impl PartialEq for StatusEvent {
     fn eq(&self, other: &Self) -> bool {
-        self.conversation_id == other.conversation_id
+        self.id == other.id
             && self.timestamp == other.timestamp
             // Skip source comparison for now since EventSource doesn't implement PartialEq
     }

@@ -173,7 +173,7 @@ impl WorkflowExecutor {
         // Create and send ExecutionPlan
         let execution_plan = self.create_execution_plan(&graph, &waves).await?;
         let execution_plan_event = StatusEvent {
-            conversation_id: conversation_id.to_string(),
+            id: conversation_id.to_string(),
             timestamp: chrono::Utc::now(),
             source: EventSource::Orchestrator,
             event: EventType::ExecutionPlanReady {
@@ -254,7 +254,7 @@ impl WorkflowExecutor {
             .collect();
 
         let wave_started_event = ai_agent_common::StatusEvent {
-            conversation_id: conversation_id.to_string(),
+            id: conversation_id.to_string(),
             timestamp: chrono::Utc::now(),
             source: ai_agent_common::EventSource::Orchestrator,
             event: ai_agent_common::EventType::WaveStarted {
@@ -364,7 +364,7 @@ impl WorkflowExecutor {
 
         // Emit wave completed event
         let wave_completed_event = ai_agent_common::StatusEvent {
-            conversation_id: conversation_id.to_string(),
+            id: conversation_id.to_string(),
             timestamp: chrono::Utc::now(),
             source: ai_agent_common::EventSource::Orchestrator,
             event: ai_agent_common::EventType::WaveCompleted {
@@ -685,7 +685,7 @@ async fn execute_task_with_retry(
 
     // Emit task node started event
     let task_started_event = ai_agent_common::StatusEvent {
-        conversation_id: conversation_id.to_string(),
+        id: conversation_id.to_string(),
         timestamp: chrono::Utc::now(),
         source: ai_agent_common::EventSource::Orchestrator,
         event: ai_agent_common::EventType::TaskNodeStarted {
@@ -748,7 +748,7 @@ async fn execute_task_with_retry(
 
                 // Emit task node completed event
                 let task_completed_event = ai_agent_common::StatusEvent {
-                    conversation_id: conversation_id.to_string(),
+                    id: conversation_id.to_string(),
                     timestamp: chrono::Utc::now(),
                     source: ai_agent_common::EventSource::Orchestrator,
                     event: ai_agent_common::EventType::TaskNodeCompleted {
@@ -804,7 +804,7 @@ async fn execute_task_with_retry(
 
     // Emit task node completed event for failed task
     let task_completed_event = ai_agent_common::StatusEvent {
-        conversation_id: conversation_id.to_string(),
+        id: conversation_id.to_string(),
         timestamp: chrono::Utc::now(),
         source: ai_agent_common::EventSource::Orchestrator,
         event: ai_agent_common::EventType::TaskNodeCompleted {

@@ -648,13 +648,13 @@ impl Component<UserEvent, APIEvent> for HitlReviewRealmComponent {
                     }
                 }
             }
-            Event::User(APIEvent::StatusEventReceived(StatusEvent{event: EventType::HitlRequested { task_description, risk_level }, conversation_id, source, timestamp })) => {
+            Event::User(APIEvent::StatusEventReceived(StatusEvent{event: EventType::HitlRequested { task_description, risk_level }, id: event_id, source, timestamp })) => {
                 debug!("HITL request received, opening modal");
 
                 // Parse task_description to extract structured data
                 // For now, create a basic request - you'll need to enhance this parsing
                 let request = HitlRequest {
-                    id: conversation_id,  // TODO: Extract from task_description
+                    id: event_id,  // TODO: Extract from task_description
                     tool_name: "unknown".to_string(), // TODO: Extract from task_description
                     description: task_description.clone(),
                     risk_level: RiskLevel::from_string(&risk_level),
@@ -674,7 +674,7 @@ impl Component<UserEvent, APIEvent> for HitlReviewRealmComponent {
             },
 
                 // Handle HITL completion - CLOSE MODAL
-            Event::User(APIEvent::StatusEventReceived(StatusEvent{event: EventType::HitlCompleted { approved, reason }, conversation_id, source, timestamp })) => {
+            Event::User(APIEvent::StatusEventReceived(StatusEvent{event: EventType::HitlCompleted { approved, reason }, id: event_id, source, timestamp })) => {
                 debug!(
                     "HITL completion received: {} (reason: {:?})",
                     if approved { "approved" } else { "rejected" },

@@ -169,7 +169,7 @@ pub struct MessageMetadata {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct StatusEvent {
     /// Unique identifier for this execution
-    pub conversation_id: String,
+    pub id: String,
 
     /// When this event occurred
     pub timestamp: DateTime<Utc>,
@@ -304,7 +304,6 @@ pub enum EventType {
 
     /// Human-in-the-loop approval requested
     HitlDecision{
-        id: String,
         approved: bool,
         modified_content: Option<String>,
         reasoning: Option<String>,

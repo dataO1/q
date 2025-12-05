@@ -109,12 +109,10 @@ impl BidirectionalEventChannel {
             .map_err(|_| anyhow::anyhow!("Inbound channel closed for {}", self.id))?;
 
         // Check for targeted waiters (e.g., HITL decisions waiting for response)
-        if let Some(key) = Self::extract_event_key(&event) {
-            let mut waiters = self.event_waiters.lock().await;
-            if let Some(tx) = waiters.remove(&key) {
-                info!("✅ Routing targeted event {} to waiting agent", key);
-                let _ = tx.send(event);
-            }
+        let mut waiters = self.event_waiters.lock().await;
+        if let Some(tx) = waiters.remove(&event.id) {
+            info!("✅ Routing targeted event {} to waiting agent", event.id);
+            let _ = tx.send(event);
         }
 
         Ok(())
@@ -160,16 +158,6 @@ impl BidirectionalEventChannel {
         let mut rx = self.inbound_rx.lock().await;
         rx.recv().await
             .ok_or_else(|| anyhow::anyhow!("Inbound channel closed for {}", self.id))
-    }
-
-    /// Extract event key for targeted routing
-    fn extract_event_key(event: &StatusEvent) -> Option<String> {
-        match &event.event {
-            EventType::HitlDecision { id, .. } => {
-                Some(format!("hitl_decision:{}", id))
-            }
-            _ => None,
-        }
     }
 
     /// Get channel ID
@@ -428,7 +416,7 @@ impl ExecutionManager {
 
         // Send execution started event
         event_channel.send(StatusEvent {
-            conversation_id: conversation_id.to_string(),
+            id: conversation_id.to_string(),
             timestamp: Utc::now(),
             source: EventSource::Orchestrator,
             event: EventType::ExecutionStarted {
@@ -473,7 +461,7 @@ impl ExecutionManager {
                 Ok(result) => {
                     info!("✅ Query execution completed successfully");
                     let _ = event_channel_clone.send(StatusEvent {
-                        conversation_id: conversation_id.to_string(),
+                        id: conversation_id.to_string(),
                         timestamp: Utc::now(),
                         source: EventSource::Orchestrator,
                         event: EventType::ExecutionCompleted {
@@ -485,7 +473,7 @@ impl ExecutionManager {
                 Err(e) => {
                     error!("❌ Query execution failed: {}", e);
                     let _ = event_channel_clone.send(StatusEvent {
-                        conversation_id: conversation_id.to_string(),
+                        id: conversation_id.to_string(),
                         timestamp: Utc::now(),
                         source: EventSource::Orchestrator,
                         event: EventType::ExecutionFailed {
