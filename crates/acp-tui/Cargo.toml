@@ -59,6 +59,8 @@ hex = "0.4"
 # Configuration
 toml = { workspace = true }
 
+arboard = "*" # Check crates.io for the latest version
+
 # Testing
 tokio-test = { version = "0.4", optional = true }
 

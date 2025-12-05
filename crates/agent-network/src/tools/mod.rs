@@ -135,14 +135,14 @@ impl ToolSet {
     pub fn new(base_path: &str) -> Self {
         let mut tools = std::collections::HashMap::new();
 
-        // Register available tools
-        tools.insert(
-            "write_file".to_string(),
-            Box::new(WriteFileTool::new(base_path)) as Box<dyn Tool>,
-        );
-        // ... other tools
+        let mut tool_set = Self { tools };
 
-        Self { tools }
+        // Register available tools
+        tool_set.register_tool(WriteFileTool::new(base_path));
+        tool_set.register_tool(ReadFileTool::new(base_path));
+        tool_set.register_tool(ListDirectoryTool::new(base_path));
+        // ... other tools
+        tool_set
     }
 
     pub fn register_tool<T: Tool + 'static>(&mut self, tool: T) {

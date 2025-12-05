@@ -2,6 +2,7 @@
 //!
 //! Multi-line text input component using tui-textarea with TUIRealm integration.
 
+use arboard::Clipboard;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::Rect,
@@ -101,7 +102,11 @@ impl Component<UserEvent, APIEvent> for QueryInputRealmComponent {
                             if modifiers.is_empty() {
                                 let query = self.get_query();
                                 if !query.trim().is_empty() {
-                                    Some(UserEvent::QuerySubmitted(self.get_query()))
+                                    // clear input
+                                    let query = self.get_query();
+                                    self.textarea.select_all();
+                                    self.textarea.cut();
+                                    Some(UserEvent::QuerySubmitted(query))
                                 } else {
                                     None
                                 }
@@ -112,6 +117,21 @@ impl Component<UserEvent, APIEvent> for QueryInputRealmComponent {
                                 self.show_placeholder = self.textarea.lines().iter().all(|line| line.is_empty());
                                 None
                             }else{None}
+                        },
+
+                        TuiKeyEvent { code: Key::Char('v'), modifiers} if modifiers.contains(TuiKeyModifiers::CONTROL) && modifiers.contains(TuiKeyModifiers::SHIFT) => {
+                            let mut clipboard = Clipboard::new().expect("Failed to initialize clipboard");
+                            match clipboard.get_text() {
+                                Ok(text) => {
+                                    // Insert the text into the textarea at the current cursor position
+                                    self.textarea.insert_str(text);
+                                }
+                                Err(e) => {
+                                    // Handle error (e.g., log it or show a status message in TUI)
+                                    eprintln!("Failed to get clipboard text: {}", e);
+                                }
+                            }
+                            None
                         },
                         // Tab navigation
                         TuiKeyEvent { code: Key::Tab, modifiers } if modifiers.intersects(TuiKeyModifiers::SHIFT) => {

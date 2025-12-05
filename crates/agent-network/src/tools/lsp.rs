@@ -68,7 +68,7 @@ impl TypedTool for LspTool {
         };
 
         let preview = HitlPreview::None; // TODO:: add filecontent preview of the file to delete
-        Ok(HitlRequest{preview, metadata})
+        Ok(HitlRequest{preview, metadata,agent_message:None})
     }
 
     async fn call(&self, params: Self::Params) -> Result<ToolResult> {

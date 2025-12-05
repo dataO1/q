@@ -1,51 +1,20 @@
 # Agent Network
 - decide whether to use workflowsteps or single step agents.
 - fine tune which models to use for which tasks.
+- fine tune prompts for task decomposition.
 - currently RAG is not used in the graph
-- agents shoul have access to RAG via tool for independent research (within
+- agents should have access to RAG via tool for independent research (within
   their scope)
--
+- ADD HITL to the planning agent!
+
+# Tools
+- how to handle partial modifications of files? research this.
 
 # TUI
 - how to handle corrections after task triggered? like queued messages
 - how to handle interruptions after task has triggered? (agents, RAG and history must be stateless, until the very end of the execution?).
-- we need a full execution summary
-
-## HITL
-
-┌────────────────────────────────────────────────────────────────────────┐
-│ ⟳ Execution: Maze Runner Game [2m 45s]                  [BLOCKED]     │
-├────────────────────────────────────────────────────────────────────────┤
-│ ╔══════════════════════════════════════════════════════════════════╗   │
-│ ║ 🚨 APPROVAL REQUIRED                           [1/3] coding-1    ║   │
-│ ╠══════════════════════════════════════════════════════════════════╣   │
-│ ║                                                                  ║   │
-│ ║ write_file: src/game_engine.py (342 lines)                      ║   │
-│ ║ Task: Coding-3e61 → Code Implementation                          ║   │
-│ ║                                                                  ║   │
-│ ║ Impact: NEW FILE • pygame, numpy, asyncio                        ║   │
-│ ║                                                                  ║   │
-│ ║ ┌────────────────────────────────────────────────────────────┐  ║   │
-│ ║ │ import pygame                                              │  ║   │
-│ ║ │ import numpy as np                                         │  ║   │
-│ ║ │ from typing import List, Tuple                             │  ║   │
-│ ║ │                                                            │  ║   │
-│ ║ │ class GameEngine:                                          │  ║   │
-│ ║ │     def __init__(self, width=800, height=600):             │  ║   │
-│ ║ │         pygame.init()                                      │  ║   │
-│ ║ │         self.screen = pygame.display.set_mode(...)         │  ║   │
-│ ║ │         self.clock = pygame.time.Clock()                   │  ║   │
-│ ║ │         ...                                                │  ║   │
-│ ║ │                                              [342 lines] ↓  │  ║   │
-│ ║ └────────────────────────────────────────────────────────────┘  ║   │
-│ ║                                                                  ║   │
-│ ║ Reasoning: "Main game engine with Pygame for rendering, game    ║   │
-│ ║            loop, and entity management."                         ║   │
-│ ║                                                                  ║   │
-│ ╠══════════════════════════════════════════════════════════════════╣   │
-│ ║ [A]pprove  [M]odify  [R]eject  [D]efer  [V]iew full  [?]Help   ║   │
-│ ╚══════════════════════════════════════════════════════════════════╝   │
-└────────────────────────────────────────────────────────────────────────┘
+- we need a full execution summary (outputs of the task for the timeline
+  component)
 
 ## diff view
 ┌────────────────────────────────────────────────────────────────────────┐

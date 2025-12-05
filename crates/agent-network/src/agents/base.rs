@@ -565,6 +565,7 @@ pub trait TypedAgent: Send + Sync {
     async fn request_hitl_approval(
         &self,
         function_call: &FunctionCall,
+        agent_message: Option<String>,
         tools: Arc<ToolSet>,
         agent_context: &AgentContext,
         event_channel: &BidirectionalEventChannel,
@@ -589,7 +590,11 @@ pub trait TypedAgent: Send + Sync {
         let risk_assessment = RiskAssessment::new(&agent_result, self.agent_type(),
             Some(format!("Tool {} requires approval: risk={:?}, args={}", function_call.name, risk_level, function_call.arguments)));
 
-        let hitl_request = tools.hitl_request(function_call).await?;
+        let mut hitl_request = tools.hitl_request(function_call).await?;
+
+        if let Some(content) = agent_message {
+            hitl_request = hitl_request.with_agent_message(content);
+        }
 
         // Send HITL requested event to notify TUI
         let hitl_event = StatusEvent {
@@ -635,7 +640,6 @@ pub trait TypedAgent: Send + Sync {
             .context("Timeout or error waiting for HITL decision")?;
 
         let decision = match event {
-            // TODO: check or receive only message for the respective id
             StatusEvent{ id, timestamp, source, event: EventType::HitlDecision{ approved, modified_content, reasoning } } =>{
                 let decision = if approved{ApprovalDecision::Approved{reasoning}}else{ApprovalDecision::Rejected{reasoning: reasoning.unwrap()}};
 
@@ -774,59 +778,45 @@ pub trait TypedAgent: Send + Sync {
 
         let mut iteration = 0;
         'outer_loop: loop {
-            if iteration >= max_iter {
-                break;  // Reached max iterations
+        if iteration >= max_iter {
+                break;
             }
-            debug!(target: "agent_execution", "ReAct iteration {}/{} for step '{}'", iteration + 1, max_iter, step.name);
+            debug!(
+                target: "agent_execution",
+                "ReAct iteration {}/{} for step '{}'",
+                iteration + 1,
+                max_iter,
+                step.name
+            );
 
-            // Build request for this iteration
-            let request = if step.formatted {
+            let mut builder = &mut CreateChatCompletionRequestArgs::default();
+            builder = builder
+                .model(self.model())
+                .messages(messages.clone());
+
+            if step.formatted {
                 let json_schema = schemars::schema_for!(Self::Output);
                 let schema_value = serde_json::to_value(json_schema).unwrap_or_default();
-                if !openai_tools.is_empty() {
-                    CreateChatCompletionRequestArgs::default()
-                        .model(self.model())
-                        .messages(messages.clone())
-                        .response_format(ResponseFormat::JsonSchema {
-                            json_schema: ResponseFormatJsonSchema {
-                                name: "structured_response".to_string(),
-                                description: Some("Structured response following the provided schema".to_string()),
-                                schema: Some(schema_value),
-                                strict: Some(true),
-                            }
-                        })
-                        .tools(openai_tools.clone())
-                        .tool_choice(ChatCompletionToolChoiceOption::Auto)  // ✅ ADD
-                        .build()?
-                } else {
-                    CreateChatCompletionRequestArgs::default()
-                        .model(self.model())
-                        .messages(messages.clone())
-                        .response_format(ResponseFormat::JsonSchema {
-                            json_schema: ResponseFormatJsonSchema {
-                                name: "structured_response".to_string(),
-                                description: Some("Structured response following the provided schema".to_string()),
-                                schema: Some(schema_value),
-                                strict: Some(true),
-                            }
-                        })
-                        .build()?
-                }
-            } else {
-                if !openai_tools.is_empty() {
-                    CreateChatCompletionRequestArgs::default()
-                        .model(self.model())
-                        .messages(messages.clone())
-                        .tools(openai_tools.clone())
-                        .tool_choice(ChatCompletionToolChoiceOption::Auto)  // ✅ ADD
-                        .build()?
-                } else {
-                    CreateChatCompletionRequestArgs::default()
-                        .model(self.model())
-                        .messages(messages.clone())
-                        .build()?
-                }
-            };
+
+                builder = builder.response_format(ResponseFormat::JsonSchema {
+                    json_schema: ResponseFormatJsonSchema {
+                        name: "structured_response".to_string(),
+                        description: Some(
+                            "Structured response following the provided schema".to_string(),
+                        ),
+                        schema: Some(schema_value),
+                        strict: Some(true),
+                    },
+                });
+            }
+
+            if !openai_tools.is_empty() {
+                builder = builder
+                    .tools(openai_tools.clone())
+                    .tool_choice(ChatCompletionToolChoiceOption::Auto);
+            }
+
+            let request = builder.build()?;
             let response = self.client().chat().create(request).await?;
 
             if let Some(choice) = response.choices.first() {
@@ -868,6 +858,7 @@ pub trait TypedAgent: Send + Sync {
 
                             match self.request_hitl_approval(
                                 &function,
+                                choice.message.content.clone(),
                                 tools.clone(),
                                 context,
                                 event_channel,

@@ -46,12 +46,6 @@ pub struct HitlReviewRealmComponent {
     /// Current scroll position in preview
     scroll_offset: usize,
 
-    /// Auto-approve timer (seconds remaining for low-risk)
-    auto_approve_timer: Option<u32>,
-
-    /// Whether timer is paused
-    timer_paused: bool,
-
     /// Current input mode
     input_mode: InputMode,
 
@@ -78,8 +72,6 @@ impl HitlReviewRealmComponent {
             current_event_id: None,
             request_queue: Vec::new(),
             scroll_offset: 0,
-            auto_approve_timer: None,
-            timer_paused: false,
             input_mode: InputMode::Normal,
             reasoning_textarea,
             pending_decision: None,
@@ -191,18 +183,20 @@ impl HitlReviewRealmComponent {
     /// Show a request in the modal
     fn show_request(&mut self, request: HitlRequest) {
         // Set auto-approve timer for safe operations (non-destructive, no network)
-        self.auto_approve_timer = if !request.metadata.is_destructive && !request.metadata.requires_network {
-            Some(10) // 10 seconds
-        } else {
-            None
-        };
         self.current_request = Some(request);
         self.scroll_offset = 0;
-        self.timer_paused = false;
+
+        // ADD THIS: Reset input mode to Normal
+        self.input_mode = InputMode::Normal;
+        self.pending_decision = None;
     }
 
     /// Move to next request in queue
     fn next_request(&mut self) -> Option<UserEvent> {
+        // ADD THIS: Reset input mode before showing next request
+        self.input_mode = InputMode::Normal;
+        self.pending_decision = None;
+
         if let Some(next) = self.request_queue.pop() {
             self.show_request(next);
             None
@@ -240,25 +234,11 @@ impl HitlReviewRealmComponent {
 
     /// Tick for auto-approve timer
     pub fn tick(&mut self) -> Option<UserEvent> {
-        if self.timer_paused {
-            return None;
-        }
-
-        if let Some(timer) = self.auto_approve_timer.as_mut() {
-            if *timer > 0 {
-                *timer -= 1;
-            } else {
-                // Timer expired, auto-approve
-                info!("Auto-approving low-risk HITL request");
-                return self.approve();
-            }
-        }
         None
     }
 
     /// Toggle timer pause
     fn toggle_timer(&mut self) {
-        self.timer_paused = !self.timer_paused;
     }
 
     /// Get current queue position
@@ -276,16 +256,29 @@ impl HitlReviewRealmComponent {
             // Clear background
             frame.render_widget(Clear, modal_area);
 
-            // Split into header, body, reasoning, footer
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),   // Header
-                    Constraint::Min(8),      // Body (preview)
-                    Constraint::Length(5),   // Reasoning textarea
-                    Constraint::Length(3),   // Footer
-                ])
-                .split(modal_area);
+            // Split into header, body, reasoning (conditional), footer
+            let chunks = if self.input_mode == InputMode::EditingReasoning {
+                // With reasoning textarea
+                Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(3),  // Header
+                        Constraint::Min(8),     // Body (preview)
+                        Constraint::Length(5),  // Reasoning textarea
+                        Constraint::Length(3),  // Footer
+                    ])
+                    .split(modal_area)
+            } else {
+                // Without reasoning textarea - body gets more space
+                Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(3),  // Header
+                        Constraint::Min(8),     // Body (preview gets all remaining space)
+                        Constraint::Length(3),  // Footer
+                    ])
+                    .split(modal_area)
+            };
 
             // Render header
             self.render_header(frame, chunks[0], request);
@@ -293,11 +286,13 @@ impl HitlReviewRealmComponent {
             // Render body
             self.render_body(frame, chunks[1], request);
 
-            // Render reasoning textarea
-            if self.input_mode == InputMode::EditingReasoning{
+            // Render reasoning textarea only if in editing mode
+            if self.input_mode == InputMode::EditingReasoning {
                 frame.render_widget(&self.reasoning_textarea, chunks[2]);
+                self.render_footer(frame, chunks[3], request);
+            } else {
+                self.render_footer(frame, chunks[2], request);
             }
-            self.render_footer(frame, chunks[3], request);
         }
     }
 
@@ -340,7 +335,10 @@ impl HitlReviewRealmComponent {
 
     fn render_body(&self, frame: &mut Frame, area: Rect, request: &HitlRequest) {
         let mut lines = Vec::new();
-
+        // render agent message
+        lines.push(Line::from(vec![
+            Span::raw(format!("Agent message: {}", &request.agent_message.clone().unwrap_or("None".to_string()))),
+        ]));
         // File/path info
         if let Some(ref path) = request.metadata.file_path {
             let size_info = if let Some(size) = request.metadata.file_size {
@@ -386,30 +384,39 @@ impl HitlReviewRealmComponent {
                 )));
             }
             HitlPreview::Text(content) => {
-                lines.push(Line::from("┌────────────────────────────────────────────────────────────┐"));
                 let preview_lines: Vec<&str> = content.lines().collect();
-                let visible_lines = 10;
 
+                // To calculate based on available height:
+                let visible_lines = (area.height as usize)
+                    .saturating_sub(6)  // Account for borders, file info, blank lines
+                    .max(5);  // Minimum of 5 lines
+
+                // Calculate max width based on area
+                let max_width = (area.width as usize).saturating_sub(4); // Account for borders
+
+                // Add content lines without hardcoded box
                 for line in preview_lines.iter()
                     .skip(self.scroll_offset)
                     .take(visible_lines)
                 {
-                    let truncated = if line.len() > 58 {
-                        format!("{}...", &line[..55])
+                    let truncated = if line.len() > max_width {
+                        format!("{}...", &line[..max_width.saturating_sub(3)])
                     } else {
-                        format!("{:<58}", line)
+                        line.to_string()
                     };
-                    lines.push(Line::from(format!("│ {} │", truncated)));
+                    lines.push(Line::from(truncated));
                 }
 
-                // Scroll indicator
-                let scroll_indicator = if preview_lines.len() > visible_lines {
-                    format!("[L{}/{:3}] ↓↑", self.scroll_offset + 1, preview_lines.len())
+                // Add scroll indicator at the end
+                if preview_lines.len() > visible_lines {
+                    lines.push(Line::from(format!(
+                        "[L{}/{:3}] ↓↑",
+                        self.scroll_offset + 1,
+                        preview_lines.len()
+                    )));
                 } else {
-                    format!("[{} lines]", preview_lines.len())
-                };
-                lines.push(Line::from(format!("│{:>60}│", scroll_indicator)));
-                lines.push(Line::from("└────────────────────────────────────────────────────────────┘"));
+                    lines.push(Line::from(format!("[{} lines]", preview_lines.len())));
+                }
             }
             HitlPreview::Diff { old, new, path } => {
                 lines.push(Line::from(vec![
@@ -449,22 +456,6 @@ impl HitlReviewRealmComponent {
 
                 lines.push(Line::from(format!("│{:>60}│", format!("[{}/{}]", self.scroll_offset + 1, max_lines))));
                 lines.push(Line::from("└────────────────────────────────────────────────────────────┘"));
-            }
-        }
-
-        // Auto-approve timer (only for non-destructive operations)
-        if !request.metadata.is_destructive && !request.metadata.requires_network {
-            if let Some(timer) = self.auto_approve_timer {
-                lines.push(Line::from(""));
-                let timer_text = if self.timer_paused {
-                    format!("⏸ Auto-approve PAUSED (was {}s)", timer)
-                } else {
-                    format!("⏰ Auto-approving in {}s...", timer)
-                };
-                lines.push(Line::from(Span::styled(
-                    timer_text,
-                    Style::default().fg(Color::Yellow),
-                )));
             }
         }
 

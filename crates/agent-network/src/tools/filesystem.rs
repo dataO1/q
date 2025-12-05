@@ -160,7 +160,7 @@ impl TypedTool for ReadFileTool {
             requires_network: false,
         };
         let preview = HitlPreview::None;
-        Ok(HitlRequest{preview, metadata})
+        Ok(HitlRequest{preview, metadata,agent_message:None})
     }
 
     #[instrument(name = "read_file_tool", skip(self), fields(
@@ -246,7 +246,7 @@ impl TypedTool for WriteFileTool {
             requires_network: false,
         };
         let preview = HitlPreview::Text(params.content.clone());
-        Ok(HitlRequest{preview, metadata})
+        Ok(HitlRequest{preview, metadata,agent_message:None})
     }
 
     #[instrument(name = "write_file_tool", skip(self), fields(
@@ -342,7 +342,7 @@ impl TypedTool for ListDirectoryTool {
             requires_network: false,
         };
         let preview = HitlPreview::None;
-        Ok(HitlRequest{preview, metadata})
+        Ok(HitlRequest{preview, metadata,agent_message:None})
     }
 
     #[instrument(name = "list_directory_tool", skip(self), fields(
@@ -440,7 +440,7 @@ impl TypedTool for CreateDirectoryTool {
             requires_network: false,
         };
         let preview = HitlPreview::None; // TODO:: add tree of resulting directory tree
-        Ok(HitlRequest{preview, metadata})
+        Ok(HitlRequest{preview, metadata,agent_message:None})
     }
 
     #[instrument(name = "create_directory_tool", skip(self), fields(
@@ -522,7 +522,7 @@ impl TypedTool for DeleteFileTool {
             requires_network: false,
         };
         let preview = HitlPreview::None; // TODO:: add filecontent preview of the file to delete
-        Ok(HitlRequest{preview, metadata})
+        Ok(HitlRequest{preview, metadata,agent_message:None})
     }
 
     #[instrument(name = "delete_file_tool", skip(self), fields(
@@ -605,7 +605,7 @@ impl TypedTool for FileExistsTool {
         };
 
         let preview = HitlPreview::None; // TODO:: add filecontent preview of the file to delete
-        Ok(HitlRequest{preview, metadata})
+        Ok(HitlRequest{preview, metadata,agent_message:None})
     }
 
     #[instrument(name = "file_exists_tool", skip(self), fields(
@@ -682,7 +682,7 @@ impl TypedTool for FileMetadataTool {
         };
 
         let preview = HitlPreview::None; // TODO:: add filecontent preview of the file to delete
-        Ok(HitlRequest{preview, metadata})
+        Ok(HitlRequest{preview, metadata,agent_message:None})
     }
 
     #[instrument(name = "file_metadata_tool", skip(self), fields(

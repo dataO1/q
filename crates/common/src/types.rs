@@ -377,6 +377,15 @@ pub struct HitlRequest {
     pub preview: HitlPreview,
     /// Some metadata about the Hitl Request
     pub metadata: HitlMetadata,
+    /// The agents message while tool calls request
+    pub agent_message: Option<String>
+}
+
+impl HitlRequest{
+    pub fn with_agent_message(mut self, message: String) -> Self{
+        self.agent_message = Some(message);
+        self
+    }
 }
 
 /// Preview content with formatting hints
